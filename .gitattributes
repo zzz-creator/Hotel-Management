@@ -13,8 +13,21 @@
 # The text we actually ship. Redundant under `text=auto` above, but spelled out: a
 # migration's line endings are never cosmetic, and a .sql file is the one file type here
 # whose bytes another tool reads directly.
+#
+# `linguist-language=SQL` overrides GitHub's language stats. Four Linguist languages claim
+# `.sql` -- SQL, TSQL, PLpgSQL and PLSQL -- so the extension alone is ambiguous and Linguist
+# falls back to scoring file contents, which put migrations/019_customer_identity.sql in
+# PLpgSQL on the strength of its DECLARE/FOR/BEGIN-END blocks. That is a Postgres procedure
+# body, not what this file is.
+#
+# This overrides detection, and detection owns the tm_scope, so highlighting moves from TSQL
+# (source.tsql) to SQL (source.sql). Ordinary DDL and DML still highlight; GO, #temp tables
+# and [bracketed] identifiers are the constructs that stop looking right. Swap the value to
+# TSQL to get those back at the cost of the bar reading "TSQL" instead of "SQL".
+#
+# Nothing here touches line endings: `text` still decides that, as above.
 *.py      text
-*.sql     text
+*.sql     text linguist-language=SQL
 *.md      text
 *.txt     text
 *.ini     text
