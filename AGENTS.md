@@ -45,7 +45,7 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 
 | File | Role |
 |---|---|
-| `maincopycopy.py` | Entry point and almost everything: menus, reservations, booking desk, billing, loyalty, IT/valet panels |
+| `main.py` | Entry point and almost everything: menus, reservations, booking desk, billing, loyalty, IT/valet panels, first-run onboarding |
 | `ui.py` | `rich`-based console helpers (menus, tables, prompts, `clear_screen`/`pause`) |
 | `reports.py` | CSV report exports, also a standalone CLI |
 | `db.py` | Connection string + `get_connection()` context manager |
@@ -53,6 +53,8 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 | `config.ini.example` | The tracked template for the above; blank `password` / `master_secret` |
 | `.gitignore` | Keeps `config.ini`, `__pycache__/`, `exports/*.csv` and the generated council artifacts out of history |
 | `.gitattributes` | Pins LF in the repository and native endings in the working tree, so `core.autocrlf` stops deciding per machine |
+| `README.md` | What the project is, requirements, setup, tests, and the "not production software" warnings. The first thing anyone landing on the repo reads |
+| `LICENSE` | AGPLv3, verbatim from gnu.org. §13 is why this is AGPL and not GPL — a modified copy served over a network must offer its source |
 
 New interactive output goes through `ui.py`, never inline `rich`.
 
@@ -74,6 +76,7 @@ New interactive output goes through `ui.py`, never inline `rich`.
 | `tests/test_booking.py` | Booking money rules and the check-out credit |
 | `tests/test_customer_loyalty.py` | Customer-keyed loyalty (019) and booking-desk login |
 | `tests/test_validate_room.py` | The guest identity check |
+| `tests/test_onboarding.py` | First-run wizard: the completion marker, the first-account guard, item/room seeding idempotency, room-layout bounds |
 | `tests/test_schema_sync.py` | The schema checker itself — a checker that parses nothing must fail |
 | `tests/check_schema_sync.py` | `database.sql` vs migrations (a **script**, not a test) |
 | `tests/check_migration_sql.py` | Static T-SQL lint (a **script**, not a test) |
@@ -109,9 +112,51 @@ before reworking a feature it covers.
   It tries the configured `[hotel] master_secret` first and falls back to the plaintext
   `master` account in `Users`, so a fresh checkout with no configured secret still works.
   Destructive admin actions must call it **and** require an exact typed confirmation — being
-  admin is not sufficient on its own.
+  admin is not sufficient on its own. Both onboarding paths create that account with the
+  **admin** role, not a role called `master`: the override matches on the username alone, while
+  `admin_panel()` has no `master` branch and `add_user()` only offers admin/staff/manager, so
+  a `master`-role row would be an account nobody can sign in to.
 - **There is no real email or SMS.** `Notifications.Channel` is a label; delivery is
   in-app. `try_open_door()` and "Test Card at Reader" stand in for physical hardware.
+- **The first-run wizard creates an administrator without authenticating anyone, and that
+  is not an oversight.** It runs from `main()` when the `onboarding_complete` setting is
+  absent, which is the correct reading for a fresh database because nothing seeds that row.
+  There is no account to authenticate *against* at that point, so the trust assumption is
+  the one the database already makes: whoever is at the console can open SSMS on the empty
+  database. Two things keep it from becoming a hole, and neither is optional —
+  `create_first_user()` refuses outright if **any** account already exists, and once
+  `mark_onboarding_complete()` has run the wizard never runs again, so the Admin Panel's own
+  `add_user()` is the only remaining path. Do not add a "re-run setup" shortcut to the main
+  menu, and do not move the checklist there: it writes accounts, and the main menu is the
+  guest-facing surface. It belongs in the Admin Panel, where login has already happened.
+- **The setup checklist derives its status from live queries, not from the marker.** The
+  marker answers "has a human been through the wizard"; the checklist answers "can the front
+  desk take a booking a guest can pay for", which is the question the runbook actually cares
+  about. Someone who inherited a database and never ran the wizard still needs the second
+  one answered. Every probe swallows its own failure so an unapplied migration costs one red
+  row rather than a dead screen, and each probe distinguishes *unreachable* from *empty*.
+- **The room seeder is capped at 150 floors and 999 rooms per floor**, and those are the
+  app's limits, not a round number: `view_rooms()` rejects any floor outside 1-150, and both
+  it and the housekeeping report recover the floor as `LEFT(RoomNumber, LEN(RoomNumber) - 3)`
+  over a `<floor><3-digit code>` room number. Seeding past either bound would create rooms the
+  UI cannot reach. `validate_room_layout()` is pure and holds the bounds; the wizard and
+  `seed_rooms()` both go through it.
+- **There is deliberately no "Room Charge" item in `Items`, and adding one is a bug, not a
+  missing feature.** The app posts the room charge itself at check-out: a `Transactions` row
+  with `ItemID` **NULL** and `ChargeGroup` `'Room'`, guarded against posting twice. Because
+  `record_transaction_for_room()` defaults `ChargeGroup` to `'F&B'`, an orderable "Room Charge"
+  item would post a second charge on top of the automatic one *and* accrue loyalty points on it
+  via `award_billed_order_points()`. This is load-bearing in two directions: never add such an
+  item, and do not "fix" `Items` by assuming every charge needs a row there. It is also what
+  lets `COUNT(*) FROM Items > 0` stand as the catalogue-readiness test — every row in `Items` is
+  a genuine sellable line. `StarterCatalogueContentTests` pins all of this.
+- **`add_custom_item()` assigns `ItemID` as `MAX(ItemID)+1`; `add_item()` asks for it.** Not an
+  inconsistency to reconcile. `Items.ItemID` is a plain `int` PK, not identity, so a typed id
+  can collide with an existing row and hand the operator a constraint-violation traceback.
+  Auto-assigning makes that unreachable; `add_item()` keeps the manual path for anyone who wants
+  a deliberate numbering scheme. `add_custom_item()` validates name length against the
+  `nvarchar(100)` column and re-asks on an unparseable price, because a mistyped prompt must not
+  produce a traceback (the same rule as the card prompts in §3).
 - **`GuestRequests` is a dead table** in `database.sql`, referenced by no code. It is a
   pre-015 leftover; `ConciergeRequests` replaced it. Do not wire it up.
 - **`config.ini` is untracked on purpose.** It holds the SQL Server password and
@@ -200,7 +245,7 @@ about something else entirely.
 
 ## 5. Conventions
 
-- Top of `maincopycopy.py` has `# type: ignore`; functions are module-level, no classes.
+- Top of `main.py` has `# type: ignore`; functions are module-level, no classes.
 - Match the existing style: string `f`-format logging, `with get_connection() as conn`
   blocks, and the `conn is None` early-return guard after each DB open.
 - **Do not add an `except` around the `yield` in `db.get_connection()`.** Catching there and
@@ -215,12 +260,45 @@ about something else entirely.
   `_setting_float()` / `_setting_int()`, which fall back to the `config.ini` default on a
   blank or non-numeric value. A typo there must never break check-out.
 
+### Git: commit at the end of every change
+
+**When you finish a change in this repo, commit it.** Do not leave a finished piece of work
+uncommitted in the working tree for the next agent — or the next human — to unpick. This
+overrides any default about not committing unless asked; on this repository, the standing
+instruction *is* the ask.
+
+Granularity is **one commit per coherent change, with the checks green**. Concretely:
+
+1. Finish the whole change — not one file edit of it. A commit should be a thing you could
+   describe in a sentence.
+2. Run the checks that apply (below; at minimum `py_compile` + the unit tests).
+3. `git add` the files you changed, **by name** — never `git add -A` or `git add .`.
+4. Commit with a message that says *why*, not *what*. The diff already says what.
+5. `git push` when the branch is `main` and the checks passed.
+
+Do not amend or rebase published history, and do not force-push.
+
+**Never commit `config.ini`.** It is ignored by `.gitignore`; do not defeat that with
+`git add -f`. Note that the old `V1` tag and the `Update-V2` branch still track a `config.ini`
+from when it was uploaded through the GitHub web UI — its values are blank, but do not edit
+that file on those refs, because on them it is already tracked.
+
+Two things that make this rule safe rather than reckless:
+
+- **Checks green before committing.** A commit that does not pass the suite is a commit that
+  cannot be bisected or reverted cleanly, so "commit early" is not "commit broken".
+- **`git add` by name, always.** `git add -A` will happily stage `config.ini`, an `exports/`
+  CSV full of guest data, or a council transcript.
+
+If you are mid-task and cannot get the checks green, say so in the commit message rather than
+quietly committing a failure.
+
 ---
 
 ## 6. Verification
 
 ```powershell
-python -m py_compile maincopycopy.py db.py reports.py ui.py   # syntax
+python -m py_compile main.py db.py reports.py ui.py   # syntax
 python -m unittest discover -s tests                          # unit tests
 python tests/check_schema_sync.py                             # schema drift
 python tests/check_migration_sql.py                           # T-SQL lint
@@ -243,8 +321,8 @@ Also useful:
 
 ```powershell
 pip install -r requirements.txt
-python maincopycopy.py                                          # run the app
-python maincopycopy.py --report transactions --format csv       # report via the app
+python main.py                                          # run the app
+python main.py --report transactions --format csv       # report via the app
 python reports.py --report loyalty --room 9012                  # report via the CLI
 ```
 

@@ -170,7 +170,7 @@ def main():
     # The catalog checks prove the columns exist. These prove the CODE reads them, which is
     # the claim that actually matters and the one no schema check can make.
     print('the code, against the live database:')
-    import maincopycopy as app
+    import main as app
     import reports
 
     business = app.business_date()

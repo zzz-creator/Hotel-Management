@@ -7,7 +7,7 @@ Every phase is additive; nothing existing is removed.
 
 The app bills room service but **never charges for the room**. `Reservations` has no
 rate column (`database.sql:92`), `Items` holds only sellable items/services, and
-`bill_room_transactions()` (`maincopycopy.py:2570`) only sums `Transactions` — which
+`bill_room_transactions()` (`main.py:2570`) only sums `Transactions` — which
 only ever contains `order_item()` rows. A 14-night stay with no room service produces
 a **$0.00** bill. Room-category multipliers exist but scale only *loyalty points*,
 never a price. No nightly rate exists anywhere in the project.
@@ -79,7 +79,7 @@ to `ui.show_menu` so it stops being the one panel bypassing `ui.py`.
 
 ### Phase 1 — rates & split folio
 
-- [x] `maincopycopy.py` constants: `DEFAULT_ROOM_TYPE_RATES`.
+- [x] `main.py` constants: `DEFAULT_ROOM_TYPE_RATES`.
 - [x] Getters/setters: `get_room_types()`, `get_nightly_rate(room_type)`,
       `update_room_type_rate()`, `ensure_room_types_seeded()` (called beside
       `ensure_loyalty_tables()` in `main()`).

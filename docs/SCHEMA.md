@@ -154,8 +154,12 @@ identity PK, `RoomNumber`, `InvoiceDate`, `Subtotal`, `DiscountCodeAmount`,
 **`RoomTypes`** — 013. `RoomType` `varchar(50)` PK, `NightlyRate`, `Description`,
 `Active`. The seven categories match `Rooms.RoomType` from 008.
 
-**`Items`** — `ItemID` PK, `Name`, `Price`, `PricingRule` (`'Peak'`, `'OffPeak'`, or
-NULL; read by `get_dynamic_price()`). Sellable items and services live only here.
+**`Items`** — `ItemID` PK (a plain `int`, **not** identity — you choose it), `Name`
+`nvarchar(100)`, `Price decimal(10,2)`, `PricingRule` (`'Peak'`, `'OffPeak'`, or NULL; read by
+`get_dynamic_price()`). Sellable items and services live only here. **There is no room-charge
+item and there should not be one**: the app posts the room charge itself as a `Transactions`
+row with `ItemID` NULL and `ChargeGroup` `'Room'`, so its absence from this table is not a gap.
+Every row here is an F&B line.
 
 **`Discounts`** — `Code` PK, `DiscountPercentage`, `CreatedAt`.
 
@@ -189,7 +193,7 @@ Keys: `business_date`, `peak_factor`, `offpeak_factor`, `tax_rate`,
 `loyalty_points_per_night`, `loyalty_mult_<room-type-slug>`.
 
 - `business_date` (023) is an ISO `YYYY-MM-DD` **date string, not a number**, and it is
-  the app's single clock for "which day is it". `business_date()` in `maincopycopy.py`
+  the app's single clock for "which day is it". `business_date()` in `main.py`
   and `reports.py` both read it; nothing asks the wall clock for a date. It is advanced one
   day at a time by `close_day()` from the admin **Business Date** menu, or set to an
   explicit date. It is deliberately **not** a night audit — nothing bills, expires, cleans

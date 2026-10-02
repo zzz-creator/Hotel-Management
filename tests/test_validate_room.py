@@ -1,5 +1,5 @@
 # type: ignore
-"""Unit tests for validate_room() -- the guest identity check in maincopycopy.py.
+"""Unit tests for validate_room() -- the guest identity check in main.py.
 
 Identity is last name + first name + room number, matched in one query, and the guest is
 never shown a list of other stays. The database and the prompts are both stubbed so the
@@ -18,7 +18,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import maincopycopy as app
+import main as app
 
 
 class FakeRow:

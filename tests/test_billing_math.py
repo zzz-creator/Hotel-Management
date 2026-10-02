@@ -1,5 +1,5 @@
 # type: ignore
-"""Unit tests for the pure billing arithmetic in maincopycopy.py.
+"""Unit tests for the pure billing arithmetic in main.py.
 
 These cover the parts of check-out that decide what a guest owes, and they are
 deliberately database-free: every helper here is monkeypatched so the module can be
@@ -17,7 +17,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import maincopycopy as app
+import main as app
 import reports
 
 

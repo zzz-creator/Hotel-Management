@@ -16,7 +16,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import maincopycopy as app
+import main as app
 
 
 class BookingQuoteTests(unittest.TestCase):

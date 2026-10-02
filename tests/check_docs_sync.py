@@ -43,7 +43,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-CODE_FILES = ('maincopycopy.py', 'reports.py', 'ui.py', 'db.py')
+CODE_FILES = ('main.py', 'reports.py', 'ui.py', 'db.py')
 DOC_FILES = ('AGENTS.md', 'docs/SCHEMA.md', 'docs/BOOKING.md', 'docs/DEVIATIONS.md',
              'docs/ONBOARDING.md')
 SCHEMA_DOC = 'docs/SCHEMA.md'

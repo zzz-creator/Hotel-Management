@@ -29,7 +29,7 @@ the nightly base, and makes **every parameter admin-editable**.
       + `loyalty_mult_*` settings (idempotent); guarded accrual `'10' -> '3'`.
 - [x] `migrations/010_loyalty_tier_rebalance.sql`: Gold 5000 -> 2500, Platinum
       20000 -> 7500 (guarded against customisations).
-- [x] `maincopycopy.py`:
+- [x] `main.py`:
       - Constants: `LOYALTY_POINTS_PER_NIGHT`, `DEFAULT_ROOM_TYPE_MULTIPLIERS`;
         `DEFAULT_TIERS` Gold/Platinum thresholds + descriptions updated.
       - Getters: `get_loyalty_points_per_night()`, `get_room_type()`,
@@ -46,7 +46,7 @@ the nightly base, and makes **every parameter admin-editable**.
       - `view_my_loyalty_status()` shows Room Category and effective Points per Night.
 - [x] `AGENTS.md`: migrations list, pending-applications order, per-night model,
       new settings keys, tier rebalance note.
-- [x] Compiled clean: `py_compile` all four modules + `import maincopycopy`.
+- [x] Compiled clean: `py_compile` all four modules + `import main`.
 
 ## Remaining (after user applies SQL)
 

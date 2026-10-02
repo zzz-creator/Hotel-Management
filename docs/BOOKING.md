@@ -4,7 +4,7 @@ The public booking desk (`booking_panel()` on the main menu, "3. Bookings", **no
 login**) and the customer-keyed loyalty program.
 
 **Read this before** touching `book_room()`, `view_my_booking()`, `cancel_booking()`,
-`customer_login()`, anything under the loyalty section of `maincopycopy.py`, or
+`customer_login()`, anything under the loyalty section of `main.py`, or
 `reports.py`'s loyalty export. The rules here exist because each one has a real defect
 behind it; "fixing" one typically reintroduces that defect.
 
@@ -98,7 +98,7 @@ because there is nothing to decline.
 
 ## 3. The money rules (pure, unit-tested)
 
-All four live in `maincopycopy.py` with no database access, and are covered by
+All four live in `main.py` with no database access, and are covered by
 `tests/test_booking.py`. **Keep them pure** — that is what makes the money testable.
 
 **`booking_quote(nights, nightly_rate, tax_rate)`** → `{nights, nightly_rate, tax_rate,

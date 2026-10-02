@@ -30,16 +30,16 @@ EXPORT_DIR = os.path.join(os.path.dirname(__file__), "exports")
 # not occupy the night of the 4th. Every occupancy-shaped report in this file uses
 # `CheckInDate <= Night AND CheckOutDate > Night`, and the housekeeping board used to
 # disagree with both of them by writing `>=` -- so the same room was reported in-house on
-# the night it was vacated. There is no helper to import from maincopycopy (it opens its
+# the night it was vacated. There is no helper to import from main (it opens its
 # own connection and would be a circular import), so the rule is stated once here and the
-# pure definition lives in maincopycopy.stays_overlap().
+# pure definition lives in main.stays_overlap().
 BUSINESS_DATE_SETTING = "business_date"
 
 
 def business_date():
     """The hotel's current business date, read from HotelSettings.
 
-    The same value maincopycopy.business_date() returns, read independently so reports.py
+    The same value main.business_date() returns, read independently so reports.py
     stays importable on its own. It is the default "which day" for every report that takes
     a date, which is what makes a board re-runnable for a day that has already closed
     instead of only for the wall clock's today.

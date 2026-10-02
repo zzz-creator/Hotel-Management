@@ -7,8 +7,8 @@ Created: 2026-09-15
 
 - `Rooms` (RoomNumber varchar(10) PK, RoomType, Description, Status default 'Available') exists in `database.sql`; zero code references it.
 - Room number format used by the app: `<floor><3-digit-code>` (e.g. `9012` = floor 9, code 012). Existing reservations in `data.json` use values like `9012`, `9326`, `9756`, `1111` — the seed data must include these so status tracking never orphans them.
-- `check_in()` (maincopycopy.py:1857) and `check_out()` (maincopycopy.py:2073) are 100% simulated — no DB writes.
-- `add_reservation()` (maincopycopy.py:518) only checks "room already has a reservation" (PK), never date ranges, never `Rooms` status.
+- `check_in()` (main.py:1857) and `check_out()` (main.py:2073) are 100% simulated — no DB writes.
+- `add_reservation()` (main.py:518) only checks "room already has a reservation" (PK), never date ranges, never `Rooms` status.
 - AGENTS.md rules: DDL/DML must ship as a numbered `.sql` in `migrations/` and be applied by the user in SSMS — do not run it yourself. All Python SQL stays parameterized.
 
 ## Deliverables
@@ -20,7 +20,7 @@ Created: 2026-09-15
 - No schema changes (no `BasePrice`/`Floor` columns — keeping scope tight per chairman; the floor is already derivable from the room number). `RoomType` is the pricing/board driver for now.
 - Tell the user to run it in SSMS before testing.
 
-### 2. Python room helpers (in `maincopycopy.py`, near the settings helpers)
+### 2. Python room helpers (in `main.py`, near the settings helpers)
 - `ROOM_STATUSES = ("Available", "Occupied", "Cleaning", "Dirty", "Maintenance")` constant.
 - `get_room_status(room)` → returns status or `None`.
 - `upsert_room_if_missing(room)` → auto-creates a minimal `Available` row when a reservation/check-in references a room not in `Rooms` — guard that keeps flows from crashing and keeps the board complete.
@@ -43,7 +43,7 @@ Created: 2026-09-15
 
 ### 6. Docs & verification
 - Update `AGENTS.md`: document `Rooms` as active (status board + check-in/out sync), add `008` to the pending-migrations list.
-- Verify: `python -m py_compile maincopycopy.py db.py reports.py ui.py`, then a manual smoke run.
+- Verify: `python -m py_compile main.py db.py reports.py ui.py`, then a manual smoke run.
 - Explicitly **out of scope** (chairman: don't promise): housekeeping lifecycle, RevPAR/revenue report, `CustomerProfiles` wiring, `BasePrice` DDL.
 
 ## Risks & mitigations

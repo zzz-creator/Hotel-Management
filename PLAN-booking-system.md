@@ -233,7 +233,7 @@ so `019` adds one and the desk now requires a sign-in.
 
 ## Verification
 
-- `python -m py_compile maincopycopy.py db.py reports.py ui.py`
+- `python -m py_compile main.py db.py reports.py ui.py`
 - `python -m unittest discover -s tests` — 211 tests
 - `python tests/check_schema_sync.py` — 20 comparisons, 0 issues (reads 019/020/021's
   `ALTER`s and `LoyaltyAccounts` PK re-key, which a `CREATE TABLE`-only pass misses, and
