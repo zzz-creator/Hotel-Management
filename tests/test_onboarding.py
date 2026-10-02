@@ -970,10 +970,30 @@ class WizardStepGuardsTests(unittest.TestCase):
         # The master account is the fallback that makes the override work with a blank
         # master_secret, and it is exactly the step a hand-built database is most likely to
         # be missing -- so it is not gated on having zero rows.
-        with mock.patch.object(app, "create_first_user", return_value=True) as create:
+        #
+        # It must not go through create_first_user() here. That function refuses whenever
+        # any account exists, so on precisely this database -- accounts present, marker
+        # absent, no master -- it would refuse, and the wizard would report a failure for a
+        # step the operator had said yes to. Assert the insert that actually works.
+        with mock.patch.object(app, "create_first_user") as create, \
+                mock.patch.object(app, "add_user_with_password", return_value=True) as add:
             self._run(self._answers(users=6, items=15, rooms=138180, master=0))
-        create.assert_called_once()
-        self.assertEqual(create.call_args.args[:2], ("master", "pw"))
+        create.assert_not_called()
+        add.assert_called_once_with("master", "pw", "admin")
+
+    def test_the_master_account_is_never_refused_by_the_first_user_guard(self):
+        # The guard exists so the unauthenticated screen cannot mint a second admin on a
+        # live system, so it cannot be relaxed. Instead the wizard has to pick the right
+        # insert for the database it is looking at: both orderings, both accounted for.
+        for users, expect_first_user in ((0, True), (6, False)):
+            with self.subTest(users=users), \
+                    mock.patch.object(app, "create_first_user", return_value=True) as create, \
+                    mock.patch.object(app, "add_user_with_password", return_value=True) as add:
+                self._run(self._answers(users=users, items=0, rooms=0, master=0))
+            master_calls = [c for c in create.call_args_list if c.args[0] == "master"]
+            self.assertEqual(bool(master_calls), expect_first_user)
+            if not expect_first_user:
+                self.assertEqual([c.args for c in add.call_args_list], [("master", "pw", "admin")])
 
     def test_both_created_accounts_get_a_role_that_can_log_in(self):
         # admin_panel() has branches for staff/manager/admin/valet/it and add_user() only

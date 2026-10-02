@@ -8398,7 +8398,18 @@ def run_first_run_onboarding():
         # alone, but admin_panel() has no 'master' branch and add_user() only offers
         # admin/staff/manager -- so a 'master'-role row would be an account nobody can ever
         # sign in to.
-        if create_first_user("master", master_password, "admin"):
+        #
+        # Which insert to use depends on step 1. create_first_user() refuses whenever ANY
+        # account exists, which is right for the first login (nothing else may reach this
+        # screen) and wrong here: an inherited database has accounts, no marker, and no
+        # master -- so it would refuse and leave the override unbacked by the operator's own
+        # choice, which is the one case this step exists for. Fall back to the same
+        # already-authenticated path the checklist uses.
+        if existing_accounts:
+            created = add_user_with_password("master", master_password, "admin")
+        else:
+            created = create_first_user("master", master_password, "admin")
+        if created:
             logging.info("Master override is now backed by a real account.")
         else:
             logging.info("Could not create the 'master' account. The override will still "
