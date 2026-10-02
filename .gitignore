@@ -1,0 +1,31 @@
+# Credentials. config.ini holds the SQL Server password and [hotel] master_secret.
+# It is untracked on purpose; copy config.ini.example to config.ini and fill it in.
+config.ini
+
+# Byte-code
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Report output. The directory itself is not tracked because both reports.py and
+# maincopycopy.py create it with os.makedirs(exist_ok=True), so a fresh clone does
+# not need it to exist.
+exports/*.csv
+
+# One-off generated analysis of this codebase. Not read by the app and not a
+# dependency of anything; tests/check_docs_sync.py also lists these as
+# non-project files.
+council-report-*.html
+council-transcript-*.md
+
+# Interactive output is logging.info on the console (maincopycopy.py:116). The
+# file handler is commented out, so nothing writes a .log today -- this is here so
+# that turning it back on does not start committing one.
+*.log
+
+# Per-developer editors and OS cruft
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

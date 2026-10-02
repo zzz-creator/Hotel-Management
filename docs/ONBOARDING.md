@@ -1,0 +1,173 @@
+# Staff onboarding
+
+What has to happen, in order, between "the database exists" and "the front desk can take a
+booking that a guest can pay for". Written for whoever is handed the system, not for
+whoever wrote it.
+
+Read this after `database.sql` has been applied and before anyone tries to log in.
+
+---
+
+## 1. What a fresh install gives you, and what it does not
+
+`database.sql` is the authoritative fresh-install script and it seeds exactly **three**
+tables. Everything else is either empty or created on demand.
+
+| Table | After `database.sql` | Who fills it |
+|---|---|---|
+| `HotelSettings` | 15 rows | seeded, then Admin → Pricing & Settings |
+| `LoyaltyTiers` | 4 rows (Bronze/Silver/Gold/Platinum) | seeded; Admin → Loyalty Management |
+| `RoomTypes` | 7 rows | seeded, **and** re-checked at every start by `ensure_room_types_seeded()` |
+| `Users` | **empty** | you, by hand — see step 2 |
+| `Rooms` | **empty** | created as a side effect of booking, or seeded by migration 008 |
+| `Items` | **empty** | you, in the Admin Panel |
+| `Amenities`, `Promotions` | **empty** | migration 015, or Admin → Manage Amenities / Promotions |
+| `Discounts` | **empty** | you, in the Admin Panel |
+| `Reservations`, `Transactions`, `Invoices` | **empty** | normal use |
+
+Two of those matter more than they look:
+
+- **No rooms.** The room dashboard, housekeeping report and availability search all read
+  `Rooms`, so they are empty until a room exists. Rooms are created by
+  `upsert_room_if_missing()`, which the booking, check-in and edit paths call for you — so
+  the *first* booking invents its own room. For a hotel that is meant to already exist,
+  apply `migrations/008_rooms_seed.sql` instead (it seeds a 150-floor tower, 138,180 rooms).
+- **No items.** Nothing can be ordered and no folio can be split until at least one item
+  exists, because the room charge is written as a `Transactions` row pointing at an
+  `ItemID`. This is the step people skip.
+
+---
+
+## 2. Create the first login — this one is SQL, not a menu
+
+`Users` is seeded by nothing: not by `database.sql`, not by any migration. And the only
+in-app way to add a user, `add_user()`, lives *inside* the Admin Panel, which needs a
+login to reach. So the first account has to be inserted directly:
+
+```sql
+USE hotelSystem;
+INSERT INTO dbo.Users (Username, Password, Role) VALUES (N'admin', N'admin', N'admin');
+```
+
+Roles are `admin`, `staff`, `manager` and `valet`, and they are not equal: the `manager`
+Admin Panel has no Items, Users or Pricing sections, and `staff` gets only reservations and
+guest services. Give people the narrowest role that lets them do their job.
+
+> Passwords are stored and compared in plaintext here, on purpose — this is a teaching
+> project (see AGENTS.md §3, DEVIATIONS.md §8). Change the bootstrap password anyway.
+
+`require_master_override()` falls back to an account literally named `master` when
+`config.ini` has no `[hotel] master_secret`, so if you want that fallback to work, insert a
+`master` row too.
+
+Once you are logged in as `admin`, use **Admin Panel → 19. Add User** for everyone else.
+
+---
+
+## 3. Add items (do this before anything else)
+
+**Admin Panel → 13. Add Item** (`add_item()`). `ItemID` is a plain `int`, **not** an
+identity column, so you choose it — and it is the primary key, so pick a scheme and stick
+to it (1, 2, 3… or by category).
+
+An item needs a name, a price, and a `PricingRule`. The charge group is not set here: it is
+written on the `Transactions` row when the charge is billed, `'Room'` for the room charge
+and `'F&B'` for anything ordered (`ChargeGroup`). Getting this wrong double-counts loyalty
+points, which is why `award_billed_order_points()` filters on `'F&B'` only.
+
+Minimum viable set: one room-charge item, plus whatever the kitchen actually sells.
+
+**Admin Panel → 16. View Items** to confirm.
+
+---
+
+## 4. Set prices
+
+**Admin Panel → 25. Manage Pricing & Settings → 6. View / Edit Room Types & Nightly
+Rates** (`update_room_type_rate()`).
+
+A `RoomTypes` row is a **price list**. A confirmed booking is a **contract**: the nightly
+rate is captured onto the reservation when the stay is made, so editing a rate later does
+not re-price a stay that is already booked. A reservation with a NULL `NightlyRate` is one
+made before rate capture existed, and check-out falls back to the current rate and says so.
+
+The same menu sets the tax rate, the peak/off-peak factors and the booking cancellation
+window. The loyalty points rates are calibrated, not free-form: if you change the order
+accrual, check the ordering still holds (points earned per dollar on F&B must stay **below**
+points earned per dollar on the room). The screen shows both rates side by side.
+
+---
+
+## 5. Rooms
+
+Either let them appear as bookings are made (see step 1), or apply
+`migrations/008_rooms_seed.sql` for the full tower. To check what you have:
+**Admin Panel → 29. Rooms & Housekeeping → 1. Room Dashboard**. Status changes are
+**→ 3. Update Room Status**.
+
+A room number is `<floor><3-digit code>` (floor 9, code 012 = `9012`) and the column is
+free text — there is no foreign key from a stay to a room, deliberately.
+
+---
+
+## 6. Optional reference data
+
+Only needed if you skipped the migrations. All of it is editable afterwards.
+
+- **Amenities** — Admin Panel → 17. Manage Amenities (`manage_amenities_menu()`)
+- **Promotions** — Admin Panel → 18. Manage Promotions (`manage_promotions_menu()`)
+- **Discount codes** — Admin Panel → 24. Manage Discount Codes (`manage_discount_codes()`)
+
+---
+
+## 7. Key cards
+
+Cards are issued at check-in and expire at the reservation's check-out date; a card opens a
+door only while it is `Active` and unexpired. Issuing, revoking, reporting lost and testing
+a card at the reader are all in **Admin Panel → 32. Door Access Control**
+(`door_access_menu()`). Nothing to set up first — a card is created for you when a guest
+checks in.
+
+---
+
+## 8. The business date
+
+**Admin Panel → 26. Business Date**. This app's "today" is a stored value, not the wall
+clock, so that yesterday's report still says yesterday after you close the day.
+`close_day()` moves it forward one day. It does **not** post folios, roll occupancy or clean
+rooms — see DEVIATIONS.md §3, because the difference is load-bearing.
+
+Set it once at go-live and close it daily. Do not set it backwards casually; reports are
+re-runnable for any date you choose, which is the point.
+
+---
+
+## 9. Smoke test
+
+1. **Bookings → book a stay**, two nights, in a room number of your choosing.
+2. **Admin Panel → 29. Rooms & Housekeeping → 1.** The room should appear and be `Available`.
+3. **Order something** through the guest menu — this exercises the item you added in step 3.
+4. **Check the guest out.** The folio must split into "Room Charges" and "F&B", with tax on
+   each, which only works if `ChargeGroup` and the `Invoices` split columns exist.
+5. **Admin Panel → 30. Invoices & Printing** — print it and sanity-check the arithmetic.
+6. **Admin Panel → 28. Export Reports → occupancy and revenue** for today. Occupancy is
+   derived live from `Reservations`, not accumulated.
+
+If step 4 produces a single undifferentiated total, the split-folio columns are missing —
+that means the database was built from an out-of-date `database.sql`.
+
+---
+
+## Where the rules live
+
+This page is the runbook. The rules it refers to are documented elsewhere and are not
+reproduced here on purpose:
+
+- **Tables, columns and what each migration added** — `docs/SCHEMA.md`
+- **Booking money, deposits, refunds, loyalty** — `docs/BOOKING.md`
+- **Things this app deliberately does not do, and why** — `docs/DEVIATIONS.md`
+- **Schema rules for agents and developers** — `AGENTS.md`
+
+One warning that catches everyone: **never run `database.sql` against a database that
+already has data.** It is a fresh-install script. To upgrade an existing database, apply
+the numbered files in `migrations/` in order — see AGENTS.md §4.
