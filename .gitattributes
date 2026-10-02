@@ -1,0 +1,34 @@
+# Line endings
+#
+# Git stores text with LF and checks it out with the platform's native ending: CRLF in
+# the working tree on Windows, LF everywhere else. Without this file that decision comes
+# from core.autocrlf, which is a per-machine setting -- so the same commit produced a
+# different diff for whoever cloned it, which is exactly the churn this stops.
+#
+# These attributes win over core.autocrlf, so the behaviour is the same for everyone
+# regardless of how their Git is configured.
+
+* text=auto
+
+# The text we actually ship. Redundant under `text=auto` above, but spelled out: a
+# migration's line endings are never cosmetic, and a .sql file is the one file type here
+# whose bytes another tool reads directly.
+*.py      text
+*.sql     text
+*.md      text
+*.txt     text
+*.ini     text
+*.example text
+
+# Never translate these. A CR inside a CSV cell or a header byte in an image is data
+# corruption, not a formatting preference, and git's binary guess is not good enough to
+# be trusted on a generated export.
+*.csv   -text
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.db    binary
+*.bak   binary

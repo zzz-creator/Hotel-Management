@@ -52,6 +52,7 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 | `config.ini` | DB connection, hotel, and loyalty defaults. **Untracked** — copy `config.ini.example` |
 | `config.ini.example` | The tracked template for the above; blank `password` / `master_secret` |
 | `.gitignore` | Keeps `config.ini`, `__pycache__/`, `exports/*.csv` and the generated council artifacts out of history |
+| `.gitattributes` | Pins LF in the repository and native endings in the working tree, so `core.autocrlf` stops deciding per machine |
 
 New interactive output goes through `ui.py`, never inline `rich`.
 

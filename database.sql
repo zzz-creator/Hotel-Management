@@ -777,10 +777,13 @@ ALTER TABLE [dbo].[Orders]  WITH CHECK ADD  CONSTRAINT [CK_Orders_Status] CHECK 
 GO
 ALTER TABLE [dbo].[StaffAlerts]  WITH CHECK ADD  CONSTRAINT [CK_StaffAlerts_Severity] CHECK  (([Severity]='Info' OR [Severity]='Warning' OR [Severity]='Critical'))
 GO
--- The live database carries this one under SQL Server's auto-generated name
--- (CK__ValetVehi__Statu__0F624AF8), because migration 010 declared it without one. The
--- definition is what matters; the readable name is what this script uses.
-ALTER TABLE [dbo].[ValetVehicles]  WITH CHECK ADD  CONSTRAINT [CK_ValetVehicles_Status] CHECK  (([Status]='Checked-In' OR [Status]='Checked-Out'))
+-- The one constraint on this list the app names by convention rather than by choice.
+-- migrations/010 declared it without a name, so SQL Server auto-named it
+-- CK__ValetVehi__Statu__0F624AF8, and that is the name every migrated database carries.
+-- It is spelled out here verbatim on purpose: this file builds a schema indistinguishable
+-- from a migrated one, and a later script that looks the constraint up by name has to find
+-- the same name here that it finds there.
+ALTER TABLE [dbo].[ValetVehicles]  WITH CHECK ADD  CONSTRAINT [CK__ValetVehi__Statu__0F624AF8] CHECK  (([Status]='Checked-Out' OR [Status]='Checked-In'))
 GO
 -- Column defaults the migrations added but this file never declared. Rooms.Status matters
 -- most: the room dashboard and housekeeping report key on 'Available', so without this a
