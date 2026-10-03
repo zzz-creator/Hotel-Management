@@ -421,28 +421,36 @@ it. As of 2 October 2026 it establishes, on a disposable database:
 - `database.sql` matches the live catalog column-for-column, apart from the one documented
   `GuestRequests` difference.
 
-It is **red on two application bugs**, both confirmed against a real server and both
-invisible to every other check in §6:
+- `post_room_charge()` charges the room exactly once per stay, verified by calling it twice.
+  (This was a bug until 2 October 2026 — see the note below.)
 
-1. **`post_room_charge()` double-charges.** The once-only guard selects on
-   `Description = f"Room charge for {check_in}"` but the `INSERT` writes
-   `f"{marker} - {room_type}"`. The two strings are never equal, so the guard can never match
-   its own row and a retried check-out posts the room charge a second time. The docstring's
-   claim that it is "Idempotent on `Transactions.Description = 'Room charge for {check_in}'`"
-   is false. `main.py:3459-3479`.
-2. **`main.get_connection()` swallows every database error.** It catches, logs, and re-yields
-   (§5), so the real exception is replaced by `RuntimeError: generator didn't stop after
-   throw()`. A concrete consequence: when the booking-reference unique index rejects a
-   duplicate, `record_booking_payment()` cannot see the `IntegrityError`, so
-   `_is_duplicate_key_error()` returns `False`, `BookingRefTaken` is never raised, and the
-   function returns `None` — a caller cannot tell a taken reference from any other failed
-   write. `main.py:141-161`.
+It is **red on one known application bug**, confirmed against a real server and invisible to
+every other check in §6:
 
-Both predate this harness. They survived because nothing had ever executed the code they sit
-in, which is the same reason 019 died three times: a static check on text cannot see whether
-a statement parses, and a catalog comparison cannot see whether a function works.
+**`main.get_connection()` swallows every database error.** It catches, logs, and re-yields
+(§5), so the real exception is replaced by `RuntimeError: generator didn't stop after
+throw()`. A concrete consequence: when the booking-reference unique index rejects a
+duplicate, `record_booking_payment()` cannot see the `IntegrityError`, so
+`_is_duplicate_key_error()` returns `False`, `BookingRefTaken` is never raised, and the
+function returns `None` — a caller cannot tell a taken reference from any other failed
+write. `main.py:141-161`.
 
-**Do not "fix" `verify_e2e.py` by loosening those two assertions.** They are the finding.
+**This is deliberate and the fix is not mechanical.** Deleting the `except` makes
+`main.get_connection()` match `db.get_connection()` and makes `BookingRefTaken` work again,
+but every error currently swallowed as a silent `None` would start propagating instead — a
+deadlock, a CHECK violation, a lost connection mid-check-out. That is the *intended*
+behaviour per §5 and callers are supposed to have the `conn is None` guard, but no one has
+ever watched what happens when those paths raise rather than return `None`, because nothing
+had executed them. It needs a pass over the DB call sites and a manual run of the booking
+and check-out screens, not a one-line edit. Do not do it as drive-by cleanup.
+
+**Do not "fix" `verify_e2e.py` by loosening that assertion.** It is the finding.
+
+`post_room_charge()` had the same class of bug and is fixed: its once-only guard selected on
+`f"Room charge for {check_in}"` while the `INSERT` wrote `f"{marker} - {room_type}"`, so the
+guard could never match its own row and a retried check-out double-charged the guest. The
+description is now composed once and used by both sites. `verify_e2e.py` asserts it, so that
+cannot regress silently.
 
 `database.sql` was audited against the live catalog in October 2026 and the two agree
 on every table, column, type, nullability, primary key, UNIQUE index, CHECK constraint,

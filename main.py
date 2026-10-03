@@ -1885,6 +1885,13 @@ def record_booking_payment(room_number, booking_ref, stay_check_in, kind, amount
     Raises BookingRefTaken when the reference collides with another booking's initial
     charge, which migration 021's filtered unique index makes a real possibility rather
     than a theoretical one.
+
+    DOES NOT CURRENTLY RAISE IT. `main.get_connection()` catches the IntegrityError and
+    re-yields, which replaces it with RuntimeError("generator didn't stop after throw()"),
+    so `_is_duplicate_key_error()` never sees the violation and a collision is reported as
+    a plain `None` -- indistinguishable from any other failed write. Verified against a live
+    server by tests/verify_e2e.py, which is red on exactly this. See AGENTS.md section 7;
+    do not "fix" the test, fix the context manager.
     """
     try:
         amount = round(float(amount), 2)
@@ -3437,8 +3444,14 @@ def post_room_charge(room_number, check_in, check_out):
     the current rate, and it says so. UnitPrice is the same number, so the invoice
     snapshot and the captured rate can never disagree either.
 
-    Idempotent on Transactions.Description = 'Room charge for {check_in}', so a retried
-    check-out cannot double-charge the room. Returns the transaction ID, or None.
+    Idempotent on Transactions.Description = 'Room charge for {check_in} - {room_type}',
+    which is the exact string the INSERT writes, so a retried check-out cannot
+    double-charge the room. The description is composed once and used by both the guard
+    and the INSERT on purpose: an earlier version built it twice, the guard tested one
+    form and the INSERT wrote the other, and the guard therefore never matched its own row
+    -- so every retry billed the room again. `tests/verify_e2e.py` catches that regression.
+
+    Returns the transaction ID, or None (including when the stay is already charged).
     """
     if not room_number:
         return None
@@ -3456,17 +3469,25 @@ def post_room_charge(room_number, check_in, check_out):
     if nightly_rate <= 0:
         logging.info(f"No nightly rate configured for {room_type}; room charge skipped.")
         return None
-    marker = f"Room charge for {check_in}"
+    # ONE string, used by both the guard and the INSERT. Building it twice is exactly what
+    # let them drift apart: the guard tested `marker` while the INSERT wrote
+    # `f"{marker} - {room_type}"`, so the guard could never match its own row and every
+    # retry posted the room charge a second time. Found by tests/verify_e2e.py against a
+    # real server; no other check could see it, because both statements were well-formed.
+    description = f"Room charge for {check_in} - {room_type}"
     amount = round(nightly_rate * nights, 2)
     try:
         with get_connection() as conn:
             if conn is None:
                 return None
             cursor = conn.cursor()
-            # Guard on the stay marker so a retried check-out cannot double-charge.
+            # Guard on the exact Description this function writes, so a retried check-out
+            # cannot double-charge. Matching on RoomNumber + the full description also
+            # scopes the guard to the stay: a room re-let later gets a different check-in
+            # date, and therefore a different description.
             cursor.execute(
                 "SELECT ID FROM Transactions WHERE RoomNumber = ? AND Description = ?",
-                (room_number, marker),
+                (room_number, description),
             )
             if cursor.fetchone():
                 logging.info("Room charge already posted for this stay; not charging again.")
@@ -3476,7 +3497,7 @@ def post_room_charge(room_number, check_in, check_out):
                 "IsBilled, ChargeGroup, Description) OUTPUT INSERTED.ID "
                 "VALUES (?, NULL, ?, ?, ?, 0, ?, ?)",
                 (room_number, nights, nightly_rate, amount, CHARGE_GROUP_ROOM,
-                 f"{marker} - {room_type}"),
+                 description),
             )
             row = cursor.fetchone()
             tx_id = int(row[0]) if row and row[0] is not None else None

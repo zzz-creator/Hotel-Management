@@ -387,33 +387,41 @@ database, and `tests/verify_e2e.py` is meant to be where this gets exercised rep
 
 `python tests/verify_e2e.py` builds a disposable database, runs the schema through both
 install paths, exercises the booking code against it and drops it. See AGENTS.md §4 for the
-rules that authorise it and §6 for how to run it. It is red today, and **both red checks are
-real money bugs** rather than harness problems:
+rules that authorise it and §6 for how to run it.
 
-**1. `post_room_charge()` is not idempotent, so a retried check-out double-charges the room.**
-The guard selects on `Transactions.Description = f"Room charge for {check_in}"`, but the
-`INSERT` writes `f"{marker} - {room_type}"`. Those are never equal, so the guard cannot match
-its own row: verified twice against a server, two room-charge rows appeared for one stay
-(`ItemID IS NULL AND ChargeGroup = 'Room'`). The docstring's idempotency claim is therefore
-false. `main.py:3459-3479`.
+**Fixed: `post_room_charge()` double-charged the room on any retry.** The once-only guard
+selected on `Transactions.Description = f"Room charge for {check_in}"`, but the `INSERT`
+wrote `f"{marker} - {room_type}"`. Those are never equal, so the guard could not match its own
+row: calling it twice against a real server produced two room-charge rows for one stay
+(`ItemID IS NULL AND ChargeGroup = 'Room'`). The docstring's idempotency claim was therefore
+false.
 
-This matters more than a normal double-post, because the room charge is the line a guest
-argues about. Any retry — a declined card, a re-entered card, a re-run of check-out after a
-crash — bills it again. The loyalty award beside it *is* idempotent (verified: a repeat
-`award_stay_points()` pays nothing), so the folio and the points ledger also disagree after
-such a retry.
+This mattered more than an ordinary double-post, because the room charge is the line a guest
+argues about, and the retry paths are ordinary: a declined card, a re-entered card, a
+re-run of check-out after a crash. The loyalty award beside it was always idempotent
+(verified — a repeat `award_stay_points()` pays nothing), so before the fix a single retry
+left the folio charging twice while the points ledger paid once. The description is now
+composed once and used by both the guard and the `INSERT`, so the two cannot drift apart
+again, and `verify_e2e.py` asserts it.
 
-**2. `main.get_connection()` swallows every database error, so `BookingRefTaken` never
+**Open: `main.get_connection()` swallows every database error, so `BookingRefTaken` never
 fires.** It catches, logs, and re-yields — the exact shape AGENTS.md §5 forbids, in the copy
 at `main.py:141` rather than the correct one in `db.py`. The unique-index violation on a
-duplicate booking reference arrives as `IntegrityError` 2601, the context manager replaces it
+duplicate booking reference arrives as `IntegrityError` 2601; the context manager replaces it
 with `RuntimeError: generator didn't stop after throw()`, `_is_duplicate_key_error()`
 correctly returns `False` for that, and `record_booking_payment()` returns `None` instead of
 raising. A caller therefore cannot distinguish a reference already in use from any other
 failed write — which is the one thing the 021 index exists to enforce. The classification
 itself is sound; it is never reached.
 
-Neither was visible to `check_schema_sync.py`, `check_migration_sql.py`,
+This is left open on purpose. Deleting the `except` is the correct fix and is one line, but it
+converts every error currently swallowed into a silent `None` into a raised exception across
+the whole app — deadlocks, CHECK violations, a connection lost mid-check-out. Callers are
+supposed to have the `conn is None` guard, but nobody has watched what they do when a query
+raises rather than returns `None`, because nothing had ever run them. It wants a pass over
+the DB call sites plus a manual run of the booking and check-out screens.
+
+Neither bug was visible to `check_schema_sync.py`, `check_migration_sql.py`,
 `check_applied_migrations.py` or the unit suite, because all four work on text or on a
 catalog, and neither had ever had the code executed.
 
