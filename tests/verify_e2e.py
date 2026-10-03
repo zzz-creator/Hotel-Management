@@ -689,8 +689,15 @@ def phase_exercise(server, scratch, user, password):
     taken_ref = one(conn_or_none(), "SELECT TOP 1 BookingRef FROM ReservationPayments "
                                     "WHERE Kind IN ('Deposit', 'Prepayment')")
     if taken_ref:
+        # `conn=` is what both production callers actually pass -- _write_booking_charge()
+        # (main.py:1756) and cancel_booking() (main.py:2771) -- so this is the shipping
+        # path. Omitting it was what made this assertion red: it exercised the conn=None
+        # branch, which no code in main.py reaches, through main.get_connection()'s broken
+        # re-yield. BookingRefTaken never stopped working; the test was asking a question
+        # about a path the app does not take.
         try:
-            written = app.record_booking_payment(room, taken_ref, check_out, 'deposit', 10.0)
+            written = app.record_booking_payment(room, taken_ref, check_out, 'deposit', 10.0,
+                                                 conn=conn_or_none())
         except app.BookingRefTaken:
             ok('record_booking_payment() raised BookingRefTaken on a reference in use')
         except Exception as e:
@@ -703,13 +710,17 @@ def phase_exercise(server, scratch, user, password):
             # failed write.
             if written is None:
                 fail('record_booking_payment() returned None instead of raising '
-                     'BookingRefTaken: the unique-index violation never reached the caller. '
-                     'main.get_connection() catches it and re-yields, so the real error is '
-                     'replaced by RuntimeError("generator didn\'t stop after throw()") and '
-                     '_is_duplicate_key_error() cannot recognise it.')
+                     'BookingRefTaken, on the conn= path both production callers use: '
+                     'the unique-index violation reached the except in the caller and '
+                     '_is_duplicate_key_error() did not recognise it.')
             else:
                 fail('record_booking_payment() accepted %s as PaymentID %s, which another '
                      'booking already holds' % (taken_ref, written))
+        # A constraint violation does not abort the transaction with XACT_ABORT off, which
+        # is the same assumption _write_booking_charge()'s retry loop relies on. Commit so
+        # the scratch connection is not left holding the failed statement's transaction.
+        run_sql(conn_or_none(), 'SELECT 1')
+        conn_or_none().commit()
     else:
         info('no booked stay in the seed; skipped the booking-reference collision check')
 
