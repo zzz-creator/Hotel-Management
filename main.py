@@ -1886,12 +1886,19 @@ def record_booking_payment(room_number, booking_ref, stay_check_in, kind, amount
     charge, which migration 021's filtered unique index makes a real possibility rather
     than a theoretical one.
 
-    DOES NOT CURRENTLY RAISE IT. `main.get_connection()` catches the IntegrityError and
-    re-yields, which replaces it with RuntimeError("generator didn't stop after throw()"),
-    so `_is_duplicate_key_error()` never sees the violation and a collision is reported as
-    a plain `None` -- indistinguishable from any other failed write. Verified against a live
-    server by tests/verify_e2e.py, which is red on exactly this. See AGENTS.md section 7;
-    do not "fix" the test, fix the context manager.
+    `conn` is not optional in practice: both callers in this module pass one
+    (`_write_booking_charge`, `cancel_booking`), so the shipping path is the `conn is not
+    None` branch at the bottom, which never opens a connection of its own and therefore
+    never touches `main.get_connection()`. On that path the IntegrityError arrives
+    intact, `_is_duplicate_key_error()` recognises it, and BookingRefTaken is raised and
+    retried. `tests/verify_e2e.py` asserts this against a real server.
+
+    The `conn is None` branch has no caller in main.py, and on that branch a collision is
+    still reported as a plain `None`: `main.get_connection()` catches the error and
+    re-yields (AGENTS.md section 5), so it reaches `_is_duplicate_key_error()` as
+    `RuntimeError("generator didn't stop after throw()")` and the classifier correctly
+    answers False. That branch starts raising too when the duplicated context manager at
+    main.py:141 is deleted; see AGENTS.md section 7.
     """
     try:
         amount = round(float(amount), 2)

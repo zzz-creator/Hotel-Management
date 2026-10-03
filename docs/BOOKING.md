@@ -404,22 +404,11 @@ left the folio charging twice while the points ledger paid once. The description
 composed once and used by both the guard and the `INSERT`, so the two cannot drift apart
 again, and `verify_e2e.py` asserts it.
 
-**Open: `main.get_connection()` swallows every database error, so `BookingRefTaken` never
-fires.** It catches, logs, and re-yields — the exact shape AGENTS.md §5 forbids, in the copy
-at `main.py:141` rather than the correct one in `db.py`. The unique-index violation on a
-duplicate booking reference arrives as `IntegrityError` 2601; the context manager replaces it
-with `RuntimeError: generator didn't stop after throw()`, `_is_duplicate_key_error()`
-correctly returns `False` for that, and `record_booking_payment()` returns `None` instead of
-raising. A caller therefore cannot distinguish a reference already in use from any other
-failed write — which is the one thing the 021 index exists to enforce. The classification
-itself is sound; it is never reached.
+**Open: `main.get_connection()` swallows every database error.** It catches, logs, and re-yields — the exact shape AGENTS.md §5 forbids, in the copy at `main.py:141` rather than the correct one in `db.py`. The unique-index violation arrives as `IntegrityError` 2601, the context manager replaces it with `RuntimeError: generator didn't stop after throw()`, `_is_duplicate_key_error()` correctly returns `False` for that, and a caller on that branch gets `None` instead of an exception. The classification itself is sound; on that branch it is never reached.
 
-This is left open on purpose. Deleting the `except` is the correct fix and is one line, but it
-converts every error currently swallowed into a silent `None` into a raised exception across
-the whole app — deadlocks, CHECK violations, a connection lost mid-check-out. Callers are
-supposed to have the `conn is None` guard, but nobody has watched what they do when a query
-raises rather than returns `None`, because nothing had ever run them. It wants a pass over
-the DB call sites plus a manual run of the booking and check-out screens.
+**This does not affect the booking desk.** Both callers pass `conn=` — `_write_booking_charge()` (main.py:1756) and `cancel_booking()` (main.py:2771) — which takes the `conn is not None` branch, opens no connection of its own, and never touches `main.get_connection()`. The retry loop described above has always worked, and `verify_e2e.py` asserts it against a real server. An earlier version of this file claimed otherwise in this section while §2 said the opposite; §2 was right. What remains is a duplicated definition of one function, and a real diagnostic defect on the ~42 `with get_connection()` blocks that no enclosing `try` catches: they surface the generic `RuntimeError` instead of pyodbc's message, and kill the console mid-screen.
+
+The fix is still to delete the duplicate, but it is smaller and safer than it looked. Deleting the `except` does not start new exceptions propagating into code that was silently returning `None`: 99 of the 141 blocks are already inside a `try` that catches them, and the other 42 already propagate today — they are the ones that already kill the app, just with a useless message. The 130 `conn is None` guards are live and correct, because `create_connection()` returns `None` when a **connect** fails and that is the only path to them; they are not there for query failures and should not be removed.
 
 Neither bug was visible to `check_schema_sync.py`, `check_migration_sql.py`,
 `check_applied_migrations.py` or the unit suite, because all four work on text or on a
