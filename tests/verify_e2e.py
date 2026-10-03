@@ -45,9 +45,12 @@ test -- nothing in the unit suite runs it, because it needs a server and because
 a database.
 """
 import configparser
+import csv
 import os
 import re
+import shutil
 import sys
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -517,6 +520,23 @@ def phase_live_convergence(server, live, user, password):
 
 _HARNESS_CONN = [None]
 
+# reports.py writes CSVs to EXPORT_DIR, which is <repo>/exports. Pointed at a temp directory
+# for the report checks so that guest data from a database about to be dropped never lands in
+# the working tree, and so the repo's exports/ is not quietly seeded with scratch rows. Held
+# here because Phase 6 has to remove it whether or not the phase raised.
+_EXPORT_DIR = [None]
+
+
+def read_csv(path):
+    """Read a generated report back as (headers, list-of-dicts).
+
+    The report layer's contract is the CSV it leaves behind, so asserting on the file is the
+    point -- checking that a function returned a path would prove nothing about the rows.
+    """
+    with open(path, newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        return reader.fieldnames or [], list(reader)
+
 
 def conn_or_none():
     """The scratch connection, for the few assertions that need raw SQL.
@@ -696,6 +716,109 @@ def phase_exercise(server, scratch, user, password):
     else:
         info('no open folio lines in the seed; skipped the order-accrual check')
 
+    # --- the loyalty report, and 019's room-scoped semantics ------------------------
+    # BOOKING.md section 6 called this untested, and it was. Two things had to be arranged
+    # first, because the obvious version of this test would pass either way:
+    #
+    #   * reports.py writes to <repo>/exports. That would drop guest rows from a database
+    #     about to be deleted into the working tree, so EXPORT_DIR is pointed at a temp
+    #     directory that Phase 6 removes.
+    #   * The seed gives guest A EVERY ledger row in one room, and so do the awards above.
+    #     So "this guest's whole history" and "this one stay" are the same set of rows, and
+    #     a room-scoped report that wrongly filtered on the room would look identical. One
+    #     ledger row is therefore placed in a second room first, which is what makes the two
+    #     readings distinguishable at all.
+    other_room = one(conn_or_none(),
+                     "SELECT TOP 1 RoomNumber FROM Rooms WHERE RoomNumber <> ? "
+                     "ORDER BY RoomNumber", (room,))
+    if other_room is None:
+        info('the scratch database has only one room; skipped the room-scoped report check')
+    else:
+        run_sql(conn_or_none(), """
+            INSERT INTO dbo.LoyaltyTransactions
+                (CustomerID, RoomNumber, Delta, Reason, CreatedAt, SourceID)
+            VALUES (?, ?, 50, N'Stay award (prior visit, Gold)', GETDATE(),
+                    'verify:cross-room')""", (customer_id, other_room))
+        # Keep the account total consistent with its ledger, so the CSV does not model
+        # something impossible. The assertions below are about which rows are selected, not
+        # about the arithmetic.
+        run_sql(conn_or_none(), "UPDATE dbo.LoyaltyAccounts SET Points = Points + 50 "
+                                "WHERE CustomerID = ?", (customer_id,))
+        conn_or_none().commit()
+
+        import reports as reportsmod
+        _EXPORT_DIR[0] = tempfile.mkdtemp(prefix='verify_e2e_exports_')
+        reportsmod.EXPORT_DIR = _EXPORT_DIR[0]
+
+        cross_room = str(other_room)
+        scoped_room = str(room)
+
+        def report_rows(**kwargs):
+            """Run one loyalty export and read back the CSV it wrote.
+
+            The report layer's contract is the CSV, so asserting the function returned a
+            path would prove nothing about which rows it selected.
+            """
+            paths = reportsmod.export_loyalty_statements('csv', **kwargs)
+            if not paths:
+                return None, [], []
+            csv_headers, csv_rows = read_csv(paths[0])
+            return paths[0], csv_headers, csv_rows
+
+        path, headers, data = report_rows(room_number=room)
+        if path is None:
+            fail('export_loyalty_statements(room_number=%s) wrote no CSV' % room)
+        else:
+            if os.path.dirname(path) == _EXPORT_DIR[0] and os.path.isfile(path):
+                ok('the loyalty report wrote inside the temporary export directory')
+            else:
+                fail('the loyalty report wrote to %s, outside the temporary export '
+                     'directory -- scratch guest rows would be left in the working tree'
+                     % path)
+
+            if 'EarnedInRoom' in headers and 'Points' in headers:
+                ok('the loyalty statement carries the guest ledger columns')
+            else:
+                fail('loyalty statement headers are %r, expected EarnedInRoom and Points'
+                     % (headers,))
+
+            # The assertion that carries the section. A room-scoped report is meant to
+            # report the GUEST's whole history, not the one stay that was asked about; that
+            # is the entire content of migration 019. Filtering the ledger on the room would
+            # still produce a plausible-looking CSV naming the right guest.
+            if any(r.get('EarnedInRoom') == cross_room for r in data):
+                ok('a room-scoped statement for room %s also reports the same guest history '
+                   'earned in room %s (019: keyed on the guest, not the stay)'
+                   % (scoped_room, cross_room))
+            else:
+                fail('a room-scoped statement for room %s did NOT include the same guests '
+                     'ledger rows from room %s. It has been filtered by room, which is the '
+                     'fragment 019 replaced: a balance would read as only the part earned '
+                     'where you happened to ask about it.'
+                     % (scoped_room, cross_room))
+
+            if any(r.get('EarnedInRoom') == scoped_room for r in data):
+                ok('the room-scoped statement includes the room it was asked about too')
+            else:
+                fail('a room-scoped statement for room %s contains no row for that room'
+                     % scoped_room)
+
+            # The same guest, asked for by id rather than by room.
+            _, _, by_id = report_rows(customer=str(customer_id))
+            if any(r.get('EarnedInRoom') == cross_room for r in by_id):
+                ok('a customer-scoped statement reports the same whole history')
+            else:
+                fail('a customer-scoped statement for customer %s did not include the '
+                     'ledger rows earned in room %s' % (customer_id, cross_room))
+
+            # And unscoped: every account, so the join must not collapse to one guest.
+            _, _, everyone = report_rows()
+            if everyone:
+                ok('the unscoped loyalty statement exported %s rows' % len(everyone))
+            else:
+                fail('the unscoped loyalty statement exported no rows, though the seed '
+                     'creates a loyalty account')
+
     # --- availability must not offer a room that is occupied -----------------------
     room_type = app.get_room_type(room)
     free = app.search_availability(check_in, check_out, room_type=room_type, limit=500)
@@ -842,6 +965,16 @@ def main():
             print('  FAIL  could not drop %s: %s' % (scratch, e))
             print('        it will be recreated by the next run')
             problems += 1
+        # The report CSVs describe a guest of a database that no longer exists, so they go
+        # with it. Done here rather than in the phase, because the phase may have raised.
+        if _EXPORT_DIR[0] and os.path.isdir(_EXPORT_DIR[0]):
+            try:
+                shutil.rmtree(_EXPORT_DIR[0])
+                ok('temporary report exports removed')
+            except Exception as e:
+                print('  FAIL  could not remove %s: %s' % (_EXPORT_DIR[0], e))
+                problems += 1
+            _EXPORT_DIR[0] = None
 
     print('\n%s' % ('-' * 62))
     if problems:

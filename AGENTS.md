@@ -432,6 +432,10 @@ it. As of 2 October 2026 it establishes, on a disposable database:
   `pyodbc.Error` carrying the server's own message. These two are regression guards for §7:
   a context manager that swallows every error still hands out usable connections, so
   nothing else in the harness would notice the duplicate returning.
+- The loyalty report at all three scopes, read back out of its CSV. The room-scoped one
+  asserts 019's actual claim — a statement about one room reports that **guest's** whole
+  history — which needs a ledger row in a second room to be distinguishable from a
+  room-filtered query at all.
 
 As of 3 October 2026 it is **green**, and has been run to completion more than once.
 

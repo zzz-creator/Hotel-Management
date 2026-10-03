@@ -380,13 +380,18 @@ What `verify_e2e.py` now covers, on every run, against a server that really is S
 - 021's booking-reference collision: `record_booking_payment()` raising `BookingRefTaken`, on
   the `conn=` path both production callers use.
 - 022's captured-rate read, against a row that genuinely carries a captured rate.
+- **The loyalty report**, at all three of its scopes — unscoped, by customer, and by room —
+  read back out of the CSV it actually writes rather than out of a return value.
 
-Two things it still does **not** touch:
+The room-scoped one is the interesting check, because it is the whole content of 019: a
+statement asked about one room must report that **guest's** history, including points earned
+in rooms that were not asked about. A query that filtered the ledger on the room would still
+produce a plausible-looking CSV naming the right guest, so the harness places a ledger row in
+a second room first — without that, "whole history" and "this one stay" are the same rows and
+the test passes either way. The seed gave guest A every row in a single room, which is why this
+had to be arranged rather than read off the fixtures.
 
-- **The loyalty report.** `verify_e2e.py` contains no reference to `reports` or `REPORTS` at
-  all, so the export behind `python reports.py --report loyalty` is still unexercised end to
-  end.
-- **The live database**, for the reason above.
+The one thing it still does **not** touch is **the live database**, for the reason above.
 
 Migrations **022-025** were verified by `tests/check_applied_migrations.py`, which confirmed
 the `Reservations.NightlyRate` shape, the seeded `business_date`, the recalibrated accrual,
