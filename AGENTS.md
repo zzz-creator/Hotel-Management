@@ -430,38 +430,42 @@ it. As of 2 October 2026 it establishes, on a disposable database:
 
 As of 3 October 2026 it is **green**, and has been run to completion more than once.
 
-### The remaining `main.get_connection()` defect
+### The `main.get_connection()` defect — fixed 3 October 2026
 
-`main.get_connection()` still catches, logs, and re-yields (§5), so a query failure inside a
-`with get_connection()` block surfaces as `RuntimeError: generator didn't stop after
-throw()` instead of pyodbc's message. `main.py:141-161`.
+`main.py` used to carry a second copy of the context manager that wrapped its `yield` in
+`except Exception` and then yielded again. That is illegal in a generator, so every error
+raised inside a `with get_connection()` block reached the caller as
+`RuntimeError: generator didn't stop after throw()` instead of pyodbc's message.
+`db.get_connection()` had the correct shape all along. `main.get_connection` is now a
+plain alias for it (`main.py:141`), so there is one definition, and it is the right one.
 
-**It does not affect the booking desk, and an earlier version of this file said it did.**
-Both callers of `record_booking_payment()` pass `conn=` — `_write_booking_charge()`
-(main.py:1756) and `cancel_booking()` (main.py:2771) — so they take the branch that opens no
-connection of its own and never reach the broken copy. `BookingRefTaken` has always worked;
-`verify_e2e.py` proves it. The earlier claim came from an assertion that called
-`record_booking_payment()` *without* `conn`, a path no code in `main.py` takes, and
-concluded from the resulting `None` that the production path was broken too.
+**What this never was: a broken booking desk.** An earlier version of this section claimed
+`BookingRefTaken` "never fires" because the unique-index violation was swallowed. It did
+fire. Both callers of `record_booking_payment()` pass `conn=` — `_write_booking_charge()`
+(main.py:1736) and `cancel_booking()` (main.py:2757) — so they take the branch that opens
+no connection of its own and never reached the broken copy. The claim came from a
+`verify_e2e.py` assertion that called `record_booking_payment()` *without* `conn`, a path no
+code in `main.py` takes, and read the resulting `None` as a broken production path. The
+assertion now exercises the real path and passes.
 
-The real cost is diagnostic, on the blocks that no enclosing `try` catches: of 141
-`with get_connection()` blocks, 99 are already inside a `try` that swallows the failure
-either way, and **42 propagate today** — they kill the console mid-screen with a useless
-message where pyodbc's real error would have said what happened. Deleting the duplicate
-introduces no new crash site.
+The risk that was priced into "this is not mechanical" was also overstated: of 141
+`with get_connection()` blocks, 99 are inside a `try` that catches the failure either way,
+and the 42 that propagate were **already** killing the console — just with a useless
+message. Deleting the duplicate added no crash site. Verified by fault injection: a bad
+statement now escapes as `pyodbc.ProgrammingError` with the server's own text, and a failed
+*connect* still yields `None`, so the `conn is None` contract is unchanged.
 
-Two things to know before deleting it, because both look like cleanups and are not:
+Two rules that survive this fix, because both still look like cleanups and are not:
 
-- **Do not delete the 130 `conn is None` guards.** `create_connection()` returns `None` when a
-  **connect** fails, and that is the only path to them. They are live, correct, and not
-  written for query failures. Conversely, adding guards to the 42 blocks would be dead code.
-- **Do not add a top-level handler to `main()`'s menu loop as part of this.** There are 78
-  `conn.commit()` sites, multi-statement functions commit mid-body, and nothing rolls back on
-  error. A handler that returns to the menu turns today's fail-stop into a **retryable
-  half-written folio** — the `post_room_charge` class of bug. If one is ever wanted it needs
-  its own commit, gated on a rollback audit, and must never auto-retry.
-
-That is the whole remaining fix, and it is still open.
+- **The 130 `conn is None` guards stay.** `create_connection()` returns `None` when a
+  **connect** fails, and that is the only path to them. They are not there for query
+  failures. Adding guards to more blocks would be dead code; a failed query never yields
+  `None`, it raises.
+- **`main()`'s menu loop still must not get a top-level exception handler** without its own
+  audit. There are 78 `conn.commit()` sites, multi-statement functions commit mid-body, and
+  nothing rolls back on error. A handler that returns to the menu turns today's fail-stop
+  into a **retryable half-written folio** — the `post_room_charge` class of bug. That is a
+  rollback-safety question, not an error-handling one, and it is still unaudited.
 
 `post_room_charge()` had the same class of bug and is fixed: its once-only guard selected on
 `f"Room charge for {check_in}"` while the `INSERT` wrote `f"{marker} - {room_type}"`, so the

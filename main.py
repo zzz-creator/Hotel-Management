@@ -5,7 +5,6 @@ import logging
 import os
 import sys
 import time
-import pyodbc
 import random
 import string
 import getpass
@@ -14,7 +13,6 @@ import configparser
 import tqdm
 import argparse
 import re
-import contextlib
 import reports
 import ui
 
@@ -127,38 +125,20 @@ for handler in logger.handlers:
 ## =========================
 # Database Connection & Utilities
 ## =========================
-def create_connection():
-    """Return a raw pyodbc connection. Prefer using `get_connection()` context manager."""
-    try:
-        conn = pyodbc.connect(CONNECTION_STRING)
-        return conn
-    except Exception as e:
-        logging.error("Database connection failed: %s", e)
-        return None
-
-
-@contextlib.contextmanager
-def get_connection():
-    """Context manager that yields a DB connection and ensures it is closed.
-
-    Yields None if connection could not be established.
-    """
-    conn = None
-    try:
-        conn = create_connection()
-        if conn is None:
-            yield None
-            return
-        yield conn
-    except Exception as e:
-        logging.error("Database operation error: %s", e)
-        yield None
-    finally:
-        try:
-            if conn is not None:
-                conn.close()
-        except Exception:
-            pass
+# One definition of this, not two. main.py used to carry its own copy that wrapped the
+# `yield` in `except Exception` and then yielded again, which is illegal in a generator:
+# every error raised inside a `with get_connection()` block reached the caller as
+# `RuntimeError: generator didn't stop after throw()` instead of pyodbc's real message.
+# db.get_connection() has always had the correct shape -- it returns None only when the
+# *connect* fails, and lets a statement failure propagate with its own type and message.
+# AGENTS.md section 5 says so; this copy is the one that broke it, and nothing else in
+# the app ever needed a second definition.
+#
+# `db.init(CONNECTION_STRING)` above is what keeps the two in step, and it is the seam
+# tests/verify_e2e.py re-points at a disposable database. Do NOT redefine this function
+# here. If a caller needs different failure behaviour, wrap the body in its own
+# try/except -- that is the only correct place to swallow a database error.
+get_connection = db.get_connection
 
 
 ## =========================
@@ -1893,12 +1873,11 @@ def record_booking_payment(room_number, booking_ref, stay_check_in, kind, amount
     intact, `_is_duplicate_key_error()` recognises it, and BookingRefTaken is raised and
     retried. `tests/verify_e2e.py` asserts this against a real server.
 
-    The `conn is None` branch has no caller in main.py, and on that branch a collision is
-    still reported as a plain `None`: `main.get_connection()` catches the error and
-    re-yields (AGENTS.md section 5), so it reaches `_is_duplicate_key_error()` as
-    `RuntimeError("generator didn't stop after throw()")` and the classifier correctly
-    answers False. That branch starts raising too when the duplicated context manager at
-    main.py:141 is deleted; see AGENTS.md section 7.
+    The `conn is None` branch has no caller in main.py. It now behaves like the rest of
+    the app: a statement failure propagates with pyodbc's own type, so a collision is
+    classified here and raised, rather than being logged and answered with a silent
+    `None`. It behaved differently only while main.py carried a second, broken copy of
+    `get_connection()` -- see AGENTS.md section 7.
     """
     try:
         amount = round(float(amount), 2)
