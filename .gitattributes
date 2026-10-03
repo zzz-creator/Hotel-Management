@@ -27,7 +27,7 @@
 #
 # Nothing here touches line endings: `text` still decides that, as above.
 *.py      text
-*.sql     text linguist-language=SQL
+*.sql     text
 *.md      text
 *.txt     text
 *.ini     text
