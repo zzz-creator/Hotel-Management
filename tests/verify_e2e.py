@@ -594,6 +594,37 @@ def phase_exercise(server, scratch, user, password):
     app._RESERVATIONS_CAPTURED_RATE_SUPPORT = None
     app.LOYALTY_ENABLED = True
 
+    # --- how the app reaches the database at all -----------------------------------
+    # Two probes, both regression guards for the deletion of main.py's second copy of
+    # get_connection() (AGENTS.md section 7). Nothing else here would notice that copy
+    # coming back, because a context manager that swallows every error still returns
+    # usable connections -- it just reports nothing that went wrong.
+    if app.get_connection is dbmod.get_connection:
+        ok('main.get_connection is db.get_connection: one definition, not two')
+    else:
+        fail('main.get_connection is NOT db.get_connection. main.py must not define its '
+             'own copy: the old one wrapped the yield in except Exception and re-yielded, '
+             'which is illegal in a generator, so every database error surfaced as '
+             '"RuntimeError: generator didn\'t stop after throw()" and named nothing.')
+
+    # The behavioural half of the same guard, because identity alone would not catch a
+    # future edit that changes db.py's copy and leaves main.py aliasing it. A statement
+    # that cannot succeed raises; against a table that does not exist this is read-only,
+    # and the with-block closes the connection on the way out so nothing is left open.
+    try:
+        with app.get_connection() as probe_conn:
+            probe_conn.cursor().execute('SELECT * FROM NoSuchTable_FaultInjection')
+    except pyodbc.Error as e:
+        ok('a failing statement escapes as %s: %s'
+           % (type(e).__name__, str(e).splitlines()[0][:60]))
+    except Exception as e:
+        fail('a failing statement escaped as %s, not a pyodbc error: %s. The context '
+             'manager is swallowing the real exception and substituting one of its own, '
+             'so a query failure reaches the console with a message that names nothing.'
+             % (type(e).__name__, e))
+    else:
+        fail('SELECT against a table that does not exist returned without raising')
+
     # --- the read path 022 exists to feed -----------------------------------------
     biz = app.business_date()
     if isinstance(biz, date):

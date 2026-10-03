@@ -427,6 +427,10 @@ it. As of 2 October 2026 it establishes, on a disposable database:
 - `record_booking_payment()` raises `BookingRefTaken` when the booking-reference unique index
   rejects a duplicate, verified on the `conn=` path both production callers use.
   (A misdiagnosis of this path was itself a bug until 3 October 2026 — see below.)
+- `main.get_connection` **is** `db.get_connection`, and a failing statement escapes as a
+  `pyodbc.Error` carrying the server's own message. These two are regression guards for §7:
+  a context manager that swallows every error still hands out usable connections, so
+  nothing else in the harness would notice the duplicate returning.
 
 As of 3 October 2026 it is **green**, and has been run to completion more than once.
 
@@ -454,6 +458,11 @@ and the 42 that propagate were **already** killing the console — just with a u
 message. Deleting the duplicate added no crash site. Verified by fault injection: a bad
 statement now escapes as `pyodbc.ProgrammingError` with the server's own text, and a failed
 *connect* still yields `None`, so the `conn is None` contract is unchanged.
+
+Both probes are now assertions in `verify_e2e.py` Phase 5, and they were checked against a
+deliberately restored copy of the broken context manager before being trusted: with it back,
+`verify_e2e.py` exits non-zero on both. An assertion that has never been seen to fail is not
+evidence, and this repo has already shipped one that was wrong for exactly that reason.
 
 Two rules that survive this fix, because both still look like cleanups and are not:
 
