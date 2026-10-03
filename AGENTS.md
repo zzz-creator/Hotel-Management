@@ -405,8 +405,9 @@ and when the §2 file map drifts from the repo.
 **Apply migrations in order, or re-run `database.sql` on a fresh database.** Migrations
 001-025 are all applied to the developer's live database. 001-018 were verified end-to-end
 (book → check out with credit → cancel, plus the declined-card and full-refund paths).
-019-021 were verified read-only against the catalog, and the flows they back have never been
-run against a live database — see `docs/BOOKING.md` §6.
+019-021 were verified read-only against the catalog. Their T-SQL and the flows they back now
+run on every `verify_e2e.py` invocation — but against a *disposable* database, so
+`hotelSystem` itself still has not had a booking run through it. See `docs/BOOKING.md` §6.
 
 `tests/verify_e2e.py` closes most of that gap and is the check to run before trusting any of
 it. As of 2 October 2026 it establishes, on a disposable database:

@@ -359,24 +359,52 @@ dropped.
 
 ---
 
-## 6. Known untested surface
+## 6. What has and has not been run
 
-The booking desk and the loyalty report have **never** been exercised against a live
-database — migrations 019-021 were verified read-only against the catalog, not by running
-the flows. Their unit tests are database-free by design (the money rules are pure
-functions, the storage layer is mocked), so an end-to-end booking → check-out-with-credit →
-cancel run is the gap. If you are the first to run it, update this section.
+Which of these have actually been run changes over time, so this section is kept to the
+short version. The unit tests are database-free by design (the money rules are pure
+functions, the storage layer is mocked), so they can never cover any of it.
+
+**`hotelSystem` itself has still never had a booking or a check-out run through it, and
+`tests/verify_e2e.py` does not change that** — it builds a disposable database, exercises the
+code there and drops it. A full booking → check-out-with-credit → cancel run against the live
+database is still the gap.
+
+What `verify_e2e.py` now covers, on every run, against a server that really is SQL Server:
+
+- The booking-desk money helpers — `booking_quote`, `booking_payment_options`,
+  `refund_decision`, `allocate_booking_credit`, `settle_with_prepayment`, `stay_nights`.
+- Both loyalty award paths, **including that a repeat pays nothing**. That idempotency claim
+  used to rest on reading the code.
+- 019's guest identity: `customer_id_for_stay()`.
+- 021's booking-reference collision: `record_booking_payment()` raising `BookingRefTaken`, on
+  the `conn=` path both production callers use.
+- 022's captured-rate read, against a row that genuinely carries a captured rate.
+
+Two things it still does **not** touch:
+
+- **The loyalty report.** `verify_e2e.py` contains no reference to `reports` or `REPORTS` at
+  all, so the export behind `python reports.py --report loyalty` is still unexercised end to
+  end.
+- **The live database**, for the reason above.
 
 Migrations **022-025** were verified by `tests/check_applied_migrations.py`, which confirmed
 the `Reservations.NightlyRate` shape, the seeded `business_date`, the recalibrated accrual,
-the deleted expiry row, and both date reports running against the live server. But that
-database had **no reservations in it**, so:
+the deleted expiry row, and both date reports running against the live server.
 
-- The 022 backfill had nothing to do. The `UPDATE` itself is unexercised, though it is
-  guarded and reads the same `Rooms`/`RoomTypes` join the check verified with a `SELECT`.
-- The **captured-rate read path has never seen a real row** — `post_room_charge()` has
-  always been tested against the fallback branch. That is the single most important thing
-  left to verify.
+That live database had **no reservations in it**, which at the time meant two things were
+unproven. Both are now proven on the disposable database, and neither is proven on the live
+one:
+
+- The 022 backfill statement was run against rows that genuinely lacked a rate, rather than
+  finding nothing to update. Precisely: migration 022's own file runs in Phase 2, before the
+  seed exists, so it is `verify_e2e.py` that re-runs 022's `UPDATE` in Phase 5 — the same
+  statement, not the migration.
+- The captured-rate read path returned a real captured value rather than taking the fallback
+  branch — `get_captured_nightly_rate()` and `stay_nightly_rate()` both assert it.
+
+Both claims used to be stated here as *never verified at all*, which was true when written and
+stopped being true the moment `verify_e2e.py` ran.
 
 `tests/seed_smoke_test.sql` populates a stay for exactly this, and
 `tests/seed_smoke_test_cleanup.sql` undoes it. Both are yours to run. The agent may not run
