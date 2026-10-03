@@ -168,10 +168,29 @@ before reworking a feature it covers.
 
 ## 4. Database rules
 
-- **Never execute DDL or modify the database yourself.** Schema changes ship as `.sql`
+- **Never execute DDL or modify the live database yourself.** Schema changes ship as `.sql`
   files only — either an edit to `database.sql` (fresh installs) **and** a new numbered file
   in `migrations/` (existing databases). Then **tell the user to apply the SQL** in SSMS or
   another tool. Do not run it for them.
+- **A scratch database is not the live database, and writing to one is permitted.** The rule
+  above exists to protect rows you cannot get back. It has no force against a throwaway, so it
+  must not be read as a blanket ban on touching SQL Server: read that way it forbids the only
+  way to find out whether a migration works. A **scratch** database — one whose name comes
+  from a config key that is **not** the one `[database]` uses — may be created, built from
+  `database.sql`, migrated through every file in `migrations/` in order, seeded, exercised by
+  the real code, and dropped. Three conditions, all non-negotiable:
+  1. The live database's name must never appear in a scratch connection string.
+  2. The script must refuse to run if it would resolve to the `[database]` target, rather than
+     trusting the config file to be correct.
+  3. Keep it in one script. `tests/verify_e2e.py` is where this is meant to live; ad-hoc
+     `sqlcmd` against a scratch database is not the sanctioned path and leaves nothing behind
+     that the next agent can re-run.
+
+  This is the only sanctioned way to exercise unapplied migrations, and the reason it is
+  written down is that not having it written down is what left 019-021 unrun. Migration 019
+  died three separate times against a live server (`dbo.sys.*`, bare `EXEC`, `GO` inside
+  `BEGIN`) and passed `check_migration_sql.py` as written: code you never ran has never met a
+  real constraint it did not expect, and no static check can substitute for running it.
 - **`database.sql` must be able to build the whole schema on an empty server.** It is the
   authoritative fresh-install script, so it carries a `CREATE TABLE` for **every** table in
   the app. Never write "handled by migration NNN" in it, and never let it depend on a file
@@ -209,7 +228,8 @@ before reworking a feature it covers.
 6. Add the file to the inventory table in `docs/SCHEMA.md`, plus a degradation row if the
    feature can be missing.
 7. Update the numbered lists in `docs/SCHEMA.md` §1 if you renumbered anything.
-8. Tell the user to apply it. **Do not apply it.**
+8. Tell the user to apply it. **Do not apply it to the live database** — a scratch database is
+   the one exception, and only under the rule at the top of this section.
 9. Once the user says they applied it, run `python tests/check_applied_migrations.py`.
    It is the only check that looks at the **live** server rather than the repo, and it
    also calls the real code against it — a column existing is not the same as the
@@ -361,8 +381,10 @@ run against a live database — see `docs/BOOKING.md` §6. 022-025 were verified
 `check_applied_migrations.py` — column shape, the seeded `business_date`, the recalibrated
 accrual, the deleted expiry row, and both date reports running — but the database had **no
 reservations in it**, so the 022 backfill had nothing to do and the captured-rate read path
-has still never seen a real row. `tests/seed_smoke_test.sql` exists for exactly that; the
-agent must not run it (see §4).
+has still never seen a real row. `tests/seed_smoke_test.sql` exists for exactly that.
+Running it against the live database is still the agent's job to refuse; running it
+against a scratch one is what `tests/verify_e2e.py` is meant to do (see §4), and until
+that script exists this gap is open rather than closed.
 
 `database.sql` was audited against the live catalog in October 2026 and the two now agree
 on every table, column, type, nullability, primary key, UNIQUE index, CHECK constraint,

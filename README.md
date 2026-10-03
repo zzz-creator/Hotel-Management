@@ -69,7 +69,7 @@ records every statement so a bad column name or a missing `?` fails in the test 
 against your data.
 
 ```powershell
-python -m unittest discover -s tests        # 344 tests
+python -m unittest discover -s tests        # 345 tests
 ```
 
 The static and live checks are separate, and each exits non-zero on failure:

@@ -379,5 +379,7 @@ database had **no reservations in it**, so:
   left to verify.
 
 `tests/seed_smoke_test.sql` populates a stay for exactly this, and
-`tests/seed_smoke_test_cleanup.sql` undoes it. Both are yours to run: an agent must not
-write to the database (AGENTS.md §4).
+`tests/seed_smoke_test_cleanup.sql` undoes it. Both are yours to run. The agent may not run
+either against the live database (AGENTS.md §4) — but a scratch database is not the live
+database, and `tests/verify_e2e.py` is meant to be where this gets exercised repeatably.
+Until that script exists, the gap in this section is open, not closed.

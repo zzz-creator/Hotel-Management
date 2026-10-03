@@ -36,6 +36,7 @@ the kind of drift worth catching.
 Run with:  python tests/check_docs_sync.py
 Exit code is non-zero when anything has drifted.
 """
+import fnmatch
 import glob
 import os
 import re
@@ -49,15 +50,23 @@ DOC_FILES = ('AGENTS.md', 'docs/SCHEMA.md', 'docs/BOOKING.md', 'docs/DEVIATIONS.
 SCHEMA_DOC = 'docs/SCHEMA.md'
 
 # Files that are not project artefacts, so the file map should not have to list them.
-# The council transcript/report are the inputs this whole round of work came from: a
-# generated analysis of the codebase, kept for reference. Neither is read by the app,
-# maintained alongside it, or a dependency of anything -- listing them in AGENTS.md would
-# imply they are.
-NOT_PROJECT_FILES = {
+# The council transcript/report are generated analysis of the codebase, kept for reference.
+# Neither is read by the app, maintained alongside it, or a dependency of anything --
+# listing them in AGENTS.md would imply they are. They are matched by PATTERN, not by
+# name: an earlier version hardcoded one council's filenames, which meant every later
+# council run broke this check with "file map does not mention council-transcript-<ts>.md"
+# even though .gitignore already excludes both patterns. A checker that only passes until
+# the next run of the thing it ignores is a checker nobody trusts.
+NOT_PROJECT_FILE_PATTERNS = (
     'requirements.txt',
-    'council-report-20260927-120009.html',
-    'council-transcript-20260927-120009.md',
-}
+    'council-report-*.html',
+    'council-transcript-*.md',
+)
+
+
+def is_not_project_file(name):
+    """True for generated or non-artefact files the AGENTS.md file map need not list."""
+    return any(fnmatch.fnmatch(name, pat) for pat in NOT_PROJECT_FILE_PATTERNS)
 
 # Backticked `name(` tokens that are real calls but not project functions: T-SQL builtins,
 # Python builtins, and the stdlib/rich/logging names that appear in prose.
@@ -184,7 +193,7 @@ def check_agents_file_map(docs):
         pattern = os.path.join(ROOT, folder, '*') if folder else os.path.join(ROOT, '*')
         for path in sorted(glob.glob(pattern)):
             name = os.path.basename(path)
-            if not os.path.isfile(path) or name in NOT_PROJECT_FILES:
+            if not os.path.isfile(path) or is_not_project_file(name):
                 continue
             if not (name.endswith(('.py', '.ini', '.sql', '.md'))):
                 continue
