@@ -382,4 +382,41 @@ database had **no reservations in it**, so:
 `tests/seed_smoke_test_cleanup.sql` undoes it. Both are yours to run. The agent may not run
 either against the live database (AGENTS.md §4) — but a scratch database is not the live
 database, and `tests/verify_e2e.py` is meant to be where this gets exercised repeatably.
-Until that script exists, the gap in this section is open, not closed.
+
+### 2 October 2026 — `tests/verify_e2e.py` now exists, and two bugs came out of it
+
+`python tests/verify_e2e.py` builds a disposable database, runs the schema through both
+install paths, exercises the booking code against it and drops it. See AGENTS.md §4 for the
+rules that authorise it and §6 for how to run it. It is red today, and **both red checks are
+real money bugs** rather than harness problems:
+
+**1. `post_room_charge()` is not idempotent, so a retried check-out double-charges the room.**
+The guard selects on `Transactions.Description = f"Room charge for {check_in}"`, but the
+`INSERT` writes `f"{marker} - {room_type}"`. Those are never equal, so the guard cannot match
+its own row: verified twice against a server, two room-charge rows appeared for one stay
+(`ItemID IS NULL AND ChargeGroup = 'Room'`). The docstring's idempotency claim is therefore
+false. `main.py:3459-3479`.
+
+This matters more than a normal double-post, because the room charge is the line a guest
+argues about. Any retry — a declined card, a re-entered card, a re-run of check-out after a
+crash — bills it again. The loyalty award beside it *is* idempotent (verified: a repeat
+`award_stay_points()` pays nothing), so the folio and the points ledger also disagree after
+such a retry.
+
+**2. `main.get_connection()` swallows every database error, so `BookingRefTaken` never
+fires.** It catches, logs, and re-yields — the exact shape AGENTS.md §5 forbids, in the copy
+at `main.py:141` rather than the correct one in `db.py`. The unique-index violation on a
+duplicate booking reference arrives as `IntegrityError` 2601, the context manager replaces it
+with `RuntimeError: generator didn't stop after throw()`, `_is_duplicate_key_error()`
+correctly returns `False` for that, and `record_booking_payment()` returns `None` instead of
+raising. A caller therefore cannot distinguish a reference already in use from any other
+failed write — which is the one thing the 021 index exists to enforce. The classification
+itself is sound; it is never reached.
+
+Neither was visible to `check_schema_sync.py`, `check_migration_sql.py`,
+`check_applied_migrations.py` or the unit suite, because all four work on text or on a
+catalog, and neither had ever had the code executed.
+
+Still unexercised, and not claimed otherwise: the interactive booking wizard and check-out
+screens (the harness calls the functions they delegate to, not the `rich` flows), the
+declined-card retry path, and any concurrency behaviour.

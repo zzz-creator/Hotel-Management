@@ -11,6 +11,13 @@ database = hotelSystem
 username = admin
 password =
 
+; tests/verify_e2e.py builds a throwaway database here, runs the schema through both
+; install paths, exercises the booking code and drops it again. It NEVER opens the
+; [database] target above, and it refuses to run if this name resolves to it.
+; Leave blank to use the built-in default. Requires a login with CREATE DATABASE.
+[verify]
+verify_database = hotelSystem_verify
+
 [hotel]
 name = The Grand Oasis Hotel
 tax = 0.13

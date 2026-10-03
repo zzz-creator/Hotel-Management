@@ -81,6 +81,7 @@ New interactive output goes through `ui.py`, never inline `rich`.
 | `tests/check_schema_sync.py` | `database.sql` vs migrations (a **script**, not a test) |
 | `tests/check_migration_sql.py` | Static T-SQL lint (a **script**, not a test) |
 | `tests/check_applied_migrations.py` | The **live** database vs `database.sql` (a **script**, not a test) |
+| `tests/verify_e2e.py` | Builds a **disposable** database, runs both install paths, exercises the booking code, drops it (a **script**, not a test) |
 | `tests/seed_smoke_test.sql`, `tests/seed_smoke_test_cleanup.sql` | Throwaway populate/undo pair for manual runs |
 | `tests/check_docs_sync.py` | This file's staleness checker (a **script**, not a test) |
 
@@ -260,6 +261,21 @@ about something else entirely.
   `Msg 1779`. Use `sys.indexes.is_primary_key = 1`, and skip the drop when the desired key
   is already in place.
 - `is_primary_key` lives on `sys.indexes`, not `sys.index_columns`.
+- **A filtered index's `WHERE` cannot join two equality predicates with `OR`.**
+  `WHERE ([Kind]='Deposit' OR [Kind]='Prepayment')` fails with `Msg 156, Incorrect syntax
+  near the keyword 'OR'`; `WHERE [Kind] IN ('Deposit', 'Prepayment')` is accepted. This
+  shipped once: `database.sql` carried the `OR` form while `migrations/021` used `IN`, so an
+  upgraded database had the index and a fresh install could not get past it.
+- **One column, one DEFAULT.** A second `DEFAULT` on the same column is `Msg 1781, Column
+  already has a DEFAULT bound to it`, and the batch dies there. `database.sql` carried two
+  blocks that both defaulted the same six columns. Related to the rule above: a guard that
+  tests `name = 'DF_X_Y'` cannot see a default that was declared unnamed, because SQL Server
+  then calls it `DF__X__Y__<hash>` — so an unnamed declaration plus a name-guarded migration
+  collides even though both are individually correct.
+
+Both were found by `tests/verify_e2e.py` executing the files, not by reading them, and
+neither is something `check_migration_sql.py` can see: the statements are valid-looking and
+parse fine as text. That is the whole argument for §4's scratch database.
 
 ---
 
@@ -268,7 +284,7 @@ about something else entirely.
 - Top of `main.py` has `# type: ignore`; functions are module-level, no classes.
 - Match the existing style: string `f`-format logging, `with get_connection() as conn`
   blocks, and the `conn is None` early-return guard after each DB open.
-- **Do not add an `except` around the `yield` in `db.get_connection()`.** Catching there and
+- **Do not add an `except` around the `yield` in either `get_connection()`.** Catching there and
   yielding a second time is illegal in a generator: Python replaces the real error with
   `RuntimeError: generator didn't stop after throw()`, hiding the actual message. A
   *connection* failure is already handled by `create_connection()` returning `None` (hence
@@ -276,6 +292,10 @@ about something else entirely.
   so a missing migration reads as pyodbc's "Invalid column/object name 'X'". Functions that
   must tolerate an unapplied migration (e.g. the `ReservationArchive` read in
   `search_availability()`) wrap **their own body** in `try/except`.
+  There are **two** of these context managers — `db.get_connection()` and an independent copy
+  at `main.py:141`. Only `db`'s is correct. `main`'s catches, logs, and re-yields, so every
+  caller in `main.py` loses the real exception type; see §7 for what that costs. **The rule is
+  about both.**
 - `HotelSettings` values are admin-editable free text: every numeric read goes through
   `_setting_float()` / `_setting_int()`, which fall back to the `config.ini` default on a
   blank or non-numeric value. A typo there must never break check-out.
@@ -324,7 +344,15 @@ python tests/check_schema_sync.py                             # schema drift
 python tests/check_migration_sql.py                           # T-SQL lint
 python tests/check_docs_sync.py                               # docs are stale?
 python tests/check_applied_migrations.py                      # live DB matches database.sql
+python tests/verify_e2e.py                                    # run it, on a throwaway database
 ```
+
+The first six are read-only and safe to run at any time. **`verify_e2e.py` is the only one
+that creates anything**, and it creates a database of its own and drops it again — see §4.
+It needs a login with `CREATE DATABASE` authority; it refuses to run if
+`[verify] verify_database` resolves to the `[database]` target, and it exits non-zero when
+anything it checks fails. It is currently **red on two known app bugs** (§7), so treat a
+non-zero exit as "something to look at", not "the harness is broken".
 
 Exit code 0 = pass. `check_schema_sync.py` compares the 20 tables that migrations 013-018
 `CREATE` (by column, type, and nullability), the columns and primary key that 019, 020 and
@@ -377,16 +405,46 @@ and when the §2 file map drifts from the repo.
 001-025 are all applied to the developer's live database. 001-018 were verified end-to-end
 (book → check out with credit → cancel, plus the declined-card and full-refund paths).
 019-021 were verified read-only against the catalog, and the flows they back have never been
-run against a live database — see `docs/BOOKING.md` §6. 022-025 were verified by
-`check_applied_migrations.py` — column shape, the seeded `business_date`, the recalibrated
-accrual, the deleted expiry row, and both date reports running — but the database had **no
-reservations in it**, so the 022 backfill had nothing to do and the captured-rate read path
-has still never seen a real row. `tests/seed_smoke_test.sql` exists for exactly that.
-Running it against the live database is still the agent's job to refuse; running it
-against a scratch one is what `tests/verify_e2e.py` is meant to do (see §4), and until
-that script exists this gap is open rather than closed.
+run against a live database — see `docs/BOOKING.md` §6.
 
-`database.sql` was audited against the live catalog in October 2026 and the two now agree
+`tests/verify_e2e.py` closes most of that gap and is the check to run before trusting any of
+it. As of 2 October 2026 it establishes, on a disposable database:
+
+- `database.sql` builds all 28 tables from an empty server, with no errors.
+- All 25 migrations execute in order against a real server — the first automated execution
+  of 019-021's T-SQL ever.
+- All 25 migrations execute a **second** time without error, so the re-runnability §4
+  requires is now measured rather than asserted.
+- The 022 backfill populates `NightlyRate` on a row that genuinely lacked one (it had never
+  been run against a row before), and the captured-rate read path reads a real non-NULL
+  value.
+- `database.sql` matches the live catalog column-for-column, apart from the one documented
+  `GuestRequests` difference.
+
+It is **red on two application bugs**, both confirmed against a real server and both
+invisible to every other check in §6:
+
+1. **`post_room_charge()` double-charges.** The once-only guard selects on
+   `Description = f"Room charge for {check_in}"` but the `INSERT` writes
+   `f"{marker} - {room_type}"`. The two strings are never equal, so the guard can never match
+   its own row and a retried check-out posts the room charge a second time. The docstring's
+   claim that it is "Idempotent on `Transactions.Description = 'Room charge for {check_in}'`"
+   is false. `main.py:3459-3479`.
+2. **`main.get_connection()` swallows every database error.** It catches, logs, and re-yields
+   (§5), so the real exception is replaced by `RuntimeError: generator didn't stop after
+   throw()`. A concrete consequence: when the booking-reference unique index rejects a
+   duplicate, `record_booking_payment()` cannot see the `IntegrityError`, so
+   `_is_duplicate_key_error()` returns `False`, `BookingRefTaken` is never raised, and the
+   function returns `None` — a caller cannot tell a taken reference from any other failed
+   write. `main.py:141-161`.
+
+Both predate this harness. They survived because nothing had ever executed the code they sit
+in, which is the same reason 019 died three times: a static check on text cannot see whether
+a statement parses, and a catalog comparison cannot see whether a function works.
+
+**Do not "fix" `verify_e2e.py` by loosening those two assertions.** They are the finding.
+
+`database.sql` was audited against the live catalog in October 2026 and the two agree
 on every table, column, type, nullability, primary key, UNIQUE index, CHECK constraint,
 DEFAULT constraint, foreign key and secondary index — with one deliberate exception:
 `GuestRequests` exists in `database.sql` and not on the live database, because it is the
@@ -396,4 +454,16 @@ dead table §3 says not to wire up. That audit fixed a `Transactions.ChargeGroup
 corrections went into `database.sql` **only**, because the live database already had all of
 them and no migration was needed; `database.sql` and `migrations/` therefore differ on
 CHECK/DEFAULT/index surface from here on, and `database.sql` is the reference for fresh
-installs. Re-run the comparison before trusting either file.
+installs.
+
+**That audit's conclusion was wrong, and the way it was wrong is the lesson.** A catalog
+comparison checks that an object *exists* and has the right shape. It cannot check that the
+statement which creates it *parses*, and it cannot check that the file applies in order. So
+the October audit passed a `database.sql` that could not build a database at all: a filtered
+index written with `OR` in its `WHERE` (`Msg 156`), and a second block re-defaulting six
+columns the file had already defaulted (`Msg 1781`). A third defect sat behind them — two
+defaults declared unnamed where `migrations/003` adds the same two under names and guards on
+those names, so the guard missed and collided. All three were invisible to the comparison and
+to `check_migration_sql.py`, and all three are now fixed in `database.sql` (no migration
+needed; the live database already had the correct form of each). `verify_e2e.py` Phase 1 and
+Phase 4 are what catch this class, which is why they exist rather than a fourth static check.

@@ -150,8 +150,14 @@ CREATE TABLE [dbo].[Reservations](
 	[LastName] [nvarchar](50) NULL,
 	[FirstName] [varchar](50) NULL,
 	[Floor] [int] NULL,
-	[CheckInDate] [date] NOT NULL DEFAULT (CAST(GETDATE() AS DATE)),
-	[CheckOutDate] [date] NOT NULL DEFAULT (CAST(DATEADD(DAY, 1, GETDATE()) AS DATE)),
+	-- These two defaults are NAMED on purpose, unlike most of the defaults in this file.
+	-- migrations/003_reservations.sql adds them under these names and guards on those
+	-- names, so an unnamed declaration here would make 003's guard miss an existing
+	-- constraint and then collide with it (Msg 1781, "Column already has a DEFAULT bound
+	-- to it") the moment that file ran against a fresh install. The live database carries
+	-- exactly these names for the same reason.
+	[CheckInDate] [date] NOT NULL CONSTRAINT [DF_Reservations_CheckInDate] DEFAULT (CAST(GETDATE() AS DATE)),
+	[CheckOutDate] [date] NOT NULL CONSTRAINT [DF_Reservations_CheckOutDate] DEFAULT (CAST(DATEADD(DAY, 1, GETDATE()) AS DATE)),
 	-- The guest who owns this stay (migration 019), which is what the loyalty award and
 	-- the booking-ownership check resolve. NULL is legal and expected: front-desk
 	-- bookings have no online account, and pre-019 reservations predate the column.
@@ -746,7 +752,13 @@ GO
 -- Migration 021: one booking per reference, enforced by the database. Filtered to the two
 -- kinds that appear once per booking, because a cancellation writes a second row carrying
 -- the SAME reference. See migrations/021_booking_ref_uniqueness.sql.
-CREATE UNIQUE INDEX [UX_ReservationPayments_BookingRef_Charge] ON [dbo].[ReservationPayments] ([BookingRef]) WHERE ([Kind]='Deposit' OR [Kind]='Prepayment')
+-- The filter uses IN rather than `([Kind]='Deposit' OR [Kind]='Prepayment')`: SQL Server
+-- rejects an OR between two equality predicates in a filtered index's WHERE clause with
+-- Msg 156, "Incorrect syntax near the keyword 'OR'". migrations/021 writes the same index
+-- in this IN form, which is why an upgraded database has it and a fresh install once did
+-- not -- nothing caught the difference because the live catalog comparison in AGENTS.md
+-- section 7 sees the finished index, not whether this statement parses.
+CREATE UNIQUE INDEX [UX_ReservationPayments_BookingRef_Charge] ON [dbo].[ReservationPayments] ([BookingRef]) WHERE [Kind] IN ('Deposit', 'Prepayment')
 GO
 /****** Migration 014: historical stays for re-booked rooms ******/
 CREATE INDEX [IX_Reservations_CheckOutDate] ON [dbo].[Reservations] ([CheckOutDate])
@@ -785,20 +797,20 @@ GO
 -- the same name here that it finds there.
 ALTER TABLE [dbo].[ValetVehicles]  WITH CHECK ADD  CONSTRAINT [CK__ValetVehi__Statu__0F624AF8] CHECK  (([Status]='Checked-Out' OR [Status]='Checked-In'))
 GO
--- Column defaults the migrations added but this file never declared. Rooms.Status matters
--- most: the room dashboard and housekeeping report key on 'Available', so without this a
--- row inserted by anything other than upsert_room_if_missing() has a NULL status.
-ALTER TABLE [dbo].[Discounts] ADD  CONSTRAINT [DF_Discounts_CreatedAt] DEFAULT (getdate()) FOR [CreatedAt]
-GO
-ALTER TABLE [dbo].[LoyaltyAccounts] ADD  CONSTRAINT [DF_LoyaltyAccounts_Points] DEFAULT ((0)) FOR [Points]
-GO
-ALTER TABLE [dbo].[LoyaltyTransactions] ADD  CONSTRAINT [DF_LoyaltyTransactions_CreatedAt] DEFAULT (getdate()) FOR [CreatedAt]
-GO
-ALTER TABLE [dbo].[Rooms] ADD  CONSTRAINT [DF_Rooms_Status] DEFAULT ('Available') FOR [Status]
-GO
-ALTER TABLE [dbo].[Users] ADD  CONSTRAINT [DF_Users_FailedAttempts] DEFAULT ((0)) FOR [FailedAttempts]
-GO
-ALTER TABLE [dbo].[ValetVehicles] ADD  CONSTRAINT [DF_ValetVehicles_CheckInTime] DEFAULT (getdate()) FOR [CheckInTime]
+-- Column defaults are NOT repeated here. Rooms.Status matters most: the room dashboard and
+-- housekeeping report key on 'Available', so without it a row inserted by anything other
+-- than upsert_room_if_missing() has a NULL status. All six -- Discounts.CreatedAt,
+-- LoyaltyAccounts.Points, LoyaltyTransactions.CreatedAt, Rooms.Status,
+-- Users.FailedAttempts and ValetVehicles.CheckInTime -- are already declared by the
+-- unnamed `ALTER TABLE ... ADD DEFAULT ... FOR` statements near the top of this file.
+--
+-- They are declared there UNNAMED on purpose. That is how the migrations created them, so
+-- the live database carries SQL Server's generated names (DF__Discounts__Creat__49C3F6B7,
+-- DF__Rooms__Status__75A278F5, ...) rather than readable ones. A second block here used to
+-- add the same six defaults again under hand-written names; SQL Server rejected that with
+-- Msg 1781, "Column already has a DEFAULT bound to it", so a fresh install died partway
+-- through. Looking a constraint up by a name it was never given is the trap AGENTS.md
+-- section 4 warns about for primary keys, and it applies to defaults too.
 GO
 -- Secondary indexes. Every one of these backs a query the app makes on a screen a user is
 -- looking at, so they are correctness-adjacent rather than optional tuning.
