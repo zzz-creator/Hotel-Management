@@ -420,10 +420,9 @@ The assertion was proven able to fail before being trusted, by restoring the exa
 scenarios, reporting `room charges=2`, `invoices=2`, `invoiced total=502.85` where an
 uninterrupted run gives `276.85`.
 
-One thing the resumability scenarios deliberately do **not** cover is point redemption. The
-scenarios answer "no" to it, because redemption is interactive and has a defect of its own —
-see [DEVIATIONS.md §9](DEVIATIONS.md). Folding it in would have mixed two problems into one
-result.
+Point redemption is deliberately **not** covered here, though Phase 5c covers it separately.
+Answering "no" keeps the resumability scenarios about one property; mixing redemption in
+would fold two problems into a single result, and a failure would not say which one broke.
 
 The one thing it still does **not** touch is **the live database**, for the reason above.
 
@@ -488,9 +487,19 @@ Still unexercised, and not claimed otherwise: the interactive booking wizard and
 screens (the harness calls the functions they delegate to, not the `rich` flows), and any
 concurrency behaviour.
 
-The declined-card path needs a precise note, because it was run once and the result was a
-finding rather than a pass. A declined card *on its own* is safe — `bill_room_transactions()`
-returns `False` having written nothing, and re-running it re-reads the same unbilled rows.
-What is not safe is a declined card **after a point redemption**, which burns the guest's
-points with nothing billed; see DEVIATIONS.md §9. There is no permanent assertion for that
-path, because a permanent assertion would be a permanent failure.
+### A redemption cannot outlive the payment it was given for
+
+The declined-card path has its own phase (Phase 5c) and it exists because running it once
+produced a **finding**, not a pass. Redemption used to commit before the card prompt, so a
+declined card cost the guest their points with nothing billed in exchange — and because that
+was the only loyalty mutation in the app with no `SourceID`, nothing in the ledger identified
+the loss. Measured, before the fix: `points before=2600 after=2100 | redemption ledger rows=1
+| invoices=0`.
+
+Redemption now records only the *intent* at the prompt; the deduction happens in the same
+transaction that inserts the invoice, alongside `apply_booking_credit()`, which was already
+doing exactly this for the booking credit. Phase 5c now asserts all three outcomes — a
+declined card leaves the balance and the ledger untouched, a settled redemption deducts
+exactly once with a `SourceID` and an agreeing invoice, and a repeat run takes nothing
+further. Those assertions were proven red against the old code, which reported
+`2600 -> 2100, with nothing billed`. See [DEVIATIONS.md §9](DEVIATIONS.md).

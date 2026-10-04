@@ -914,6 +914,7 @@ def phase_exercise(server, scratch, user, password):
 
     # --- what a mid-settlement failure leaves behind ---------------------------------
     phase_settlement_faults(app, biz)
+    phase_redemption_safety(app, biz)
 
     app._RESERVATIONS_CAPTURED_RATE_SUPPORT = None
 
@@ -989,7 +990,7 @@ def arm_step(app, name):
     return probe
 
 
-def _prompt_script(room, last, first):
+def _prompt_script(room, last, first, redeem='n', points=0, card=FIXTURE_CARD):
     """Answer check-out's prompts by matching the prompt text, not by queue position.
 
     Matching on text means the script survives a reordering of the prompts, and -- the
@@ -1010,15 +1011,15 @@ def _prompt_script(room, last, first):
         if 'room number' in lowered:
             return str(room)
         if 'redeem points' in lowered:
-            return 'n'
+            return redeem
         if 'number of points' in lowered:
-            return '0'
+            return str(points)
         if 'discount code' in lowered:
             # No promotional code, so the fixture's invoice total is plain rate + tax and
             # two scenarios cannot diverge because one of them matched a seeded Discounts row.
             return 'n'
         if 'credit card number' in lowered:
-            return FIXTURE_CARD
+            return card
         if 'expiration' in lowered:
             return FIXTURE_EXPIRY
         if 'cvv' in lowered:
@@ -1029,14 +1030,14 @@ def _prompt_script(room, last, first):
     return answer, unexpected
 
 
-def _run_check_out(app, room, last, first):
+def _run_check_out(app, room, last, first, **script):
     """Drive the real check_out() with scripted answers and a silenced console.
 
     Returns the prompts it did not recognise. check_out() returns None on every path,
     success included, so the caller judges the outcome from database state -- which is
     the only thing that can tell an interrupted settlement from a finished one.
     """
-    answer, unexpected = _prompt_script(room, last, first)
+    answer, unexpected = _prompt_script(room, last, first, **script)
     sink = io.StringIO()
     root = logging.getLogger()
     previous = root.level
@@ -1253,6 +1254,140 @@ def phase_settlement_faults(app, base_date):
                  '               after retry:  %s\n'
                  '               uninterrupted: %s'
                  % (step, _describe(interrupted), _describe(final), _describe(baseline)))
+
+
+def _fixture_customer(room, last, first):
+    return one(conn_or_none(),
+               'SELECT CustomerID FROM CustomerProfiles WHERE LastName = ? AND FirstName = ?',
+               (last, first))
+
+
+def _loyalty_reading(room, last, first):
+    """The three things a redemption is allowed to change, and nothing else."""
+    conn = conn_or_none()
+    cid = _fixture_customer(room, last, first)
+    return {
+        'points': int(one(conn, 'SELECT Points FROM LoyaltyAccounts WHERE CustomerID = ?',
+                           (cid,)) or 0),
+        'redemption rows': int(one(conn, "SELECT COUNT(*) FROM LoyaltyTransactions "
+                                         "WHERE CustomerID = ? AND Reason = 'checkout'", (cid,)) or 0),
+        'invoices': int(one(conn, 'SELECT COUNT(*) FROM Invoices WHERE RoomNumber = ?',
+                            (room,)) or 0),
+    }
+
+
+def phase_redemption_safety(app, base_date):
+    """A redemption must not outlive the payment it was given for.
+
+    Redemption used to commit before the card prompt, so a declined card cost the guest
+    their points with nothing billed in exchange and no ledger row identifying the loss --
+    `SourceID` was NULL. This drives the real check-out through both outcomes.
+    """
+    head('Phase 5c  a redemption cannot outlive the payment it was given for')
+
+    check_in = base_date
+    check_out = base_date + timedelta(days=2)
+    last, first = 'Redemption', 'Safety'
+    redeem = 500
+
+    room = str(one(conn_or_none(),
+                   'SELECT TOP 1 r.RoomNumber FROM Rooms r '
+                   'WHERE NOT EXISTS (SELECT 1 FROM Reservations x WHERE x.RoomNumber = r.RoomNumber) '
+                   'AND NOT EXISTS (SELECT 1 FROM Transactions t WHERE t.RoomNumber = r.RoomNumber) '
+                   'AND NOT EXISTS (SELECT 1 FROM Invoices i WHERE i.RoomNumber = r.RoomNumber) '
+                   'AND NOT EXISTS (SELECT 1 FROM KeyCards k WHERE k.RoomNumber = r.RoomNumber) '
+                   'ORDER BY r.RoomNumber'))
+    if room is None:
+        info('every room is in use; skipped the redemption checks')
+        return
+    _reset_settlement_fixture(room, last, first, check_in, check_out)
+    start = _loyalty_reading(room, last, first)
+    info('redemption fixture room %s, starting at %s points' % (room, start['points']))
+
+    # --- a declined card must cost the guest nothing -----------------------------------
+    # '1234' fails the Luhn check, so process_credit_card() returns False.
+    unexpected = _run_check_out(app, room, last, first, redeem='y', points=redeem, card='1234')
+    after_decline = _loyalty_reading(room, last, first)
+
+    if unexpected:
+        fail('declined-card run asked something this harness does not answer: %r'
+             % unexpected[:3])
+    elif after_decline['invoices'] != 0:
+        # Guards the premise: had the card gone through, this scenario would have been
+        # asserting nothing about a declined card at all.
+        fail('the premise failed -- the card was accepted (%d invoice(s) written), so this '
+             'scenario never exercised a decline' % after_decline['invoices'])
+    elif after_decline['points'] != start['points']:
+        fail('a declined card took the guest\'s points: %s -> %s, with nothing billed. '
+             'The guest owes the full bill AND has lost %s points.'
+             % (start['points'], after_decline['points'], start['points'] - after_decline['points']))
+    elif after_decline['redemption rows'] != 0:
+        fail('a declined card still wrote %d redemption ledger row(s)'
+             % after_decline['redemption rows'])
+    else:
+        ok('a declined card leaves the balance at %s points and writes no redemption row'
+           % after_decline['points'])
+
+    # --- a successful redemption deducts exactly once, and is traceable ----------------
+    unexpected = _run_check_out(app, room, last, first, redeem='y', points=redeem)
+    after_paid = _loyalty_reading(room, last, first)
+    conn = conn_or_none()
+    cid = _fixture_customer(room, last, first)
+    sourceless = int(one(conn, 'SELECT COUNT(*) FROM LoyaltyTransactions WHERE CustomerID = ? '
+                               "AND Reason = 'checkout' AND (SourceID IS NULL OR SourceID = '')",
+                        (cid,)) or 0)
+    redemption_delta = int(one(conn, "SELECT COALESCE(SUM(Delta), 0) FROM LoyaltyTransactions "
+                                     "WHERE CustomerID = ? AND Reason = 'checkout'", (cid,)) or 0)
+    # Check-out grants the stay award and the order award once payment lands, so the balance
+    # is not simply "opening minus the redemption". Assert the invariant that actually holds
+    # and covers all three at once: every point the guest now holds is accounted for by a
+    # ledger row written during this scenario. The fixture's own seeded history is excluded
+    # by its SourceID, since it is already baked into the opening balance.
+    ledger_delta = int(one(conn, "SELECT COALESCE(SUM(Delta), 0) FROM LoyaltyTransactions "
+                                 "WHERE CustomerID = ? AND (SourceID IS NULL OR "
+                                 "SourceID NOT LIKE 'fixture:%')", (cid,)) or 0)
+    recorded = one(conn, 'SELECT MAX(PointsRedeemed) FROM Invoices WHERE RoomNumber = ?', (room,))
+
+    if unexpected:
+        fail('successful-redemption run asked something this harness does not answer: %r'
+             % unexpected[:3])
+    elif redemption_delta != -redeem:
+        fail('the redemption ledger row should total %d, found %d'
+             % (-redeem, redemption_delta))
+    elif after_paid['points'] != start['points'] + ledger_delta:
+        fail('the balance is not explained by the ledger: the guest holds %s, but the '
+             'opening %s plus this scenario\'s ledger rows (%+d) is %s. A balance that '
+             'ledger does not explain means a mutation happened outside it.'
+             % (after_paid['points'], start['points'], ledger_delta,
+                start['points'] + ledger_delta))
+    elif after_paid['redemption rows'] != 1:
+        fail('expected exactly 1 redemption ledger row, found %s'
+             % after_paid['redemption rows'])
+    elif sourceless:
+        fail('%d redemption ledger row(s) carry no SourceID, so the loss could not be '
+             'traced or the charge detected as already made' % sourceless)
+    elif recorded is None or int(recorded) != redeem:
+        fail('the invoice records PointsRedeemed=%r, expected %s -- the invoice and the '
+             'balance disagree' % (recorded, redeem))
+    else:
+        ok('a settled redemption deducts %s points once with a SourceID, the invoice agrees, '
+           'and the balance matches the ledger (%+d across redemption, stay and order awards)'
+           % (redeem, ledger_delta))
+
+    # --- and a second pass cannot take them twice --------------------------------------
+    unexpected = _run_check_out(app, room, last, first, redeem='y', points=redeem)
+    after_second = _loyalty_reading(room, last, first)
+    if unexpected:
+        fail('repeat run asked something this harness does not answer: %r' % unexpected[:3])
+    elif after_second['points'] != after_paid['points']:
+        fail('re-running check-out took the points a second time: %s -> %s'
+             % (after_paid['points'], after_second['points']))
+    elif after_second['redemption rows'] != after_paid['redemption rows']:
+        fail('re-running check-out wrote another redemption ledger row (%s -> %s)'
+             % (after_paid['redemption rows'], after_second['redemption rows']))
+    else:
+        ok('re-running check-out takes the points no further (%s points, %s redemption row(s))'
+           % (after_second['points'], after_second['redemption rows']))
 
 
 # ------------------------------------------------------------------ main

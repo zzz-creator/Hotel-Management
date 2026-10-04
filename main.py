@@ -934,6 +934,60 @@ def redeem_points_by_customer(customer_id, points, reason='redeem', room_number=
             return False
 
 
+class LoyaltyRedemptionError(Exception):
+    """A point redemption cannot be honoured, so the bill that promised it cannot stand.
+
+    Raised rather than returned as False because the invoice records the discount it
+    applied. A False here would let that invoice commit claiming a discount nobody took,
+    which is a silent revenue leak; raising rolls the invoice back, leaving the guest
+    unbilled so the attempt can simply be repeated. See docs/DEVIATIONS.md 9.
+    """
+
+
+def redeem_points_for_invoice(customer_id, points, room_number, reason, conn,
+                             source_id=None):
+    """Deduct redeemed points inside the caller's transaction, beside its invoice insert.
+
+    The invoice snapshots the discount it granted (`PointsRedeemed`/`RedemptionValue`), so
+    that claim and the guest's balance have to land together or not at all. This is the
+    same reason `apply_booking_credit()` runs where it does. Redemption used to be committed
+    up front instead, which meant a declined card cost the guest their points with nothing
+    billed in exchange and no way to detect the loss afterwards -- `SourceID` was NULL, so
+    nothing in the ledger identified the transaction.
+
+    `source_id` makes the deduction self-checking, following the convention
+    `award_stay_points()` uses for its own idempotency guard.
+
+    Does not commit: the caller owns the transaction and must not commit a partial bill.
+    """
+    if points <= 0 or not customer_id:
+        return False
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT ISNULL(Points, 0) FROM LoyaltyAccounts WHERE CustomerID = ?", (customer_id,))
+    row = cursor.fetchone()
+    balance = int(row[0]) if row and row[0] is not None else 0
+    if balance < points:
+        raise LoyaltyRedemptionError(
+            f"cannot redeem {points} points from customer {customer_id}: balance is {balance}")
+    if source_id:
+        cursor.execute(
+            "SELECT 1 FROM LoyaltyTransactions WHERE CustomerID = ? AND SourceID = ?",
+            (customer_id, source_id))
+        if cursor.fetchone():
+            logging.info(f"Points already redeemed under {source_id}; not deducting twice.")
+            return False
+    cursor.execute(
+        "UPDATE LoyaltyAccounts SET Points = Points - ?, LastUpdated = ? WHERE CustomerID = ?",
+        (points, datetime.now(), customer_id))
+    cursor.execute(
+        "INSERT INTO LoyaltyTransactions (CustomerID, RoomNumber, Delta, Reason, SourceID) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (customer_id, room_number, -points, reason, source_id))
+    logging.info(f"Redeemed {points} points from customer {customer_id} ({reason}).")
+    return True
+
+
 def get_lifetime_points_by_customer(customer_id) -> int:
     """Lifetime points ever earned by a customer (sum of positive ledger deltas)."""
     if not LOYALTY_ENABLED or not customer_id:
@@ -5647,6 +5701,7 @@ def bill_room_transactions(room_number, require_payment=True):
 
         points_redeemed = 0
         redemption_value = 0.0
+        redemption_customer_id = None
         amount_paid = 0.0
         total_before_redemption = 0.0
         discount_code_amount = 0.0
@@ -5723,12 +5778,19 @@ def bill_room_transactions(room_number, require_payment=True):
                                     pass
                                 logging.info("Invalid input. Please enter a valid integer.")
                             if pts > 0:
-                                if redeem_points_by_room(room_number, pts, reason='checkout'):
-                                    discount_value = pts / get_loyalty_redemption_points_per_currency_unit()
-                                    final_total -= discount_value
+                                # Record the INTENT only. The deduction happens in the
+                                # invoice transaction further down, beside the invoice insert.
+                                # Committing it here meant a declined card cost the guest
+                                # their points with nothing billed in exchange -- the defect
+                                # in docs/DEVIATIONS.md 9.
+                                redemption_customer_id = customer_id_for_stay(room_number)
+                                if redemption_customer_id is None:
+                                    logging.info("No loyalty profile for this stay, so points cannot be redeemed.")
+                                else:
+                                    redemption_value = pts / get_loyalty_redemption_points_per_currency_unit()
+                                    final_total -= redemption_value
                                     points_redeemed = pts
-                                    redemption_value = discount_value
-                                    logging.info(f"Redeemed {pts} points for ${discount_value:.2f} off. New total: ${final_total:.2f}")
+                                    logging.info(f"Redeeming {pts} points for ${redemption_value:.2f} off. New total: ${final_total:.2f}")
                 except Exception as e:
                     logging.error(f"Error during loyalty redemption: {e}")
 
@@ -5808,6 +5870,15 @@ def bill_room_transactions(room_number, require_payment=True):
                 # invoice leaves the credit available for the retry.
                 if has_prepaid and stay_check_in is not None and prepaid_applied > 0:
                     apply_booking_credit(room_number, stay_check_in, prepaid_applied, invoice_id, conn)
+                # Deduct the redeemed points in THIS transaction too, for the same reason the
+                # booking credit is applied here. The invoice above already claims this
+                # discount in PointsRedeemed/RedemptionValue, so the deduction has to land with
+                # it. Keyed on the invoice so a repeated redemption is detectable and a retry
+                # cannot take the points twice.
+                if points_redeemed > 0 and redemption_customer_id is not None:
+                    redeem_points_for_invoice(
+                        redemption_customer_id, points_redeemed, room_number, 'checkout', conn,
+                        source_id=f'redeem:{invoice_id}')
                 # Mark this bill's items billed and link them to the invoice (settled at check-out).
                 if tx_ids:
                     cursor.execute(

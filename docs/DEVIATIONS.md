@@ -156,35 +156,47 @@ has a plaintext fallback to the `master` account.
 
 ---
 
-## 9. A declined card after a point redemption burns the guest's points
+## 9. A declined card after a point redemption — fixed 4 October 2026
 
-**Where:** `bill_room_transactions()` — redemption at `main.py:5726`, card prompt at
-`main.py:5756`. **Severity:** real defect, money. Not yet fixed.
+**Where:** `bill_room_transactions()` — redemption now at `main.py:5786`, deduction inside
+the invoice transaction at `main.py:5874`. `redeem_points_for_invoice()` is the new helper.
+**Severity:** was a real money defect. Fixed.
 
-Two facts combine badly. `redeem_points_by_customer()` (`main.py:912`) commits immediately
-and is the **only** loyalty mutation in the app with **no `SourceID`** — so it has no
-idempotency guard and no way to be detected or reversed after the fact. And the redemption is
-*not* part of the transaction that writes the invoice: it runs before the card prompt, and the
-card prompt is a blocking `input()` that cannot sit inside a transaction.
+Two facts combined badly. `redeem_points_by_customer()` committed immediately and was the
+**only** loyalty mutation in the app with **no `SourceID`** — so it had no idempotency guard
+and no way to be detected or reversed after the fact. And the redemption was *not* part of
+the transaction that writes the invoice: it ran before the card prompt, and the card prompt
+is a blocking `input()` that cannot sit inside a transaction.
 
-So the sequence is: guest redeems 500 points → the balance drops and a `LoyaltyTransactions`
-row is committed → the card declines → `bill_room_transactions()` returns `False` having
-written nothing. The guest has lost the points and still owes the entire bill. Re-running
-check-out does not recover them, because the balance is already reduced.
+So the sequence was: guest redeems 500 points → the balance drops and a
+`LoyaltyTransactions` row is committed → the card declines → `bill_room_transactions()`
+returns `False` having written nothing. The guest had lost the points and still owed the
+entire bill. Re-running check-out did not recover them, because the balance was already
+reduced.
 
-**Measured, not inferred.** A probe against a disposable database — driving the real
-`check_out()` with a redemption of 500 points and a card that fails the Luhn check — reported
-`points before=2600 after=2100 | redemption ledger rows=1 | invoices=0`. The probe was removed
-after confirming the defect, because a permanent assertion here would be a permanent failure.
-`verify_e2e.py` Phase 5b answers "no" to the redemption prompt for the same reason.
+**Measured before the fix, not inferred.** A probe against a disposable database — driving
+the real `check_out()` with a redemption of 500 points and a card that fails the Luhn check
+— reported `points before=2600 after=2100 | redemption ledger rows=1 | invoices=0`.
 
-**Fix:** defer the redemption until payment has succeeded, and apply it in the **same
-transaction that writes the invoice** — the pattern `apply_booking_credit()` already uses at
-`main.py:5810` for exactly this reason ("consume the credit in this same transaction, so a
-rolled-back invoice leaves the credit available for the retry"). The redemption prompt can stay
-where it is; only the deduction moves. It should also gain a `SourceID`, so a retry is
-detectable even after the fact.
+**Fixed by deferring the deduction.** The prompt still happens where it did, but it now only
+records the *intent*; the points come off in the same transaction that inserts the invoice,
+which is exactly what `apply_booking_credit()` (`main.py:5810`) already did for the same
+reason. The deduction carries `SourceID = 'redeem:{invoice_id}'`, so it is self-checking in
+the same way as `award_stay_points()`'s guard, and a repeat is detectable rather than
+silent.
 
-Do **not** fix this by moving the card prompt inside a transaction, or by removing the
-declined-card retry — see [BOOKING.md §6](BOOKING.md) on why the room charge posts before
-payment on purpose.
+`redeem_points_for_invoice()` **raises** `LoyaltyRedemptionError` rather than returning
+`False` when the balance will not cover the redemption. This is deliberate and is the one
+place the two patterns differ: `apply_booking_credit()` logs and returns 0, but the invoice
+snapshot here *claims* the discount in `PointsRedeemed`/`RedemptionValue`. A silent `False`
+would let that claim commit against a balance nobody reduced. Raising rolls the invoice back,
+leaving the guest unbilled and uncharged so the attempt can be repeated.
+
+`verify_e2e.py` Phase 5c covers all three outcomes — a declined card leaving the balance and
+the ledger untouched, a settled redemption deducting exactly once with a `SourceID` and an
+agreeing invoice, and a repeat run taking nothing further. The assertions were proven red
+against the old code first, which reported `2600 -> 2100, with nothing billed`.
+
+Do **not** "fix" this differently by moving the card prompt inside a transaction, or by
+removing the declined-card retry — see [BOOKING.md §6](BOOKING.md) on why the room charge
+posts before payment on purpose.

@@ -441,7 +441,12 @@ it. As of 2 October 2026 it establishes, on a disposable database:
   reaches. All five steps already satisfy this; the point is that it is now measured. Do
   **not** "fix" this by making check-out atomic — settlement prompts for card details, and
   the room charge posts before payment *so a declined card can be retried*. See
-  `docs/BOOKING.md` §6 and `docs/DEVIATIONS.md` §9.
+  `docs/BOOKING.md` §6.
+- **Redemption safety** (Phase 5c): a declined card leaves the guest's balance and loyalty
+  ledger untouched. Redemption used to commit before the card prompt, so a declined card
+  burned the points with nothing billed, and it was the only loyalty mutation with no
+  `SourceID`, so the loss was untraceable. The deduction now runs inside the invoice's
+  transaction, keyed `redeem:{invoice_id}`.
 
 Two rules for anyone extending Phase 5b, both learned the hard way:
 
