@@ -6170,6 +6170,99 @@ def print_my_invoice():
         print_invoice(int(raw))
 
 
+def settlement_outstanding(room_number, check_in=None, check_out=None, customer_id=None):
+    """What still has to happen before this stay's settlement counts as finished.
+
+    Derived from the database rather than remembered, because the process that failed is
+    gone by the time anyone asks: a guest who has already walked out leaves nothing in
+    memory to interrogate, and that is exactly the case where a live key card matters.
+    Ordered the way `check_out()` runs its steps, so the result reads as remaining work
+    rather than as a list of symptoms.
+
+    Conservative on purpose. Every entry must be a fact that is unambiguously wrong for a
+    finished settlement -- a predicate that cries wolf on healthy rooms is one nobody
+    reads. Each check is therefore guarded by the thing that makes it meaningful: the
+    stay-points check needs loyalty enabled and a real customer, and the invoice check only
+    fires when there is nothing at all to have billed against.
+
+    Returns a list of short human-readable strings; empty means the settlement looks done.
+    """
+    outstanding = []
+    if not room_number:
+        return outstanding
+    try:
+        with get_connection() as conn:
+            if conn is None:
+                return outstanding
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) FROM Transactions WHERE RoomNumber = ? AND IsBilled = 0",
+                (room_number,))
+            unbilled = int(cursor.fetchone()[0] or 0)
+            cursor.execute("SELECT COUNT(*) FROM Invoices WHERE RoomNumber = ?", (room_number,))
+            invoices = int(cursor.fetchone()[0] or 0)
+            cursor.execute(
+                "SELECT COUNT(*) FROM KeyCards WHERE RoomNumber = ? AND Status = 'Active'",
+                (room_number,))
+            live_cards = int(cursor.fetchone()[0] or 0)
+            cursor.execute("SELECT Status FROM Rooms WHERE RoomNumber = ?", (room_number,))
+            row = cursor.fetchone()
+            room_status = row[0] if row else None
+
+            stay_awarded = None
+            if LOYALTY_ENABLED and customer_id and check_in and check_out:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM LoyaltyTransactions WHERE CustomerID = ? "
+                    "AND SourceID = ?",
+                    (customer_id, f"stay:{customer_id}:{room_number}:{check_in}"))
+                stay_awarded = int(cursor.fetchone()[0] or 0)
+    except Exception as e:
+        logging.error(f"Error reading settlement state for room {room_number}: {e}")
+        return outstanding
+
+    if invoices == 0:
+        outstanding.append("no invoice was ever issued, so the bill was never settled")
+    if unbilled:
+        outstanding.append(f"{unbilled} charge(s) are still unbilled")
+    if live_cards:
+        outstanding.append(f"{live_cards} key card(s) are still active -- the guest can "
+                           f"still open the door")
+    if room_status == "Occupied":
+        outstanding.append("the room is still flagged Occupied, so housekeeping has not "
+                           "been told")
+    if stay_awarded == 0:
+        outstanding.append("stay points have not been awarded for this stay")
+    return outstanding
+
+
+def announce_settlement_outstanding(room_number, reservation=None):
+    """Tell the clerk exactly what a re-run of check-out still has to do.
+
+    `check_out()` used to report a failed settlement only as the exception that caused it,
+    which named the error and nothing about the state it left behind. The clerk was left to
+    infer whether the guest was still in the room, still holding a working key card, and
+    still owed money -- and `check_out()` returns None on success and on failure alike, so
+    nothing downstream could tell them apart either.
+    """
+    try:
+        items = settlement_outstanding(
+            room_number,
+            getattr(reservation, "CheckInDate", None),
+            getattr(reservation, "CheckOutDate", None),
+            getattr(reservation, "CustomerID", None))
+    except Exception as e:
+        logging.debug(f"Could not report outstanding settlement work for {room_number}: {e}")
+        return
+    if not items:
+        logging.info("Nothing is outstanding for this room -- the settlement looks complete.")
+        return
+    logging.info("This check-out did NOT finish. Still to do:")
+    for n, item in enumerate(items, 1):
+        logging.info(f"  {n}. {item}")
+    logging.info("Run check-out again for this room to finish it; the steps already done are "
+                 "not repeated.")
+
+
 def check_out():
     """Handle customer check-out without deleting the reservation.
 
@@ -6185,6 +6278,7 @@ def check_out():
         logging.info("Could not verify your last name, first name, and room number, so "
                      "check-out cannot continue. Please ask the front desk for assistance.")
         return
+    matched_reservation = None
     try:
         with get_connection() as conn:
             if conn is None:
@@ -6231,8 +6325,13 @@ def check_out():
                 logging.info(f"Check-out complete for room {room_number}. Thanks for visiting, {first_name.capitalize()}! We hope to see you again soon!")
         else:
             logging.info("Payment declined. Please settle the bill before completing check-out.")
+            announce_settlement_outstanding(room_number, matched_reservation)
     except Exception as e:
         logging.error(f"Error during check-out: {e}")
+        # Name the state left behind, not just the error that caused it. A guest who has
+        # already walked out leaves no in-memory trace to ask, so this is the only place
+        # the residue is reported. See settlement_outstanding() above.
+        announce_settlement_outstanding(room_number, matched_reservation)
 
 
 def open_order(room_number):

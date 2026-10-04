@@ -497,6 +497,30 @@ Still unexercised, and not claimed otherwise: the interactive booking wizard and
 screens (the harness calls the functions they delegate to, not the `rich` flows), and any
 concurrency behaviour.
 
+### A failed check-out now says what is left to do
+
+Phase 5e injects a failure at each of `check_out()`'s five steps and measures the residue,
+because until now nothing reported it. `check_out()` returned `None` on success and on
+failure alike and logged only the exception, so a clerk had to infer whether the guest was
+still in the room, still holding a working key card, and still owed money.
+
+`settlement_outstanding()` derives that from the rows rather than from memory — the failed
+process is gone, so there is nothing in memory to ask — and `announce_settlement_outstanding()`
+prints it on both failure paths. The sharpest residue is a failure at
+`revoke_active_key_cards()`, which leaves a guest who has already paid holding a working key
+card to a room the system still shows as occupied.
+
+An advisory review proposed reordering the steps so key revocation and room status happen
+*before* payment. **That was not applied**, and the reason is worth keeping: it trades this
+residue for a worse one. Revoking first means a declined card leaves a guest who has not paid,
+is still in the room, and cannot open their own door. No ordering of five non-atomic steps
+leaves nothing behind, so the choice is which residue you would rather be *told* about.
+See [DEVIATIONS.md §10](DEVIATIONS.md).
+
+Phase 5e asserts the negative direction too, and that half matters more: a **completed**
+check-out reports nothing outstanding. A signal that fires on healthy rooms teaches staff to
+ignore it.
+
 ### A redemption cannot outlive the payment it was given for
 
 The declined-card path has its own phase (Phase 5c) and it exists because running it once

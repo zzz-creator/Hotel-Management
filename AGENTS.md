@@ -447,6 +447,16 @@ it. As of 2 October 2026 it establishes, on a disposable database:
   burned the points with nothing billed, and it was the only loyalty mutation with no
   `SourceID`, so the loss was untraceable. The deduction now runs inside the invoice's
   transaction, keyed `redeem:{invoice_id}`.
+- **Rollback safety** (Phase 5d): connections are autocommit-off, an exception inside a
+  `with get_connection()` block discards the uncommitted write, and a committed write
+  survives the close. The autocommit assertion is first because it is the precondition for
+  the other two.
+- **Outstanding-settlement signalling** (Phase 5e): a failure at any of `check_out()`'s five
+  steps must print what is left undone, name each item, and go quiet once a retry completes.
+  Both directions are asserted — the "goes quiet" half matters more, because a signal that
+  fires on healthy rooms teaches staff to ignore it. Asserting only the predicate was not
+  enough: a version that computes the answer and never prints it passed every check until
+  the console output itself was captured.
 
 Two rules for anyone extending Phase 5b, both learned the hard way:
 
@@ -504,8 +514,10 @@ Two rules that survive this fix, because both still look like cleanups and are n
   audit. A handler that returns to the menu turns today's fail-stop into a **retryable
   half-written folio** — the `post_room_charge` class of bug. That is a rollback-safety
   question, not an error-handling one. See the audit below: the per-function atomicity
-  story turned out to be sound, so this rule rests on *inter-procedure* sequencing, which
-  is still the unaudited part.
+  story turned out to be sound, so this rule rests on *inter-procedure* sequencing.
+  Phase 5e has since made the residue **visible** rather than prevented, which is a
+  compensating control and not a fix — so the rule survives, and the thing it was worried
+  about is at least now reported instead of silent.
 
 ### Rollback safety — audited 4 October 2026, and the standing worry was overstated
 

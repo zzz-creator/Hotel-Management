@@ -200,3 +200,60 @@ against the old code first, which reported `2600 -> 2100, with nothing billed`.
 Do **not** "fix" this differently by moving the card prompt inside a transaction, or by
 removing the declined-card retry — see [BOOKING.md §6](BOOKING.md) on why the room charge
 posts before payment on purpose.
+
+---
+
+## 10. A failed check-out leaves residue — now reported, not prevented
+
+**Where:** `check_out()` steps at `main.py:6308-6319`; `settlement_outstanding()` at
+`main.py:6177`, `announce_settlement_outstanding()` at `main.py:6238`.
+**Severity:** the residue was real and silent. Now reported. The *prevention* is still a
+deliberate non-goal — see below.
+
+Check-out is five separately-committing steps, not a transaction, because
+`bill_room_transactions()` prompts for card details and that prompt cannot sit inside a
+transaction. So a failure part-way through leaves a genuine half-finished stay. Until
+4 October 2026 nothing said so: `check_out()` returned `None` on success and on failure
+alike, and reported only the exception that caused the failure. A clerk was left to infer
+whether the guest was still in the room, still holding a working key card, and still owed
+money.
+
+**The residue is now enumerated rather than described.** Phase 5e injects a failure at each
+of the five steps and measures what is left, so this list is observed, not reasoned:
+
+| failure at | left behind |
+|---|---|
+| `post_room_charge` | no invoice; 2 unbilled charges; live key card; room still `Occupied`; no stay points |
+| `bill_room_transactions` | no invoice; 3 unbilled charges; live key card; room still `Occupied`; no stay points |
+| `set_room_status` | live key card; room still `Occupied`; no stay points |
+| `revoke_active_key_cards` | live key card; no stay points |
+| `award_stay_points` | no stay points |
+
+`settlement_outstanding()` derives this from the rows, not from memory, because the process
+that failed is gone by the time anyone asks — a guest who has already walked out leaves
+nothing to interrogate. `announce_settlement_outstanding()` prints it, and `check_out()`
+calls it on both failure paths.
+
+### Why the steps were not reordered instead
+
+An advisory review of this codebase proposed moving `revoke_active_key_cards()` and
+`set_room_status()` **before** payment, on the grounds that a failure after a successful
+card leaves a departed guest with live door access. That is a real defect, and it is the
+sharpest entry in the table above.
+
+The reorder was **not** applied, because it trades this residue for a worse one rather than
+removing it. `post_room_charge()` runs first *specifically* so a declined card can be
+retried (`main.py:6304-6307`); the same reasoning applies with more force to key revocation.
+Revoke first and a declined card leaves a guest who has not paid, is still in the room, and
+now cannot open their own door — with the bill still unsettled. There is no ordering of five
+non-atomic steps that leaves nothing behind; the only question is which residue you would
+rather be told about.
+
+That is the argument for reporting rather than reordering: **make the residue visible instead
+of choosing a different residue and hoping.** If you do revisit this, the ordering change is
+worth making *together with* a recovery path for whatever it leaves behind, not instead of
+one.
+
+Phase 5e also asserts the negative direction, which matters more than the positive one: a
+**completed** check-out reports nothing outstanding. A signal that fires on healthy rooms is
+worse than no signal, because it teaches staff to ignore it.

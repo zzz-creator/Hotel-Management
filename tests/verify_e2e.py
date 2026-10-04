@@ -916,6 +916,7 @@ def phase_exercise(server, scratch, user, password):
     phase_settlement_faults(app, biz)
     phase_redemption_safety(app, biz)
     phase_rollback_safety(app)
+    phase_outstanding_signal(app, biz)
 
     app._RESERVATIONS_CAPTURED_RATE_SUPPORT = None
 
@@ -1115,18 +1116,30 @@ def _prompt_script(room, last, first, redeem='n', points=0, card=FIXTURE_CARD):
     return answer, unexpected
 
 
-def _run_check_out(app, room, last, first, **script):
+def _run_check_out(app, room, last, first, capture=None, **script):
     """Drive the real check_out() with scripted answers and a silenced console.
 
     Returns the prompts it did not recognise. check_out() returns None on every path,
     success included, so the caller judges the outcome from database state -- which is
     the only thing that can tell an interrupted settlement from a finished one.
+
+    Pass a list as `capture` to also collect what the app printed. `logging` goes to a
+    handler rather than stdout, so capturing the *messages the clerk sees* means attaching
+    to the root logger and letting INFO through, not redirecting stdout.
     """
     answer, unexpected = _prompt_script(room, last, first, **script)
     sink = io.StringIO()
     root = logging.getLogger()
     previous = root.level
-    root.setLevel(logging.CRITICAL)
+    handler = None
+    if capture is None:
+        root.setLevel(logging.CRITICAL)
+    else:
+        handler = logging.StreamHandler(sink)
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(logging.Formatter('%(message)s'))
+        root.addHandler(handler)
+        root.setLevel(logging.INFO)
     had_input = hasattr(app, 'input')
     saved_input = getattr(app, 'input', None)
     app.input = answer
@@ -1140,7 +1153,11 @@ def _run_check_out(app, room, last, first, **script):
             # Back to the builtin: leaving a function in the module namespace would
             # outlive this scenario and silently answer every later prompt.
             del app.input
+        if handler is not None:
+            root.removeHandler(handler)
         root.setLevel(previous)
+    if capture is not None:
+        capture.append(sink.getvalue())
     return unexpected
 
 
@@ -1473,6 +1490,96 @@ def phase_redemption_safety(app, base_date):
     else:
         ok('re-running check-out takes the points no further (%s points, %s redemption row(s))'
            % (after_second['points'], after_second['redemption rows']))
+
+
+def phase_outstanding_signal(app, base_date):
+    """A failed settlement must say what is left, not just that it broke.
+
+    `check_out()` returned None on success and on failure alike and reported only the
+    exception, so a clerk had no way to learn that a guest had walked out still holding a
+    working key card. This runs every injection point again and requires that the predicate
+    named the residue each time, and that it went quiet once the retry completed.
+
+    The empty-after-retry half matters as much as the non-empty half: a predicate that
+    reports something outstanding on a finished settlement is worse than none, because it
+    teaches staff to ignore it.
+    """
+    head('Phase 5e  a failed settlement reports what is still outstanding')
+
+    check_in = base_date
+    check_out = base_date + timedelta(days=2)
+    last, first = 'Outstanding', 'Signal'
+
+    room = str(one(conn_or_none(),
+                   'SELECT TOP 1 r.RoomNumber FROM Rooms r '
+                   'WHERE NOT EXISTS (SELECT 1 FROM Reservations x WHERE x.RoomNumber = r.RoomNumber) '
+                   'AND NOT EXISTS (SELECT 1 FROM Transactions t WHERE t.RoomNumber = r.RoomNumber) '
+                   'AND NOT EXISTS (SELECT 1 FROM Invoices i WHERE i.RoomNumber = r.RoomNumber) '
+                   'AND NOT EXISTS (SELECT 1 FROM KeyCards k WHERE k.RoomNumber = r.RoomNumber) '
+                   'ORDER BY r.RoomNumber'))
+    if room is None:
+        info('every room is in use; skipped the outstanding-signal checks')
+        return
+    info('outstanding-signal fixture room %s' % room)
+
+    # A finished settlement must report nothing, or the whole feature is noise.
+    _reset_settlement_fixture(room, last, first, check_in, check_out)
+    _run_check_out(app, room, last, first)
+    residue = app.settlement_outstanding(room, check_in, check_out,
+                                         _fixture_customer(room, last, first))
+    if residue:
+        fail('a fully completed check-out still reports outstanding work: %s' % '; '.join(residue))
+    else:
+        ok('a completed check-out reports nothing outstanding (no crying wolf)')
+
+    for step in SETTLEMENT_STEPS:
+        _reset_settlement_fixture(room, last, first, check_in, check_out)
+        probe = arm_step(app, step)
+        shown = []
+        try:
+            _run_check_out(app, room, last, first, capture=shown)
+        finally:
+            probe['restore']()
+        if not probe['fired']:
+            fail('%s was never reached; the outstanding-signal scenario proved nothing' % step)
+            continue
+
+        spoken = shown[0] if shown else ''
+        interrupted = app.settlement_outstanding(room, check_in, check_out,
+                                                _fixture_customer(room, last, first))
+        _run_check_out(app, room, last, first)
+        after = app.settlement_outstanding(room, check_in, check_out,
+                                           _fixture_customer(room, last, first))
+
+        if not interrupted:
+            # Injecting at the LAST step leaves everything before it done, so there is
+            # genuinely nothing left -- that is a true negative, not a gap. Anything else
+            # must have said something.
+            if step != SETTLEMENT_STEPS[-1]:
+                fail('a failure at %s left no outstanding work reported, yet the settlement '
+                     'was incomplete' % step)
+                continue
+            ok('a failure at the final step leaves nothing outstanding, correctly reported')
+            continue
+
+        # The predicate existing is not the feature. The clerk has to be TOLD, so assert
+        # the text reached the console -- otherwise a version that computes the answer and
+        # never prints it would pass every check above.
+        if 'did NOT finish' not in spoken or 'Still to do' not in spoken:
+            fail('a failure at %s left work outstanding (%s) but never told the clerk so: '
+                 'nothing in the output said the settlement was incomplete'
+                 % (step, '; '.join(interrupted)))
+        elif not any(item in spoken for item in interrupted):
+            fail('a failure at %s reported the outstanding work but did not name it; the '
+                 'console said the settlement was incomplete without saying what to do'
+                 % step)
+        elif after:
+            fail('a failure at %s reported %d outstanding item(s), but the retry finished the '
+                 'settlement and it still reports %d'
+                 % (step, len(interrupted), len(after)))
+        else:
+            ok('a failure at %s told the clerk what was left (%s), and the retry cleared it'
+               % (step, '; '.join(interrupted)))
 
 
 # ------------------------------------------------------------------ main
