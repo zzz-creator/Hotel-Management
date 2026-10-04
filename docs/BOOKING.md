@@ -477,7 +477,17 @@ again, and `verify_e2e.py` asserts it.
 Two things did **not** get fixed by this, and both were mispriced while it was open:
 
 - The 130 `conn is None` guards are live and correct — `create_connection()` returns `None` when a **connect** fails, and that is the only path to them. They are not there for query failures and should not be removed.
-- Rollback safety is untouched and still unaudited. There are 78 `conn.commit()` sites, multi-statement functions commit mid-body, and nothing rolls back on error, which is why `main()`'s menu loop must not grow a top-level exception handler: it would turn a fail-stop into a retryable half-written folio.
+- Rollback safety has now been **audited**, and the standing worry was overstated. There are
+  78 `conn.commit()` sites but only **5** functions commit in more than one
+  `with get_connection()` block, and all five are correct by design — three are menu loops
+  whose commits sit in mutually exclusive branches, two commit a primary effect and then a
+  best-effort notification inside its own `try/except`. A single block whose executes all
+  precede one commit was already atomic. There were also already 5 explicit rollbacks in the
+  refund retry loop, so "nothing rolls back on error" was wrong. What the audit *did* find
+  missing was that the guarantee was inherited from the driver and untested;
+  `db.get_connection()` now rolls back explicitly and Phase 5d asserts it. `main()`'s menu
+  loop still must not grow a top-level exception handler — but the reason is
+  inter-procedure sequencing, which remains unaudited. See AGENTS.md §7.
 
 Neither bug was visible to `check_schema_sync.py`, `check_migration_sql.py`,
 `check_applied_migrations.py` or the unit suite, because all four work on text or on a

@@ -915,6 +915,7 @@ def phase_exercise(server, scratch, user, password):
     # --- what a mid-settlement failure leaves behind ---------------------------------
     phase_settlement_faults(app, biz)
     phase_redemption_safety(app, biz)
+    phase_rollback_safety(app)
 
     app._RESERVATIONS_CAPTURED_RATE_SUPPORT = None
 
@@ -958,6 +959,90 @@ FIXTURE_CVV = '123'
 
 class InjectedFailure(Exception):
     """A simulated mid-settlement failure. The app never raises this itself."""
+
+
+def phase_rollback_safety(app):
+    """Prove the two guarantees every `with get_connection()` block rests on.
+
+    There is no static check for either of these, which is why they belong here: both are
+    claims about what the driver does at close time, and code you have not run has not
+    met them. They are also load-bearing for every atomicity argument in the codebase --
+    `bill_room_transactions()` relies on an exception before its commit discarding the
+    invoice, and the refund retry loop in `book_room()` relies on the same thing.
+
+    Autocommit is asserted first because it is the precondition for the other two. If a
+    connection ever opens with `autocommit=True`, every statement commits as it is issued,
+    `rollback()` becomes a no-op, and every "atomic because one commit at the end" argument
+    in the app silently becomes false -- with nothing anywhere reporting it.
+    """
+    head('Phase 5d  rollback safety of get_connection()')
+
+    conn = conn_or_none()
+
+    # --- precondition: autocommit must be off, or nothing below means anything --------
+    with get_connection_mod().get_connection() as probe:
+        if probe is None:
+            fail('cannot reach the scratch database; skipped the rollback checks')
+            return
+        if probe.autocommit:
+            fail('connections are opening with autocommit=True. Every uncommitted write is '
+                 'already durable, rollback() is a no-op, and no with-block in the app is '
+                 'atomic any more.')
+            return
+    ok('connections are autocommit-off, so an uncommitted write is still discardable')
+
+    room = str(one(conn, 'SELECT TOP 1 r.RoomNumber FROM Rooms r '
+                         'WHERE NOT EXISTS (SELECT 1 FROM Transactions t '
+                         'WHERE t.RoomNumber = r.RoomNumber) '
+                         'ORDER BY r.RoomNumber'))
+    marker = 'verify-rollback-probe'
+    run_sql(conn, 'DELETE FROM KeyCards WHERE CardNumber = ?', (marker,))
+
+    # --- an exception inside the block must discard the write -------------------------
+    try:
+        with get_connection_mod().get_connection() as w:
+            w.cursor().execute(
+                'INSERT INTO KeyCards (CardNumber, RoomNumber, LastName, FirstName, Status, '
+                "IssuedAt, ExpiresAt, IssuedBy) VALUES (?, ?, 'Rollback', 'Probe', 'Active', "
+                "GETDATE(), GETDATE(), 'verify')", (marker, room))
+            raise InjectedFailure('after the insert, before the commit')
+    except InjectedFailure:
+        pass
+    conn_or_none().commit()   # the probe connection is a different one; flush our view
+    left = int(one(conn_or_none(), 'SELECT COUNT(*) FROM KeyCards WHERE CardNumber = ?',
+                   (marker,)) or 0)
+    # Clean up before reporting, not only on the happy path. A leaked marker collides with
+    # the next scenario's insert and reports a confusing unique-constraint error that masks
+    # the failure that actually mattered -- the same mistake as an assertion that only
+    # tidies up when it passes.
+    run_sql(conn_or_none(), 'DELETE FROM KeyCards WHERE CardNumber = ?', (marker,))
+    if left:
+        fail('an exception inside a with-block still left %d row(s) behind. Closing the '
+             'connection did not discard the transaction.' % left)
+    else:
+        ok('an exception inside a with-block discards the uncommitted write')
+
+    # --- and the normal path must still commit ----------------------------------------
+    with get_connection_mod().get_connection() as w:
+        w.cursor().execute(
+            'INSERT INTO KeyCards (CardNumber, RoomNumber, LastName, FirstName, Status, '
+            "IssuedAt, ExpiresAt, IssuedBy) VALUES (?, ?, 'Commit', 'Probe', 'Active', "
+            "GETDATE(), GETDATE(), 'verify')", (marker, room))
+        w.commit()
+    kept = int(one(conn_or_none(), 'SELECT COUNT(*) FROM KeyCards WHERE CardNumber = ?',
+                   (marker,)) or 0)
+    run_sql(conn_or_none(), 'DELETE FROM KeyCards WHERE CardNumber = ?', (marker,))
+    if kept == 1:
+        ok('a committed write inside a with-block survives the close')
+    else:
+        fail('a committed write did not survive the close (found %d row(s)); get_connection() '
+             'is discarding work it was told to keep' % kept)
+
+
+def get_connection_mod():
+    """The db module, imported lazily so a bad import cannot skip the earlier phases."""
+    import db
+    return db
 
 
 def arm_step(app, name):

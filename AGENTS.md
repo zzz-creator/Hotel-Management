@@ -501,10 +501,55 @@ Two rules that survive this fix, because both still look like cleanups and are n
   failures. Adding guards to more blocks would be dead code; a failed query never yields
   `None`, it raises.
 - **`main()`'s menu loop still must not get a top-level exception handler** without its own
-  audit. There are 78 `conn.commit()` sites, multi-statement functions commit mid-body, and
-  nothing rolls back on error. A handler that returns to the menu turns today's fail-stop
-  into a **retryable half-written folio** — the `post_room_charge` class of bug. That is a
-  rollback-safety question, not an error-handling one, and it is still unaudited.
+  audit. A handler that returns to the menu turns today's fail-stop into a **retryable
+  half-written folio** — the `post_room_charge` class of bug. That is a rollback-safety
+  question, not an error-handling one. See the audit below: the per-function atomicity
+  story turned out to be sound, so this rule rests on *inter-procedure* sequencing, which
+  is still the unaudited part.
+
+### Rollback safety — audited 4 October 2026, and the standing worry was overstated
+
+This file previously said rollback safety was "untouched and unaudited", citing 78
+`conn.commit()` sites and no `ROLLBACK` anywhere. That was a guess presented as a finding.
+It has now been measured, and the guess was wrong in a way that matters: **most of those 78
+sites are already atomic**, and the number was never the thing to worry about.
+
+What the audit actually found, by walking the AST of `main.py` for functions that commit in
+more than one `with get_connection()` block:
+
+| | |
+|---|---|
+| commit sites | 78, across 61 functions |
+| functions committing in **2+ separate blocks** | **5** |
+| existing explicit rollbacks | **5** (in the booking refund retry loop, `main.py:2555-2583`, `2804`) — not zero, as previously stated |
+| functions where a block commits mid-sequence | **0** |
+
+All five multi-block functions are correct **by design**, and the distinction matters:
+
+- Three (`admin_manage_loyalty_tiers`, `manage_amenities_menu`, `manage_promotions_menu`)
+  are `while True:` menu loops whose commits sit in **mutually exclusive branches**. Only
+  one can ever run, so there is no sequence to be partial about. An AST count cannot see
+  this; only reading the function can.
+- Two (`advance_order`, `_concierge_inbox`) commit the primary effect, then make a
+  secondary effect — an in-room `Notifications` row — inside its own `try/except: pass`.
+  That is deliberate: a notification failure must not roll back the status change.
+
+A single `with get_connection()` block whose executes all precede one commit was already
+atomic, because an exception exits the block with nothing committed. That is the shape ~56 of
+the 61 functions are in, which is why the raw commit count was misleading.
+
+What was genuinely missing was that the discard guarantee was **inherited from the driver**
+rather than stated, and nothing tested it. `db.get_connection()` now rolls back explicitly on
+the way out — not a behaviour change, since closing an autocommit-off
+connection already discards, but it stops anyone relying on that implicitly. It cannot
+defend against autocommit, where every statement is durable as issued, so Phase 5d asserts
+`autocommit` is off, that an exception discards an uncommitted write, and that a committed
+write survives the close.
+
+**What remains genuinely unaudited** is inter-procedure sequencing, not per-function
+atomicity: `check_out()` is five separately-committing steps, and resumability is now
+measured (Phase 5b) but only for the failures the harness injects, not for a crash between
+two processes or a power loss mid-commit.
 
 `post_room_charge()` had the same class of bug and is fixed: its once-only guard selected on
 `f"Room charge for {check_in}"` while the `INSERT` wrote `f"{marker} - {room_type}"`, so the

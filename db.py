@@ -34,6 +34,20 @@ def get_connection():
     message, so a missing migration surfaces as pyodbc's "Invalid column/object name"
     rather than something generic. Callers that genuinely want to tolerate a failure
     (e.g. a table from an unapplied migration) wrap their own body in try/except.
+
+    An exception from the body triggers an explicit `rollback()` before the close. Closing
+    an autocommit-off pyodbc connection already discards the open transaction, so this is
+    NOT a behaviour change -- it makes the guarantee stated here rather than inherited from
+    the driver's close semantics, and it stops anyone reasoning "close rolls back for us"
+    from being silently wrong if that ever changes.
+
+    It does NOT defend against autocommit. With `autocommit=True` every statement is
+    durable as it is issued and `rollback()` is a no-op, so the guarantee is gone before
+    this code runs. That is why `tests/verify_e2e.py` asserts connections open
+    autocommit-off, rather than this function trying to detect it per call.
+
+    Do NOT wrap this `yield` in `except Exception` and yield again: that is illegal in a
+    generator, and it was exactly the bug that lived in main.py until 3 October 2026.
     """
     conn = None
     try:
@@ -42,6 +56,13 @@ def get_connection():
             yield None
             return
         yield conn
+    except BaseException:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                logging.debug("Rollback failed while unwinding; closing anyway.")
+        raise
     finally:
         try:
             if conn is not None:
