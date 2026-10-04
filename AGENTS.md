@@ -436,8 +436,28 @@ it. As of 2 October 2026 it establishes, on a disposable database:
   asserts 019's actual claim — a statement about one room reports that **guest's** whole
   history — which needs a ledger row in a second room to be distinguishable from a
   room-filtered query at all.
+- **Settlement resumability** (Phase 5b): a failure injected at each of `check_out()`'s five
+  steps, then an ordinary re-run, must reach exactly the state an uninterrupted check-out
+  reaches. All five steps already satisfy this; the point is that it is now measured. Do
+  **not** "fix" this by making check-out atomic — settlement prompts for card details, and
+  the room charge posts before payment *so a declined card can be retried*. See
+  `docs/BOOKING.md` §6 and `docs/DEVIATIONS.md` §9.
 
-As of 3 October 2026 it is **green**, and has been run to completion more than once.
+Two rules for anyone extending Phase 5b, both learned the hard way:
+
+- **The injector sits outside each helper, never inside it.** Five of the six settlement
+  helpers have their own `except Exception`; a failure raised from *inside* one would be
+  swallowed by that same helper and the step would report as successful.
+- **Every scenario needs both vacuity guards** — that the injection actually fired, and that
+  the interrupted state differs from the finished one. Without them a step that had quietly
+  stopped being called reports a pass. The second guard already earned its place: on its
+  first run the prompt router refused to proceed over an unrecognised prompt
+  (`Do you have a discount code?`) rather than silently mis-answering it.
+
+As of 4 October 2026 it is **green**, and has been run to completion more than once. The
+Phase 5b assertions were proven able to fail — restoring the exact `post_room_charge()` guard
+mismatch took four of the five scenarios red, reporting `room charges=2` and
+`invoiced total=502.85` against an uninterrupted `276.85`.
 
 ### The `main.get_connection()` defect — fixed 3 October 2026
 

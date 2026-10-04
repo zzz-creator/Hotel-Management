@@ -153,3 +153,38 @@ Passwords are stored and compared in plaintext throughout. Do **not** introduce 
 salting without being asked — see AGENTS.md §3. This is the one entry here that is
 knowingly insecure rather than merely incomplete, and it is the reason `require_master_override()`
 has a plaintext fallback to the `master` account.
+
+---
+
+## 9. A declined card after a point redemption burns the guest's points
+
+**Where:** `bill_room_transactions()` — redemption at `main.py:5726`, card prompt at
+`main.py:5756`. **Severity:** real defect, money. Not yet fixed.
+
+Two facts combine badly. `redeem_points_by_customer()` (`main.py:912`) commits immediately
+and is the **only** loyalty mutation in the app with **no `SourceID`** — so it has no
+idempotency guard and no way to be detected or reversed after the fact. And the redemption is
+*not* part of the transaction that writes the invoice: it runs before the card prompt, and the
+card prompt is a blocking `input()` that cannot sit inside a transaction.
+
+So the sequence is: guest redeems 500 points → the balance drops and a `LoyaltyTransactions`
+row is committed → the card declines → `bill_room_transactions()` returns `False` having
+written nothing. The guest has lost the points and still owes the entire bill. Re-running
+check-out does not recover them, because the balance is already reduced.
+
+**Measured, not inferred.** A probe against a disposable database — driving the real
+`check_out()` with a redemption of 500 points and a card that fails the Luhn check — reported
+`points before=2600 after=2100 | redemption ledger rows=1 | invoices=0`. The probe was removed
+after confirming the defect, because a permanent assertion here would be a permanent failure.
+`verify_e2e.py` Phase 5b answers "no" to the redemption prompt for the same reason.
+
+**Fix:** defer the redemption until payment has succeeded, and apply it in the **same
+transaction that writes the invoice** — the pattern `apply_booking_credit()` already uses at
+`main.py:5810` for exactly this reason ("consume the credit in this same transaction, so a
+rolled-back invoice leaves the credit available for the retry"). The redemption prompt can stay
+where it is; only the deduction moves. It should also gain a `SourceID`, so a retry is
+detectable even after the fact.
+
+Do **not** fix this by moving the card prompt inside a transaction, or by removing the
+declined-card retry — see [BOOKING.md §6](BOOKING.md) on why the room charge posts before
+payment on purpose.

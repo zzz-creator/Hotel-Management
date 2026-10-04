@@ -382,6 +382,9 @@ What `verify_e2e.py` now covers, on every run, against a server that really is S
 - 022's captured-rate read, against a row that genuinely carries a captured rate.
 - **The loyalty report**, at all three of its scopes — unscoped, by customer, and by room —
   read back out of the CSV it actually writes rather than out of a return value.
+- **Settlement resumability**: a failure injected at each of `check_out()`'s five steps in
+  turn, followed by an ordinary re-run, must reach exactly the state an uninterrupted
+  check-out reaches.
 
 The room-scoped one is the interesting check, because it is the whole content of 019: a
 statement asked about one room must report that **guest's** history, including points earned
@@ -390,6 +393,37 @@ produce a plausible-looking CSV naming the right guest, so the harness places a 
 a second room first — without that, "whole history" and "this one stay" are the same rows and
 the test passes either way. The seed gave guest A every row in a single room, which is why this
 had to be arranged rather than read off the fixtures.
+
+### Settlement is resumable, not atomic — and the difference is deliberate
+
+`check_out()` is five steps in sequence, each committing on its own connection. The obvious
+remedy is to wrap them in one transaction, and that is the wrong remedy here for a reason
+recorded in the code: `bill_room_transactions()` prompts for point redemption at
+`main.py:5713`, and the comment at `main.py:6139-6142` says the room charge posts **first**
+precisely so that a declined card can be retried without re-posting it. A transaction
+spanning a console prompt would hold locks across human think-time and destroy that retry. So
+the property worth having is not atomicity, it is **resumability**: an interrupted settlement
+re-run must converge on the same state as one that was never interrupted. That is what
+`verify_e2e.py` Phase 5b asserts, and all five steps already satisfy it.
+
+The harness needed two guards to make that non-vacuous, and both are load-bearing. The
+injector sits *outside* each helper rather than inside it, because five of the six settlement
+helpers have their own `except Exception` and would otherwise swallow the simulated failure
+and report the step as successful. And each scenario asserts both that the injection fired
+and that the interrupted state **differs** from the finished one — otherwise a step that had
+quietly stopped being called, or an interruption that changed nothing, would report a pass.
+The second guard is not theoretical: on its first run the prompt router reported a prompt it
+did not recognise (`Do you have a discount code?`) instead of silently mis-answering it.
+
+The assertion was proven able to fail before being trusted, by restoring the exact
+`post_room_charge()` guard mismatch described below. It went red on four of the five
+scenarios, reporting `room charges=2`, `invoices=2`, `invoiced total=502.85` where an
+uninterrupted run gives `276.85`.
+
+One thing the resumability scenarios deliberately do **not** cover is point redemption. The
+scenarios answer "no" to it, because redemption is interactive and has a defect of its own —
+see [DEVIATIONS.md §9](DEVIATIONS.md). Folding it in would have mixed two problems into one
+result.
 
 The one thing it still does **not** touch is **the live database**, for the reason above.
 
@@ -451,5 +485,12 @@ Neither bug was visible to `check_schema_sync.py`, `check_migration_sql.py`,
 catalog, and neither had ever had the code executed.
 
 Still unexercised, and not claimed otherwise: the interactive booking wizard and check-out
-screens (the harness calls the functions they delegate to, not the `rich` flows), the
-declined-card retry path, and any concurrency behaviour.
+screens (the harness calls the functions they delegate to, not the `rich` flows), and any
+concurrency behaviour.
+
+The declined-card path needs a precise note, because it was run once and the result was a
+finding rather than a pass. A declined card *on its own* is safe — `bill_room_transactions()`
+returns `False` having written nothing, and re-running it re-reads the same unbilled rows.
+What is not safe is a declined card **after a point redemption**, which burns the guest's
+points with nothing billed; see DEVIATIONS.md §9. There is no permanent assertion for that
+path, because a permanent assertion would be a permanent failure.

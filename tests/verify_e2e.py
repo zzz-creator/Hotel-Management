@@ -45,13 +45,16 @@ test -- nothing in the unit suite runs it, because it needs a server and because
 a database.
 """
 import configparser
+import contextlib
 import csv
+import io
+import logging
 import os
 import re
 import shutil
 import sys
 import tempfile
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pyodbc
@@ -909,7 +912,347 @@ def phase_exercise(server, scratch, user, password):
         else:
             fail('%s -> %r, expected %r' % (label, got, want))
 
+    # --- what a mid-settlement failure leaves behind ---------------------------------
+    phase_settlement_faults(app, biz)
+
     app._RESERVATIONS_CAPTURED_RATE_SUPPORT = None
+
+
+# ------------------------------------------------------- settlement fault injection
+#
+# check_out() is five steps in sequence, each committing on its own connection. Nothing in
+# the repo could ask what happens when one of them fails part-way: the unit suite never
+# touches a database, and this harness ran every path to success. So a guest could be
+# charged with the room still Occupied, keys still live, and no points awarded, with
+# nothing in the app able to say so.
+#
+# The obvious remedy -- wrap settlement in one transaction -- does not apply here and the
+# council that proposed it had not read the code. bill_room_transactions() prompts for
+# point redemption (main.py:5713), and the comment at main.py:6139-6142 says the room
+# charge posts first *specifically so a declined card can be retried without re-posting
+# it*. A transaction spanning a console prompt would hold locks across human think-time
+# and destroy that retry. So the property worth testing is not atomicity, it is
+# RESUMABILITY: a settlement that is interrupted and then re-run must reach the same state
+# as one that was never interrupted.
+#
+# Two guards make that non-vacuous, which is the whole difficulty. The injector has to
+# prove it actually fired, and the interrupted state has to differ from the finished one --
+# otherwise a scenario passes by never having tested anything.
+
+# The settlement steps in the order check_out() runs them.
+SETTLEMENT_STEPS = (
+    'post_room_charge',
+    'bill_room_transactions',
+    'set_room_status',
+    'revoke_active_key_cards',
+    'award_stay_points',
+)
+
+# A Luhn-valid number and a future expiry, so process_credit_card() takes the success path
+# and the scenarios exercise settlement rather than the card validator.
+FIXTURE_CARD = '4111111111111111'
+FIXTURE_EXPIRY = '12/2030'
+FIXTURE_CVV = '123'
+
+
+class InjectedFailure(Exception):
+    """A simulated mid-settlement failure. The app never raises this itself."""
+
+
+def arm_step(app, name):
+    """Replace `app.<name>` with a version that raises once, and return a restore handle.
+
+    The wrapper sits OUTSIDE the original function, which matters: five of the six
+    settlement helpers have their own `except Exception`, so a failure raised from inside
+    one of them would be swallowed by that same helper and the step would look like it
+    succeeded. Raising from the wrapper attributes the failure to the step.
+
+    check_out() still catches it -- that is the behaviour under test, not a harness
+    artefact. Its handler logs one line and returns to the menu, exactly as it would for a
+    real database error, which is why a clerk would see check-out simply not finish.
+    """
+    original = getattr(app, name)
+    probe = {'fired': False}
+
+    def wrapper(*args, **kwargs):
+        if not probe['fired']:
+            probe['fired'] = True
+            raise InjectedFailure(name)
+        return original(*args, **kwargs)
+
+    setattr(app, name, wrapper)
+
+    def restore():
+        setattr(app, name, original)
+
+    probe['restore'] = restore
+    return probe
+
+
+def _prompt_script(room, last, first):
+    """Answer check-out's prompts by matching the prompt text, not by queue position.
+
+    Matching on text means the script survives a reordering of the prompts, and -- the
+    point of it -- an UNRECOGNISED prompt is recorded rather than swallowed. check_out()
+    wraps everything in `except Exception`, so a router that raised would be caught and
+    turned into a silent "check-out did not finish", which is indistinguishable from a
+    real failure. Collected here and asserted afterwards instead.
+    """
+    unexpected = []
+
+    def answer(prompt=''):
+        text = str(prompt)
+        lowered = text.lower()
+        if 'last name' in lowered:
+            return last
+        if 'first name' in lowered:
+            return first
+        if 'room number' in lowered:
+            return str(room)
+        if 'redeem points' in lowered:
+            return 'n'
+        if 'number of points' in lowered:
+            return '0'
+        if 'discount code' in lowered:
+            # No promotional code, so the fixture's invoice total is plain rate + tax and
+            # two scenarios cannot diverge because one of them matched a seeded Discounts row.
+            return 'n'
+        if 'credit card number' in lowered:
+            return FIXTURE_CARD
+        if 'expiration' in lowered:
+            return FIXTURE_EXPIRY
+        if 'cvv' in lowered:
+            return FIXTURE_CVV
+        unexpected.append(text)
+        return ''
+
+    return answer, unexpected
+
+
+def _run_check_out(app, room, last, first):
+    """Drive the real check_out() with scripted answers and a silenced console.
+
+    Returns the prompts it did not recognise. check_out() returns None on every path,
+    success included, so the caller judges the outcome from database state -- which is
+    the only thing that can tell an interrupted settlement from a finished one.
+    """
+    answer, unexpected = _prompt_script(room, last, first)
+    sink = io.StringIO()
+    root = logging.getLogger()
+    previous = root.level
+    root.setLevel(logging.CRITICAL)
+    had_input = hasattr(app, 'input')
+    saved_input = getattr(app, 'input', None)
+    app.input = answer
+    try:
+        with contextlib.redirect_stdout(sink):
+            app.check_out()
+    finally:
+        if had_input:
+            app.input = saved_input
+        else:
+            # Back to the builtin: leaving a function in the module namespace would
+            # outlive this scenario and silently answer every later prompt.
+            del app.input
+        root.setLevel(previous)
+    return unexpected
+
+
+def _reset_settlement_fixture(room, last, first, check_in, check_out, nightly_rate=100.0):
+    """Rebuild one isolated in-house stay, shaped like the seed's guest A.
+
+    Reset before every scenario, so each injection point starts from identical state.
+    That is not tidiness: without it, "the resumed run matches the clean run" could be a
+    coincidence of accumulated state rather than convergence. The seed's stay cannot be
+    reused for this either, because Phase 5 has already posted a room charge and awarded
+    points against it.
+
+    Returns the new CustomerID.
+    """
+    conn = conn_or_none()
+    lookup = 'SELECT CustomerID FROM CustomerProfiles WHERE LastName = ? AND FirstName = ?'
+
+    # Children before parents: Transactions.RoomNumber and KeyCards.RoomNumber are the only
+    # FKs pointing at Reservations.RoomNumber, and Loyalty* at CustomerProfiles.
+    run_sql(conn, 'DELETE FROM Transactions WHERE RoomNumber = ?', (room,))
+    run_sql(conn, 'DELETE FROM Invoices WHERE RoomNumber = ?', (room,))
+    run_sql(conn, 'DELETE FROM KeyCards WHERE RoomNumber = ?', (room,))
+    cid = one(conn, lookup, (last, first))
+    if cid is not None:
+        run_sql(conn, 'DELETE FROM LoyaltyTransactions WHERE CustomerID = ?', (cid,))
+        run_sql(conn, 'DELETE FROM LoyaltyAccounts WHERE CustomerID = ?', (cid,))
+    run_sql(conn, 'DELETE FROM Reservations WHERE RoomNumber = ?', (room,))
+    if cid is not None:
+        run_sql(conn, 'DELETE FROM CustomerProfiles WHERE CustomerID = ?', (cid,))
+
+    # RoomType is pinned so the category multiplier is the same for every scenario; a
+    # different category would award different stay points and the totals would not compare.
+    run_sql(conn,
+            "UPDATE Rooms SET Status = 'Occupied', RoomType = 'Standard' "
+            'WHERE RoomNumber = ?', (room,))
+    run_sql(conn,
+            'INSERT INTO CustomerProfiles (LastName, FirstName, Phone) VALUES (?, ?, ?)',
+            (last, first, '555-0199'))
+    cid = int(one(conn, lookup, (last, first)))
+    run_sql(conn,
+            'INSERT INTO Reservations (RoomNumber, LastName, FirstName, Floor, CheckInDate, '
+            'CheckOutDate, CustomerID, NightlyRate) VALUES (?, ?, ?, 1, ?, ?, ?, ?)',
+            (room, last, first, check_in, check_out, cid, nightly_rate))
+    run_sql(conn,
+            'INSERT INTO LoyaltyAccounts (CustomerID, RoomNumber, Points, Tier, LastUpdated) '
+            "VALUES (?, ?, 2600, 'Gold', ?)", (cid, room, check_in))
+    run_sql(conn,
+            'INSERT INTO LoyaltyTransactions (CustomerID, RoomNumber, Delta, Reason, '
+            "CreatedAt, SourceID) VALUES "
+            "(?, ?, 1000, N'Stay award (prior visit)', DATEADD(DAY, -40, ?), ?), "
+            "(?, ?, 900, N'Stay award (prior visit)', DATEADD(DAY, -20, ?), ?), "
+            "(?, ?, 700, N'Room service spend', DATEADD(DAY, -1, ?), ?)",
+            (cid, room, check_in, 'fixture:stay:1',
+             cid, room, check_in, 'fixture:stay:2',
+             cid, room, check_in, 'fixture:order:1'))
+    # Two unbilled F&B lines and one paid-at-order line, which is the shape
+    # bill_room_transactions() looks for: the last is consolidated onto the check-out
+    # invoice rather than billed again.
+    run_sql(conn,
+            'INSERT INTO Transactions (RoomNumber, ItemID, Quantity, UnitPrice, Amount, '
+            "CreatedAt, IsBilled, InvoiceID, PaidEarlier, Description, ChargeGroup) VALUES "
+            "(?, 4, 1, 20.00, 20.00, GETDATE(), 0, NULL, 0, N'Room Service Meal', 'F&B'), "
+            "(?, 8, 1, 30.00, 30.00, GETDATE(), 0, NULL, 0, N'Breakfast Buffet', 'F&B'), "
+            "(?, 11, 1, 10.00, 10.00, GETDATE(), 1, NULL, 1, N'Porter / Bellhop', 'F&B')",
+            (room, room, room))
+    run_sql(conn,
+            'INSERT INTO KeyCards (CardNumber, RoomNumber, LastName, FirstName, Status, '
+            "IssuedAt, ExpiresAt, IssuedBy) VALUES (?, ?, ?, ?, 'Active', ?, ?, "
+            "N'fixture')",
+            ('KC-FIXTURE-%s' % room, room, last, first, check_in, check_out))
+    conn.commit()
+    return cid
+
+
+def _settlement_state(room, last, first):
+    """Everything a finished settlement should have decided, as one comparable value.
+
+    Absolute counts rather than a diff against another run, so a regression names the
+    thing that doubled instead of only saying the two runs differ.
+    """
+    conn = conn_or_none()
+    lookup = 'SELECT CustomerID FROM CustomerProfiles WHERE LastName = ? AND FirstName = ?'
+    cid = one(conn, lookup, (last, first))
+    return {
+        'room charges': one(conn,
+                            "SELECT COUNT(*) FROM Transactions WHERE RoomNumber = ? "
+                            "AND ItemID IS NULL AND ChargeGroup = 'Room'", (room,)),
+        'invoices': one(conn, 'SELECT COUNT(*) FROM Invoices WHERE RoomNumber = ?', (room,)),
+        'invoiced total': round(float(one(conn,
+                                          'SELECT COALESCE(SUM(TotalAmount), 0) FROM Invoices '
+                                          'WHERE RoomNumber = ?', (room,)) or 0.0), 2),
+        'unbilled lines': one(conn, 'SELECT COUNT(*) FROM Transactions '
+                                    'WHERE RoomNumber = ? AND IsBilled = 0', (room,)),
+        'stay awards': one(conn, "SELECT COUNT(*) FROM LoyaltyTransactions "
+                                  "WHERE CustomerID = ? AND SourceID LIKE 'stay:%'", (cid,)),
+        'points': one(conn, 'SELECT Points FROM LoyaltyAccounts WHERE CustomerID = ?', (cid,)),
+        'room status': one(conn, 'SELECT Status FROM Rooms WHERE RoomNumber = ?', (room,)),
+        'active key cards': one(conn, "SELECT COUNT(*) FROM KeyCards WHERE RoomNumber = ? "
+                                       "AND Status = 'Active'", (room,)),
+    }
+
+
+def _describe(state):
+    return ', '.join('%s=%s' % (k, state[k]) for k in sorted(state))
+
+
+def phase_settlement_faults(app, base_date):
+    """Interrupt settlement at every step and require the retry to converge.
+
+    The claim under test is that re-running check-out after a mid-settlement failure
+    reaches the same state as never failing at all. It is a claim about composition --
+    each helper is already idempotent individually and the harness proves two of them
+    are -- so it can only be tested by failing a step and running the whole thing again.
+    """
+    head('Phase 5b  settlement resumability under an injected failure')
+
+    check_in = base_date
+    check_out = base_date + timedelta(days=2)
+    last, first = 'Resumability', 'Test'
+
+    room = one(conn_or_none(),
+               'SELECT TOP 1 r.RoomNumber FROM Rooms r '
+               'WHERE NOT EXISTS (SELECT 1 FROM Reservations x WHERE x.RoomNumber = r.RoomNumber) '
+               'AND NOT EXISTS (SELECT 1 FROM Transactions t WHERE t.RoomNumber = r.RoomNumber) '
+               'AND NOT EXISTS (SELECT 1 FROM Invoices i WHERE i.RoomNumber = r.RoomNumber) '
+               'AND NOT EXISTS (SELECT 1 FROM KeyCards k WHERE k.RoomNumber = r.RoomNumber) '
+               'ORDER BY r.RoomNumber')
+    if room is None:
+        info('every room is in use; skipped the settlement fault-injection checks')
+        return
+    room = str(room)
+    info('settlement fixture room %s, %s -> %s' % (room, check_in, check_out))
+
+    # --- the baseline: one uninterrupted settlement, which every retry must match ------
+    _reset_settlement_fixture(room, last, first, check_in, check_out)
+    unexpected = _run_check_out(app, room, last, first)
+    if unexpected:
+        fail('check_out() asked something this harness does not answer: %r. The scripted '
+             'run cannot be trusted until every prompt is accounted for.' % unexpected[:3])
+        return
+    baseline = _settlement_state(room, last, first)
+    settled = (baseline['room charges'] == 1 and baseline['invoices'] == 1
+               and baseline['unbilled lines'] == 0 and baseline['stay awards'] == 1
+               and baseline['room status'] == 'Dirty' and baseline['active key cards'] == 0)
+    if settled:
+        ok('an uninterrupted check-out settles: %s' % _describe(baseline))
+    else:
+        fail('an uninterrupted check-out did NOT settle, so the resumability scenarios '
+             'would be comparing against a broken baseline: %s' % _describe(baseline))
+        return
+
+    # --- one scenario per step ------------------------------------------------------
+    for step in SETTLEMENT_STEPS:
+        _reset_settlement_fixture(room, last, first, check_in, check_out)
+
+        probe = arm_step(app, step)
+        try:
+            unexpected = _run_check_out(app, room, last, first)
+        finally:
+            probe['restore']()
+        interrupted = _settlement_state(room, last, first)
+
+        if unexpected:
+            fail('%s: check_out() asked something this harness does not answer: %r'
+                 % (step, unexpected[:3]))
+            continue
+        if not probe['fired']:
+            # The scenario proved nothing: without this, a step that quietly stopped being
+            # called would report a pass.
+            fail('%s was never reached, so no failure was injected there and the scenario '
+                 'proved nothing' % step)
+            continue
+        if interrupted == baseline:
+            # Also vacuous: the interruption changed nothing, so there was no partial state
+            # for the retry to recover from.
+            fail('injecting a failure at %s left the state identical to a finished '
+                 'settlement (%s), so the interruption cannot have happened'
+                 % (step, _describe(interrupted)))
+            continue
+
+        # The retry is exactly what a clerk does after a crash: run check-out again, with
+        # nothing injected and nothing else restored first.
+        unexpected = _run_check_out(app, room, last, first)
+        if unexpected:
+            fail('%s: the retry asked something this harness does not answer: %r'
+                 % (step, unexpected[:3]))
+            continue
+
+        final = _settlement_state(room, last, first)
+        if final == baseline:
+            ok('a failure at %s leaves a state the retry recovers to exactly (%s)'
+               % (step, _describe(final)))
+        else:
+            fail('a failure at %s left a state the retry did NOT recover from.\n'
+                 '               interrupted: %s\n'
+                 '               after retry:  %s\n'
+                 '               uninterrupted: %s'
+                 % (step, _describe(interrupted), _describe(final), _describe(baseline)))
 
 
 # ------------------------------------------------------------------ main
