@@ -2833,6 +2833,7 @@ def booking_panel():
     cached in CURRENT_CUSTOMER for the rest of the session.
     """
     while True:
+        ui.pause()
         ui.show_menu("Bookings", [
             "1. Book a Room",
             "2. View My Booking",
@@ -3933,6 +3934,7 @@ def _run_report(label, fn, **kwargs):
 def export_reports_menu():
     """Interactive admin submenu for report exports."""
     while True:
+        ui.pause()
         ui.show_menu("Report Export Menu", [
             "1. Export Transactions",
             "2. Export Reservations",
@@ -4047,6 +4049,7 @@ def admin_panel():
     role = str(role).lower()
     while True:
         if role == 'staff':
+            ui.pause()
             ui.show_menu("Admin Panel", [
                 "---- Reservations ----",
                 "1. Add Reservation",
@@ -4065,6 +4068,7 @@ def admin_panel():
                 "12. Exit Admin Panel",
             ])
         elif role == 'manager':
+            ui.pause()
             ui.show_menu("Admin Panel", [
                 "---- Reservations ----",
                 "1. Add Reservation",
@@ -4101,6 +4105,7 @@ def admin_panel():
                 "22. Exit Admin Panel",
             ])
         elif role == 'admin':
+            ui.pause()
             ui.show_menu("Admin Panel", [
                 "---- Reservations ----",
                 "1. Add Reservation",
@@ -4487,12 +4492,14 @@ def rooms_admin_menu(view_only=False):
     """Rooms & housekeeping submenu: dashboard + drill-down explorer."""
     while True:
         if view_only:
+            ui.pause()
             ui.show_menu("Rooms & Housekeeping", [
                 "1. Room Dashboard",
                 "2. Explore Floor",
                 "3. Back to Admin Panel",
             ])
         else:
+            ui.pause()
             ui.show_menu("Rooms & Housekeeping", [
                 "1. Room Dashboard",
                 "2. Explore Floor",
@@ -4613,6 +4620,7 @@ def send_alert_to_staff():
     """Broadcast an alert to a staff role, persisted and acknowledgeable."""
     try:
         while True:
+            ui.pause()
             ui.show_menu("Send Alert to Staff", [
                 f"{idx}. {role}" for idx, role in enumerate(STAFF_ROLES, 1)
             ] + ["0. Cancel"])
@@ -4704,6 +4712,7 @@ def manage_discount_codes():
     """Provides a sub-menu for discount code management."""
     try:
         while True:
+            ui.pause()
             ui.show_menu("Discount Code Management", [
                 "1. Add Discount Code",
                 "2. Update Discount Code",
@@ -4887,6 +4896,7 @@ def manage_business_date():
 def manage_pricing_rules():
     """Admin: view and edit nightly room rates, peak/off-peak factors, tax, and loyalty rates."""
     while True:
+        ui.pause()
         ui.show_menu("Pricing & Settings", [
             "1. View Current Settings",
             "2. Edit Peak / Off-Peak Price Factors",
@@ -5015,6 +5025,7 @@ def manage_pricing_rules():
 def loyalty_admin_menu():
     """Admin: loyalty management submenu."""
     while True:
+        ui.pause()
         ui.show_menu("Loyalty Management", [
             "1. View Loyalty Accounts",
             "2. Adjust Points for a Room",
@@ -5210,6 +5221,7 @@ def admin_manage_loyalty_tiers():
         tiers = _tiers_from_db() or DEFAULT_TIERS
         ui.show_table("Loyalty Tiers", ["Tier", "Min Lifetime Points", "Points x", "Discount %", "Perks"],
                       [(t[0], t[1], f"x{t[2]:.2f}", f"{t[3]:.0f}%", t[4]) for t in tiers])
+        ui.pause()
         ui.show_menu("Tier Management", [
             "1. Edit Tier Discount Percentage",
             "2. Edit Tier Points Multiplier",
@@ -6121,6 +6133,7 @@ def print_invoice(invoice_id):
 def invoices_menu():
     """Admin/manager: browse and print stored invoices."""
     while True:
+        ui.pause()
         ui.show_menu("Invoices & Printing", [
             "1. Print Invoice by Number",
             "2. Find Invoices by Room",
@@ -6890,6 +6903,7 @@ def view_my_concierge_requests():
 def guest_requests_menu():
     """Staff/management inbox: concierge requests and stay feedback."""
     while True:
+        ui.pause()
         ui.show_menu("Guest Requests", [
             "1. Concierge Requests",
             "2. Guest Feedback",
@@ -6997,6 +7011,7 @@ def _feedback_inbox():
 def manage_amenities_menu():
     """Admin: add, edit, retire and reorder hotel amenities."""
     while True:
+        ui.pause()
         ui.show_menu("Manage Amenities", [
             "1. View Amenities",
             "2. Add Amenity",
@@ -7084,6 +7099,7 @@ def manage_amenities_menu():
 def manage_promotions_menu():
     """Admin: add, edit and expire hotel promotions."""
     while True:
+        ui.pause()
         ui.show_menu("Manage Promotions", [
             "1. View All Promotions",
             "2. Add Promotion",
@@ -7293,6 +7309,7 @@ def it_software_installation():
 def it_support_panel():
     """IT Support: network config, user accounts, diagnostics, and software installs."""
     while True:
+        ui.pause()
         ui.show_menu("IT Support Panel", [
             "1. Network Configuration",
             "2. User Account Management",
@@ -7581,6 +7598,7 @@ def search_customer_profiles():
 
 def customer_panel():
     while True:
+        ui.pause()
         ui.show_menu("Customer Menu", [
             "1. Check In",
             "2. Place Order",
@@ -7923,6 +7941,7 @@ def door_access_menu(view_only=False):
                 "6. View Door Access Log",
                 "7. Back",
             ]
+        ui.pause()
         ui.show_menu("Door Access Control", options)
         choice = input("Enter your choice: ").strip()
         if view_only:
@@ -8696,6 +8715,7 @@ def onboarding_checklist(role="admin"):
             ui.info("\nSetup actions need the admin role. This view is read-only.")
             return
 
+        ui.pause()
         ui.show_menu("Setup actions", [
             "1. Add a staff account",
             "2. Create the 'master' override account",
@@ -8907,6 +8927,7 @@ def _offer_item_catalogue(wizard=False):
                  "added or deleted afterwards from Admin Panel -> 13/14/15.", len(DEFAULT_SEED_ITEMS))
     try:
         while True:
+            ui.pause()
             ui.show_menu("Add items", [
                 "1. Add the starter catalogue (%d items)" % len(DEFAULT_SEED_ITEMS),
                 "2. Add an item of your own",
@@ -9007,6 +9028,7 @@ def main():
         run_first_run_onboarding()
 
     while True:
+        ui.pause()
         ui.clear_screen()
         ui.show_menu(f"Welcome to {HOTEL_NAME}!" if HOTEL_NAME else "Hotel Management System", [
             "1. Customer",
