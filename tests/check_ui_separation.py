@@ -30,9 +30,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # checker, and is allowed to talk to the user.
 CORE = 'main.py'
 
-# `input(` bare, and `getpass.` -- the two ways this codebase has historically read
-# a value at a keyboard. `ui.` is this project's console helper module.
-BANNED_CALLS = ('input', 'getpass.getpass', 'getpass.getuser')
+# `input(` bare, and `getpass.` -- the ways this codebase has historically read a value
+# at a keyboard. `ui.` is this project's console helper module.
+#
+# `builtins.input` and `builtins.getpass` are here for the same reason `ui` is matched
+# by its resolved module name rather than by the literal text: `builtins.input()` is the
+# obvious way to dodge a checker that only looks for a bare `input(`, and it was a hole
+# in this one until it was measured. `getpass.getuser` is not a prompt at all and was
+# dropped -- it reads the OS account name, not the keyboard.
+BANNED_CALLS = ('input', 'builtins.input',
+                'getpass.getpass', 'builtins.getpass.getpass')
 
 # `logging.info` rather than `logging.` generally: the core still logs errors and
 # warnings, which is correct. What it must not do is narrate to a screen -- a
