@@ -67,6 +67,7 @@ New interactive output goes through `ui.py`, never inline `rich`.
 | `docs/SCHEMA.md` | Per-table reference, migration inventory, degradation matrix |
 | `docs/DEVIATIONS.md` | Behaviours this app deliberately does **not** have, and what would close each |
 | `docs/ONBOARDING.md` | Staff first-run order: bootstrap login, items, prices, rooms, business date |
+| `docs/LIVE-RUN-2026-10-05.md` | What the first live `hotelSystem` run covered, what it did not, and which invariants were observed |
 
 ### Tests (`python -m unittest discover -s tests`; **`pytest` is NOT installed**)
 
@@ -78,6 +79,7 @@ New interactive output goes through `ui.py`, never inline `rich`.
 | `tests/test_validate_room.py` | The guest identity check |
 | `tests/test_onboarding.py` | First-run wizard: the completion marker, the first-account guard, item/room seeding idempotency, room-layout bounds |
 | `tests/test_schema_sync.py` | The schema checker itself — a checker that parses nothing must fail |
+| `tests/test_checkin_window.py` | The half-open reservation-window predicate the check-in gate uses |
 | `tests/check_schema_sync.py` | `database.sql` vs migrations (a **script**, not a test) |
 | `tests/check_migration_sql.py` | Static T-SQL lint (a **script**, not a test) |
 | `tests/check_applied_migrations.py` | The **live** database vs `database.sql` (a **script**, not a test) |
@@ -406,8 +408,11 @@ and when the §2 file map drifts from the repo.
 001-025 are all applied to the developer's live database. 001-018 were verified end-to-end
 (book → check out with credit → cancel, plus the declined-card and full-refund paths).
 019-021 were verified read-only against the catalog. Their T-SQL and the flows they back now
-run on every `verify_e2e.py` invocation — but against a *disposable* database, so
-`hotelSystem` itself still has not had a booking run through it. See `docs/BOOKING.md` §6.
+run on every `verify_e2e.py` invocation — but against a *disposable* database.
+`hotelSystem` had its first live booking run on 5 October 2026 (one unassisted
+check-in → F&B order → check-out with credit → loyalty stay); what it covered, what
+it did not, and the invariants observed are in `docs/LIVE-RUN-2026-10-05.md`. See
+`docs/BOOKING.md` §6.
 
 `tests/verify_e2e.py` closes most of that gap and is the check to run before trusting any of
 it. As of 2 October 2026 it establishes, on a disposable database:

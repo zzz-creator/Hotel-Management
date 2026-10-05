@@ -257,3 +257,51 @@ one.
 Phase 5e also asserts the negative direction, which matters more than the positive one: a
 **completed** check-out reports nothing outstanding. A signal that fires on healthy rooms is
 worse than no signal, because it teaches staff to ignore it.
+## 11. Check-in refuses an out-of-window reservation — changed 5 October 2026
+
+**Where:** `check_in()`, the window gate around the `Reservations` date comparison.
+**Severity:** a correctness guard, formerly a note.
+
+Before 5 October 2026 the check-in path logged *"Note: today is outside the
+reservation's date window"* and then checked the guest in anyway — and it had already
+marked the room `Occupied` before logging the note. The decision then was to ask
+half of the staff member: warn, let them override. A live run on 5 October 2026 walked
+exactly into it (room 10002, business date outside the booking window), so the guard
+was hardened: check-in now **refuses**, returns before any room-status change, profile
+update, or key-card issuance, and says why. The room-status flip was moved after the
+gate, so a refusal cannot leave the room mis-flagged.
+
+Deliberately not done, and the reason is load-bearing: the window is still half-open
+`CheckInDate <= today < CheckOutDate`, the same convention as §6, and the gate only
+applies when a reservation row exists. A walk-in with no reservation still checks in,
+and a database error still logs and proceeds rather than hard-blocking — because the
+console has no out-of-band channel, a wrong *error* must not strand a paying guest.
+
+## 12. Every menu pauses before redraw — convention, effective 5 October 2026
+
+**Where:** each menu loop in `main.py`, plus `ui.pause()`.
+**Severity:** cosmetic, but load-bearing for the harness.
+
+A handled option used to print its result and then the loop immediately cleared or
+redrew the menu, wiping the message off the screen before anyone could read it. Every
+menu loop now calls `ui.pause()` before showing its menu again, and the main loop
+pauses before `ui.clear_screen()`. Prompt-only loops (login retries, quantities, the
+y/n confirmations that already wait inline) were left alone on purpose.
+
+This matters to `verify_e2e.py`: its prompt router feeds one answer per recognised
+prompt, and an unrecognised prompt is an error, not a pass. Anyone adding a menu must
+keep the pause — and must expect the harness's router to reject an answer when the
+loop asks for one it does not know. See §7 Phase 5 for the router discipline.
+
+## 13. Exiting the Bookings and Customer menus signs the guest out
+
+**Where:** `booking_panel()` option 4 and `customer_panel()` option 16.
+**Severity:** a small privacy/state change, deliberate.
+
+The two public menus used to offer "Exit" that merely returned to the main screen
+while `CURRENT_CUSTOMER` stayed set. On a shared console that meant the next visitor
+inherited the previous guest's session — their loyalty balance and booking history.
+The exit entries are now labelled **Sign Out** and clear `CURRENT_CUSTOMER`; within
+one signed-in session `customer_login()` still caches it and never re-prompts.
+`CURRENT_USER` (staff/admin) is unchanged: it remains "last-logged-in user" and is
+never cleared.

@@ -316,6 +316,17 @@ def points_per_dollar_order_vs_room(order_rate=None, per_night=None, nightly_rat
     return order, room
 
 
+def reservation_window_active(check_in, check_out, today):
+    """Half-open stay window: a guest is expected in when check_in <= today < check_out.
+
+    The same convention DEVIATIONS.md §6 pins everywhere else in the app. Kept pure so
+    the check-in gate in check_in() is pinned by a unit test rather than by a run.
+    """
+    if check_in is None or check_out is None or today is None:
+        return False
+    return check_in <= today < check_out
+
+
 def business_date():
     """The hotel's current business date -- the ONE clock for "which day is it".
 
@@ -5548,7 +5559,7 @@ def check_in():
                     row = cursor.fetchone()
                     if row:
                         today = business_date()
-                        if not (row.CheckInDate <= today < row.CheckOutDate):
+                        if not reservation_window_active(row.CheckInDate, row.CheckOutDate, today):
                             logging.info(
                                 f"Check-in refused: today ({today}) is outside the reservation's "
                                 f"date window ({row.CheckInDate} to {row.CheckOutDate}). "

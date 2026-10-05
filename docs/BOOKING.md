@@ -366,10 +366,13 @@ Which of these have actually been run changes over time, so this section is kept
 short version. The unit tests are database-free by design (the money rules are pure
 functions, the storage layer is mocked), so they can never cover any of it.
 
-**`hotelSystem` itself has still never had a booking or a check-out run through it, and
-`tests/verify_e2e.py` does not change that** — it builds a disposable database, exercises the
-code there and drops it. A full booking → check-out-with-credit → cancel run against the live
-database is still the gap.
+**`hotelSystem` had its first live booking run on 5 October 2026** — one unassisted
+check-in → F&B order → check-out-with-credit → loyalty stay, covering the settlement
+path 019–022 back. What it did and did not cover, and which invariants were observed,
+is in [LIVE-RUN-2026-10-05.md](LIVE-RUN-2026-10-05.md); the gap that remains is the
+cancel/refund, declined-card, and interrupted check-out paths.
+`tests/verify_e2e.py` does not change that gap — it builds a disposable database,
+exercises the code there and drops it.
 
 What `verify_e2e.py` now covers, on every run, against a server that really is SQL Server:
 
