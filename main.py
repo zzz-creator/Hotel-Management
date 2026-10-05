@@ -88,8 +88,8 @@ CURRENT_USER = "system"
 # The signed-in guest at the public booking desk, as a CustomerProfiles.CustomerID.
 # `None` means nobody is logged in. Loyalty is keyed on this, NOT on the room number:
 # a balance that belongs to a room gets inherited by whoever checks into that room next.
-# Like CURRENT_USER it is not cleared on "logout", so treat it as the last-authenticated
-# guest rather than a session token.
+# Like CURRENT_USER it stays set across menus, but Sign Out on the Customer or Bookings
+# menu clears it: the next visitor must log in fresh rather than inherit this session.
 CURRENT_CUSTOMER = None
 # Failed booking-desk login attempts before the guest is told to stop.
 CUSTOMER_LOGIN_MAX_ATTEMPTS = 3
@@ -2832,13 +2832,14 @@ def booking_panel():
     and "Cancel" all operate on the signed-in guest's own account, and the sign-in is
     cached in CURRENT_CUSTOMER for the rest of the session.
     """
+    global CURRENT_CUSTOMER
     while True:
         ui.pause()
         ui.show_menu("Bookings", [
             "1. Book a Room",
             "2. View My Booking",
             "3. Cancel My Booking",
-            "4. Exit Bookings",
+            "4. Sign Out",
         ])
         choice = input("Enter your choice: ").strip()
         if choice == '1':
@@ -2848,6 +2849,8 @@ def booking_panel():
         elif choice == '3':
             cancel_booking()
         elif choice == '4':
+            CURRENT_CUSTOMER = None  # Sign out: the next guest must log in fresh
+            logging.info("You have been signed out.")
             break
         else:
             logging.info("Invalid choice. Please try again.")
@@ -7597,6 +7600,7 @@ def search_customer_profiles():
 
 
 def customer_panel():
+    global CURRENT_CUSTOMER
     while True:
         ui.pause()
         ui.show_menu("Customer Menu", [
@@ -7615,7 +7619,7 @@ def customer_panel():
             "13. View My History",
             "14. My Key Card",
             "15. My Notifications",
-            "16. Exit Customer Menu",
+            "16. Sign Out",
         ])
         cust_choice = input("Enter your choice: ").strip()
 
@@ -7661,7 +7665,9 @@ def customer_panel():
         elif cust_choice == '15':
             view_notifications_for_room()
         elif cust_choice == '16':
-            break  # Exit the customer menu and return to the main menu
+            CURRENT_CUSTOMER = None  # Sign out: the next visitor must log in fresh
+            logging.info("You have been signed out.")
+            break
         ui.pause()
 ## =========================
 # Door Access Control

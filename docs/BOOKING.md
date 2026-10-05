@@ -16,8 +16,9 @@ Related: [SCHEMA.md](SCHEMA.md) (tables, migrations, degradation) ·
 ## 1. Guest identity
 
 `customer_login()` sets the module-level `CURRENT_CUSTOMER` (a `CustomerID`; `None` = signed
-out) and is **cached for the rest of the session**. `book_room()`, `view_my_booking()` and
-`cancel_booking()` all call it first.
+out) and is **cached until Sign Out**. The Bookings and Customer menus offer Sign Out, which
+clears it; within one signed-in session it is never re-prompted. `book_room()`,
+`view_my_booking()` and `cancel_booking()` all call it first.
 
 - An unknown email **registers on first use** rather than being turned away: a guest with
   no account cannot book, and therefore has no way to be recognised on a return visit.
