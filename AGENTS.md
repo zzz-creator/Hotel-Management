@@ -45,12 +45,8 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 
 | File | Role |
 |---|---|
-| `main.py` | **Business core, no UI in it** — the domain logic both front ends call. Contains no `input()`, no `ui.*`, no `logging.info`; `tests/check_ui_separation.py` enforces that |
-| `main-console.py` | `rich` console front end: menus, panels, prompts. Replaces the old `main.py` entry point |
-| `main-tkinter.py` | tkinter front end over the same core |
-| `main-backup.py` | **Permanent, unchanging** pre-split copy of the old `main.py`, kept so the two implementations can be compared without rewriting either. Byte-identical to `main.py` at commit `95aad30`. Not a fallback and not imported by anything (its hyphen means it cannot be), so it is outside `CODE_FILES` in `tests/check_docs_sync.py` and holds no tests |
+| `main.py` | Entry point and almost everything: menus, reservations, booking desk, billing, loyalty, IT/valet panels, first-run onboarding |
 | `ui.py` | `rich`-based console helpers (menus, tables, prompts, `clear_screen`/`pause`) |
-| `ui_tk.py` | tkinter helpers (dialogs, table view, menu frame, threaded query runner) |
 | `reports.py` | CSV report exports, also a standalone CLI |
 | `db.py` | Connection string + `get_connection()` context manager |
 | `config.ini` | DB connection, hotel, and loyalty defaults. **Untracked** — copy `config.ini.example` |
@@ -82,9 +78,7 @@ New interactive output goes through `ui.py`, never inline `rich`.
 | `tests/test_validate_room.py` | The guest identity check |
 | `tests/test_onboarding.py` | First-run wizard: the completion marker, the first-account guard, item/room seeding idempotency, room-layout bounds |
 | `tests/test_schema_sync.py` | The schema checker itself — a checker that parses nothing must fail |
-| `tests/test_check_ui_separation.py` | The UI-separation checker itself — including that it counts `input("x").strip()` once, which it got wrong at first |
 | `tests/check_schema_sync.py` | `database.sql` vs migrations (a **script**, not a test) |
-| `tests/check_ui_separation.py` | `main.py` must contain no UI (a **script**, not a test). Reports non-zero until Phase 0 of `PLAN-tkinter-frontend.md` finishes |
 | `tests/check_migration_sql.py` | Static T-SQL lint (a **script**, not a test) |
 | `tests/check_applied_migrations.py` | The **live** database vs `database.sql` (a **script**, not a test) |
 | `tests/verify_e2e.py` | Builds a **disposable** database, runs both install paths, exercises the booking code, drops it (a **script**, not a test) |
@@ -95,9 +89,8 @@ New interactive output goes through `ui.py`, never inline `rich`.
 
 `PLAN-room-rates-and-folios.md` (room rates, split folio, availability, guest features,
 reports), `PLAN-booking-system.md` (public booking desk), `PLAN-loyalty-per-night.md`,
-`PLAN-wire-up-rooms.md`, `PLAN-test-plan.md`, `PLAN-tkinter-frontend.md` (splitting the UI
-out of `main.py` into one business core plus `main-console.py` and `main-tkinter.py`).
-Approved designs — read the relevant one before reworking a feature it covers.
+`PLAN-wire-up-rooms.md`, `PLAN-test-plan.md`. Approved designs — read the relevant one
+before reworking a feature it covers.
 
 ---
 
@@ -216,16 +209,7 @@ Approved designs — read the relevant one before reworking a feature it covers.
   schema in one place, change it in the other, and read the migrated database's catalog
   before assuming.
 - All SQL in Python uses parameterized queries (`pyodbc` `?` placeholders). Keep it that way.
-- **New interactive output goes in the UI module for the front end you are writing, never
-  inline.** One module per front end: `ui.py` for the `rich` console, `ui_tk.py` for
-  tkinter. The rule used to name `ui.py` alone, which could not survive a second front end
-  existing. What matters is unchanged — no inline widget code, helpers live in a module.
-- **`main.py` is the business core and contains no UI at all** — no `input()`, no `ui.*`, no
-  `logging.info`. `main-console.py` and `main-tkinter.py` are the front ends over it. This is
-  enforced by `tests/check_ui_separation.py`, because the `get_connection()` duplication in
-  §5/§7 is the precedent: a convention nothing checks gets violated. `logging.error` and
-  `logging.warning` are still fine in the core; `logging.info` is a `print()` that looks like
-  a log line, and it is how the two front ends would come to disagree about wording.
+- New UI helpers go in `ui.py` rather than inline `rich`.
 
 ### Adding a migration
 
@@ -356,7 +340,6 @@ quietly committing a failure.
 ```powershell
 python -m py_compile main.py db.py reports.py ui.py   # syntax
 python -m unittest discover -s tests                          # unit tests
-python tests/check_ui_separation.py                         # is any UI left in the core?
 python tests/check_schema_sync.py                             # schema drift
 python tests/check_migration_sql.py                           # T-SQL lint
 python tests/check_docs_sync.py                               # docs are stale?
@@ -371,13 +354,6 @@ It needs a login with `CREATE DATABASE` authority; it refuses to run if
 anything it checks fails. **It is currently green** (§7), so treat a non-zero exit as a real
 finding rather than as "the harness is broken" — and do not respond by loosening the
 assertion that caught it.
-
-`check_ui_separation.py` is **expected to exit non-zero while the split is in progress** — it
-reports 838 UI references in `main.py` today, which is the honest measurement of how much
-Phase 0 of `PLAN-tkinter-frontend.md` has left to do. It was added *before* that phase, not
-after, because a guard that only exists once the thing it guards is fixed documents the
-convention instead of enforcing it. Every other check in this list should be green; this one
-is a to-do counter until the split lands.
 
 Exit code 0 = pass. `check_schema_sync.py` compares the 20 tables that migrations 013-018
 `CREATE` (by column, type, and nullability), the columns and primary key that 019, 020 and
