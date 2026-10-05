@@ -4309,9 +4309,9 @@ def admin_panel():
                 door_access_menu()
             elif choice == '33':
                 delete_all_reservations()
-            elif choice == '35':
+            elif choice == '34':
                 onboarding_checklist(role)
-            elif choice == '36':
+            elif choice == '35':
                 break
             else:
                 logging.info("Invalid choice. Please try again.")
