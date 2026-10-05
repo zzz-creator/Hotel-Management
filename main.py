@@ -8646,7 +8646,7 @@ def run_first_run_onboarding():
                 + "".join("  - %s\n" % label for label in outstanding))
         + "\nSmoke test, in this order:\n"
           "  1. Bookings -> book a stay, two nights, in a room number of your choosing\n"
-          "  2. Admin Panel -> 29. Rooms & Housekeeping -> 1. the room should be Available\n"
+          "  2. Admin Panel -> 29. Rooms & Housekeeping -> 2. Explore Floor -- the room should be Available\n"
           "  3. Order something through the guest menu\n"
           "  4. Check the guest out -- the folio must split into Room Charges and F&B\n"
           "  5. Admin Panel -> 30. Invoices & Printing -- print it and check the arithmetic",
