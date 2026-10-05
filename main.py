@@ -5526,8 +5526,6 @@ def check_in():
         logging.info("Finalizing check-in...")
         time.sleep(1)
         try:
-            # Rooms status is now real state: mark the room occupied on check-in.
-            set_room_status(room_number, "Occupied")
             with get_connection() as conn:
                 if conn is not None:
                     cursor = conn.cursor()
@@ -5536,7 +5534,14 @@ def check_in():
                     if row:
                         today = business_date()
                         if not (row.CheckInDate <= today < row.CheckOutDate):
-                            logging.info("Note: today is outside the reservation's date window. Please verify the stay dates.")
+                            logging.info(
+                                f"Check-in refused: today ({today}) is outside the reservation's "
+                                f"date window ({row.CheckInDate} to {row.CheckOutDate}). "
+                                "Please verify the stay dates before checking in."
+                            )
+                            return
+            # A valid stay: now it is real state, mark the room occupied on check-in.
+            set_room_status(room_number, "Occupied")
         except Exception as e:
             logging.error(f"Error syncing room status on check-in: {e}")
         # Capture or refresh the guest's contact details in CustomerProfiles.
