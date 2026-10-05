@@ -1379,149 +1379,65 @@ def normalize_room_number(room_number):
 VALIDATE_ROOM_MAX_ATTEMPTS = 3
 
 
-# Guest identity outcomes. The prompt loop below returns one of these rather than
-# rendering a message, so the two front ends can word the refusal differently without
-# the core deciding what a guest is told. The *policy* -- that a refusal must not
-# distinguish "no such surname" from "wrong first name" -- is core, and lives in the
-# constant beside each outcome, because that is the part that is a privacy boundary
-# rather than a presentation choice.
-IDENTITY_OK = "ok"
-IDENTITY_NO_MATCH = "no_match"
-IDENTITY_ROOM_MISMATCH = "room_mismatch"
-IDENTITY_UNAVAILABLE = "unavailable"
+def validate_room():
+    """Verify a guest's identity from last name, first name, and room number.
 
+    All three are required and must match one reservation row. The guest is never shown a
+    list of other people's stays: a last name is not unique, and listing every match would
+    disclose other guests' room numbers and first names to anyone who knew a surname. When
+    one person holds two stays (the same last and first name in different rooms) the room
+    number disambiguates, so the lookup is narrowed in SQL rather than offered as a menu.
 
-def match_guest_identity(last_name, first_name, room_number):
-    """Look up a stay by all three identifiers. Returns (outcome, first_name, message).
-
-    `first_name` in the result is the *stored* value, so callers get the database's
-    capitalisation rather than whatever the guest typed.
-
-    One query, all three fields, and the guest is never shown a list of other stays: a
-    last name is not unique, so listing every match would disclose other guests' room
-    numbers and first names to anyone who knew a surname. When one person holds two
-    stays (the same last and first name in different rooms) the room number
-    disambiguates, so the lookup is narrowed in SQL rather than offered as a menu.
-
-    A missing field is a no-match WITHOUT querying -- there is nothing to look up, and
-    an empty string against `LastName = ''` would match any row with a blank name.
+    Returns (room_number, first_name) on success -- first_name is the stored value, so
+    callers get correct capitalisation -- or (None, None) once the attempts run out or the
+    database is unreachable.
     """
-    if not last_name or not first_name or not room_number:
-        return (IDENTITY_NO_MATCH, None,
-                "Please enter your last name, first name, and room number.")
-
-    try:
-        with get_connection() as conn:
-            if conn is None:
-                return (IDENTITY_UNAVAILABLE, None,
-                        "We could not reach the front desk system. Please try again shortly.")
-            cursor = conn.cursor()
-            # Collation is case-insensitive, so this tolerates 'smith' for 'Smith'.
-            cursor.execute(
-                "SELECT RoomNumber, FirstName FROM Reservations "
-                "WHERE LastName = ? AND FirstName = ?",
-                (last_name, first_name),
-            )
-            candidates = cursor.fetchall()
-    except Exception as e:
-        logging.error(f"Error validating room: {e}")
-        return (IDENTITY_UNAVAILABLE, None,
-                "We could not reach the front desk system. Please try again shortly.")
-
-    if not candidates:
-        # Deliberately does not distinguish "no such surname" from "wrong first name",
-        # so the prompt cannot be used to discover who is staying here.
-        return (IDENTITY_NO_MATCH, None,
-                "We could not find a reservation for those details. Please check your "
-                "last name, first name, and room number.")
-
-    # Room numbers are free-text, so compare canonically ('01001' == '1001').
-    wanted = normalize_room_number(room_number)
-    match = next(
-        (c for c in candidates
-         if normalize_room_number(c.RoomNumber) == wanted),
-        None,
-    )
-    if match is None:
-        return (IDENTITY_ROOM_MISMATCH, None,
-                "That room number does not match the name you entered. Please try again.")
-
-    return (IDENTITY_OK, match.FirstName, "Please wait while we validate your room number and name.")
-
-
-## =========================
-# Prompt seam
-## =========================
-# The one place the core reaches out for a terminal, and it is transitional.
-#
-# `ask`/`say` belong to a front end. Twelve call sites in this file still say
-# `validate_room()` with no arguments, because the functions containing them have not
-# moved out yet (PLAN-tkinter-frontend.md, Phase 0). Rather than break all twelve in one
-# commit, the default below resolves through the console helper module -- and
-# tests/check_ui_separation.py flags this very `import ui` as a UI reference in the core,
-# which is correct: it is one. It comes out when the last caller has moved to a front end,
-# and `validate_room()` then requires both arguments.
-#
-# Passing `ask`/`say` explicitly is the destination, not the exception: that is what makes
-# this logic testable without a keyboard and reusable from tkinter.
-_CONSOLE_BACKEND = None
-
-
-def _console_backend():
-    """Resolve (ask, say) from the console UI, for the callers not yet moved."""
-    global _CONSOLE_BACKEND
-    if _CONSOLE_BACKEND is None:
-        import ui
-
-        def ask(prompt=""):
-            return input(prompt)
-
-        def say(message=""):
-            ui.info(message)
-
-        _CONSOLE_BACKEND = (ask, say)
-    return _CONSOLE_BACKEND
-
-
-def validate_room(ask=None, say=None):
-    """Ask a guest for their identity and check it, bounded to VALIDATE_ROOM_MAX_ATTEMPTS.
-
-    Returns (room_number, first_name) on success -- the stored first name -- or
-    (None, None) once the attempts run out or the database is unreachable.
-
-    Two injected callables, both owned by the front end:
-      `ask(prompt) -> str`   read one value  (a console prompt, or a tkinter dialog)
-      `say(message) -> None` show one line   (a console message, or a label)
-
-    Splitting them is what lets this function keep the parts that are policy -- the
-    attempt cap, the retry rule, and above all the refusal wording, which must not
-    distinguish "no such surname" from "wrong first name" (docs/BOOKING.md section 1).
-    The actual lookup is `match_guest_identity()`, which neither prompts nor speaks.
-
-    Both arguments are optional only while the transitional console default is needed;
-    see the prompt seam above.
-
-    A database fault returns immediately rather than consuming a retry: an outage is
-    not a mistyped name, and re-prompting a guest three times about it helps nobody.
-    """
-    if ask is None or say is None:
-        default_ask, default_say = _console_backend()
-        ask = ask or default_ask
-        say = say or default_say
-
     for _ in range(VALIDATE_ROOM_MAX_ATTEMPTS):
-        last_name = ask("Please enter your last name: ").strip()
-        first_name = ask("Please enter your first name: ").strip()
-        room_number = ask("Please enter your room number (floor + 3-digit code): ").strip()
+        try:
+            last_name = input("Please enter your last name: ").strip()
+            first_name = input("Please enter your first name: ").strip()
+            room_number = input("Please enter your room number (floor + 3-digit code): ").strip()
+            if not last_name or not first_name or not room_number:
+                logging.info("Please enter your last name, first name, and room number.")
+                continue
 
-        outcome, stored_first, message = match_guest_identity(
-            last_name, first_name, room_number)
-        say(message)
-        if outcome == IDENTITY_OK:
-            return room_number, stored_first
-        if outcome == IDENTITY_UNAVAILABLE:
+            with get_connection() as conn:
+                if conn is None:
+                    return None, None
+                cursor = conn.cursor()
+                # Collation is case-insensitive, so this tolerates 'smith' for 'Smith'.
+                cursor.execute(
+                    "SELECT RoomNumber, FirstName FROM Reservations "
+                    "WHERE LastName = ? AND FirstName = ?",
+                    (last_name, first_name),
+                )
+                candidates = cursor.fetchall()
+
+            if not candidates:
+                # Deliberately does not distinguish "no such surname" from "wrong first
+                # name", so the prompt cannot be used to discover who is staying here.
+                logging.info("We could not find a reservation for those details. Please check your "
+                             "last name, first name, and room number.")
+                continue
+
+            # Room numbers are free-text, so compare canonically ('01001' == '1001').
+            wanted = normalize_room_number(room_number)
+            match = next(
+                (c for c in candidates
+                 if normalize_room_number(c.RoomNumber) == wanted),
+                None,
+            )
+            if match is None:
+                logging.info("That room number does not match the name you entered. Please try again.")
+                continue
+
+            logging.info("Please wait while we validate your room number and name.")
+            time.sleep(2)  # Simulate a delay for validation
+            return room_number, match.FirstName
+        except Exception as e:
+            logging.error(f"Error validating room: {e}")
             return None, None
-    say("Too many unsuccessful attempts.")
+    logging.info("Too many unsuccessful attempts.")
     return None, None
 
 

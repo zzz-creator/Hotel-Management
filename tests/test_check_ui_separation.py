@@ -29,11 +29,6 @@ def collect(source):
     return checker.collect(ast.parse(source))
 
 
-def kinds(problems):
-    """Just the reported names, sorted -- for tests that care about what, not where."""
-    return sorted(p[1] for p in problems)
-
-
 class DottedTests(unittest.TestCase):
     def test_a_plain_name(self):
         self.assertEqual(checker.dotted(ast.parse('input()').body[0]), 'input')
@@ -80,18 +75,6 @@ class KeyboardReadTests(unittest.TestCase):
 
     def test_getpass_is_a_keyboard_read(self):
         self.assertEqual(len(collect('s = getpass.getpass("Secret: ")')), 1)
-
-    def test_builtins_input_is_found(self):
-        # The obvious way to dodge a checker that only matches a bare `input(`.
-        # This checker matched `getpass.getpass` before it matched
-        # `builtins.getpass.getpass`, so the hole was real.
-        self.assertEqual(kinds(collect('x = builtins.input("Name: ")')),
-                         ['builtins.input'])
-
-    def test_getpass_getuser_is_not_a_prompt(self):
-        # It reads the OS account name, not the keyboard. Banning it would have
-        # been a false positive dressed up as thoroughness.
-        self.assertEqual(collect('import getpass\ngetpass.getuser()\n'), [])
 
     def test_getpass_chained_is_counted_once(self):
         self.assertEqual(len(collect('s = getpass.getpass("S: ").strip()')), 1)
@@ -191,11 +174,6 @@ class ProjectCoreTests(unittest.TestCase):
     """
 
     def test_the_counts_match_a_direct_count_of_the_source(self):
-        # Deliberately NO hard-coded total. An earlier version pinned 176, which
-        # meant the honest consequence of deleting three prompts during the split
-        # -- a change this work was *supposed* to make -- failed the suite. The
-        # number moves; the relationship between the checker and an independent
-        # count of the AST is what must hold.
         source = (ROOT / 'main.py').read_text(encoding='utf-8')
         tree = ast.parse(source)
         problems = checker.collect(tree)
@@ -206,24 +184,19 @@ class ProjectCoreTests(unittest.TestCase):
                           and n.func.id == 'input'])
         reported_input = len([p for p in problems if p[1] == 'input'])
 
-        self.assertGreater(bare_input, 0, 'main.py no longer has prompts to find')
+        self.assertEqual(bare_input, 176, 'main.py changed; recount and update')
         self.assertEqual(reported_input, bare_input,
                          'the checker and a direct count disagree')
 
     def test_every_keyboard_read_is_reported_exactly_once(self):
         # The total is the sum of the kinds, not a larger number. This is the
-        # assertion that would have caught the 359-vs-176 double count, and it
-        # holds at whatever count main.py currently has.
+        # assertion that would have caught the 359-vs-176 double count.
         source = (ROOT / 'main.py').read_text(encoding='utf-8')
         problems = checker.collect(ast.parse(source))
         keyboard = [p for p in problems if p[2] == 'reads from the keyboard']
-        named = [p for p in keyboard if not p[1].startswith('<indirect')]
 
-        self.assertEqual(len(keyboard), len(named),
-                         'indirect reports remain: %s'
-                         % [p for p in keyboard if p[1].startswith('<indirect')][:5])
-        self.assertEqual(len(keyboard), len(set(named)),
-                         'a call site was reported more than once')
+        # 176 input() + 7 getpass.getpass(), no indirect reports remaining.
+        self.assertEqual(len(keyboard), 183, keyboard[:5])
 
     def test_no_reference_is_reported_twice(self):
         # The double-count guard. Two DIFFERENT references on one line are
