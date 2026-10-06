@@ -53,23 +53,22 @@ already been archived or overwritten by the time the audit call happens.
 
 ---
 
-## 3. The business date is a clock, not a night audit
+## 3. The business date is a clock, not a night audit — and as of 5 Oct 2026 the clock is the wall clock
 
-**Where:** `business_date()`, `close_day()` (023). **Severity:** by design.
+**Where:** `business_date()` (023 is now historical). **Severity:** by design, changed 5 October 2026.
 
-`close_day()` moves `HotelSettings['business_date']` forward one day. It does **not** post
-the day's folios, roll occupancy, expire anything, clean rooms, or re-read rates. Reports
-are therefore *re-runnable for a chosen day* (same input, same numbers) but occupancy is
-**derived live** from `Reservations` rather than accumulated — so editing a past stay
-changes what that past day's report says. There is no stored daily fact to compare against.
+Until 5 October 2026 `business_date()` read a stored `HotelSettings['business_date']` row,
+seeded once and advanced daily by an admin panel `close_day`. That clock, `close_day`,
+`set_business_date`, the admin **Business Date** menu, and the wizard's business-date
+step were all removed at the owner's request: "today" now IS the wall clock, on the desk
+terminal. Reports that should speak about another day still can — occupancy and the
+housekeeping board take an explicit date/window (`on_date`, `start_date`/`end_date`) — so a
+closed day can be re-run by passing its date, not by rewinding the clock. The
+`business_date` settings row becomes historical; nothing reads or writes it.
 
-**Fix:** a nightly snapshot table written by a real audit job (occupancy per night, folio
-totals per day, a room-status roll-forward). That is a business-objects layer this app does
-not have.
-
-**Why it is not done:** calling the current behaviour a night audit would be a lie, and
-building the real one piecemeal would be worse. The distinction is load-bearing: the setting
-is a clock, and the docs say so in both places.
+**Fix (unchanged):** a nightly snapshot table written by a real audit job. That is a
+business-objects layer this app does not have. The clock/audit distinction remains
+load-bearing: calling the current behaviour a night audit would be a lie.
 
 ---
 

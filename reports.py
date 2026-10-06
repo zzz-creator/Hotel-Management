@@ -33,51 +33,14 @@ EXPORT_DIR = os.path.join(os.path.dirname(__file__), "exports")
 # the night it was vacated. There is no helper to import from main (it opens its
 # own connection and would be a circular import), so the rule is stated once here and the
 # pure definition lives in main.stays_overlap().
-BUSINESS_DATE_SETTING = "business_date"
-
-
 def business_date():
-    """The hotel's current business date, read from HotelSettings.
+    """The hotel's current business date -- as of 5 October 2026, just the wall clock.
 
-    The same value main.business_date() returns, read independently so reports.py
-    stays importable on its own. It is the default "which day" for every report that takes
-    a date, which is what makes a board re-runnable for a day that has already closed
-    instead of only for the wall clock's today.
-
-    Falls back to the wall clock when the setting is missing or unparseable, so a
-    database without it still produces a report. The fallback is reported, because it is
-    the difference between a reproducible figure and a silently different one.
+    Kept as a function (rather than inlined) because every "today" default in the
+    reports funnels through it. Reports that should speak about another day take an
+    explicit date or window, so a closed day can be re-run by passing its date.
     """
-    try:
-        with get_connection() as conn:
-            if conn is None:
-                return datetime.now().date()
-            cursor = conn.cursor()
-            cursor.execute("SELECT SettingValue FROM HotelSettings WHERE SettingKey = ?",
-                           (BUSINESS_DATE_SETTING,))
-            row = cursor.fetchone()
-    except Exception as e:
-        logging.error("Could not read the business date (%s: %s); using today. "
-                      "Reports will not be reproducible for a closed day.",
-                      type(e).__name__, e)
-        return datetime.now().date()
-    raw = row[0] if row is not None else None
-    if raw is None or str(raw).strip() == "":
-        logging.error("Setting '%s' is missing or blank (migration 023 not applied?); "
-                      "using today.", BUSINESS_DATE_SETTING)
-        return datetime.now().date()
-    text = str(raw).strip()
-    for pattern in ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%m/%d/%Y"):
-        try:
-            return datetime.strptime(text, pattern).date()
-        except ValueError:
-            continue
-    try:
-        return datetime.fromisoformat(text).date()
-    except ValueError:
-        logging.error("Setting '%s' is not a date ('%s'); using today.",
-                      BUSINESS_DATE_SETTING, text)
-        return datetime.now().date()
+    return datetime.now().date()
 
 
 def _coerce_date(value, pattern="%Y-%m-%d"):

@@ -42,7 +42,7 @@ install and is kept in sync by hand — a schema change lands in **both** places
 | 020 | `020_partial_booking_credit.sql` | `ReservationPayments.AppliedAmount` + range CHECK, so partial credit is representable |
 | 021 | `021_booking_ref_uniqueness.sql` | Filtered unique `UX_ReservationPayments_BookingRef_Charge` over `Deposit`/`Prepayment` |
 | 022 | `022_captured_stay_rate.sql` | `Reservations.NightlyRate` so a booked rate is locked at booking time; backfilled from the current category rate, `NULL` left for anything unknown |
-| 023 | `023_business_date.sql` | Seeds the `business_date` `HotelSettings` row — the app's single clock for "which day is it" |
+| 023 | `023_business_date.sql` | Seeds the (now historical) `business_date` `HotelSettings` row — the app's one-time clock for "which day is it" |
 | 024 | `024_loyalty_order_accrual.sql` | Recalibrates `loyalty_accrual_points_per_unit` 3 → 0.5, so F&B cannot out-earn the room |
 | 025 | `025_drop_loyalty_expiration.sql` | Deletes `loyalty_expiration_days`, a setting nothing ever read |
 
@@ -192,14 +192,13 @@ Keys: `business_date`, `peak_factor`, `offpeak_factor`, `tax_rate`,
 `loyalty_redemption_points_per_currency_unit`,
 `loyalty_points_per_night`, `loyalty_mult_<room-type-slug>`.
 
-- `business_date` (023) is an ISO `YYYY-MM-DD` **date string, not a number**, and it is
-  the app's single clock for "which day is it". `business_date()` in `main.py`
-  and `reports.py` both read it; nothing asks the wall clock for a date. It is advanced one
-  day at a time by `close_day()` from the admin **Business Date** menu, or set to an
-  explicit date. It is deliberately **not** a night audit — nothing bills, expires, cleans
-  or re-rates when it moves. A missing/blank/unparseable value falls back to the wall
-  clock so a missing clock cannot stop check-out, but it logs at **ERROR**, because the
-  fallback is the difference between a reproducible report and a wrong one.
+- `business_date` (023) is an ISO `YYYY-MM-DD` **date string, not a number**.
+  As of 5 October 2026 nothing reads it: `business_date()` in `main.py` and
+  `reports.py` return the wall clock, the admin **Business Date** menu and
+  `close_day` are gone, and a report for another day takes an explicit date
+  or window (`on_date`, `start_date`/`end_date`). The row lingers; treat it as
+  historical. The wall clock is deliberately **not** a night audit — nothing
+  bills, expires, cleans or re-rates when the day turns over.
 - `loyalty_accrual_points_per_unit` is a **fraction** (0.5), not an integer. It is read
   through `_setting_float()`; reading it as an int turns 0.5 into 0 and silently pays
   nothing for every order. It must stay **below** what a night's stay earns — see
@@ -336,7 +335,7 @@ database is a normal state during that run. These fallbacks are load-bearing.
 | 020 | The legacy whole-row credit path runs, latched by `_RESERVATION_PAYMENTS_PARTIAL_SUPPORT`. `_set_partial_credit_unsupported()` latches **only** on a missing column or table — never on a deadlock — so a transient error cannot pin the process to the legacy path |
 | 021 | Nothing breaks; `new_booking_ref()` falls back to its racy `booking_reference_exists()` probe, and a collision raises `BookingRefTaken` for `_write_booking_charge()` to retry |
 | 022 | `post_room_charge()` bills the **current** category rate, exactly as it did before, and logs that no rate was captured. `Reservations.NightlyRate` stays `NULL` for new stays. Not an error: an unapplied 022 must not stop a guest checking out |
-| 023 | `business_date()` falls back to the wall clock and logs at **ERROR**. Everything still works and every report still runs; it just is not reproducible for a day that has already closed |
+| 023 | Nothing breaks: as of 5 October 2026 `business_date()` is the wall clock, and every report still runs. What is not reproducible is re-running a historical day without passing its explicit date/window |
 | 024 | Nothing breaks. The order rate is simply still whatever the operator set; `points_per_dollar_order_vs_room()` reports the inversion on the settings screen rather than failing |
 | 025 | Nothing breaks. The `loyalty_expiration_days` row lingers, and nothing reads it |
 

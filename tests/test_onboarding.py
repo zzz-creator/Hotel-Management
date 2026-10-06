@@ -193,7 +193,7 @@ class CreateFirstUserTests(unittest.TestCase):
              mock.patch.object(app, "setup_status", return_value=ChecklistGatingTests.READY), \
              mock.patch.object(app.ui, "pause"):
             with mock.patch("builtins.input",
-                            ChecklistGatingTests()._scripted_input(["2", "7"])[0]):
+                            ChecklistGatingTests()._scripted_input(["2", "6"])[0]):
                 app.onboarding_checklist("admin")
         add_user.assert_called_once_with("master", "pw", "admin")
 
@@ -644,7 +644,6 @@ class SetupStatusTests(unittest.TestCase):
         self.assertFalse(checks["Master override account"][0])
         self.assertFalse(checks["Item catalogue"][0])
         self.assertFalse(checks["Rooms"][0])
-        self.assertFalse(checks["Business date"][0])
         # RoomTypes is seeded by database.sql, so a fresh install has this one already.
         self.assertTrue(checks["Nightly rates"][0])
 
@@ -662,7 +661,7 @@ class SetupStatusTests(unittest.TestCase):
         settings = {"business_date": "2026-10-02"}
         checks = self._status([], answers, settings=settings)
         for label in ("Staff accounts", "Master override account", "Item catalogue",
-                      "Rooms", "Nightly rates", "Business date", "Loyalty tiers"):
+                      "Rooms", "Nightly rates", "Loyalty tiers"):
             self.assertTrue(checks[label][0], label)
 
     def test_missing_master_row_is_a_failure_only_without_a_config_secret(self):
@@ -694,13 +693,6 @@ class SetupStatusTests(unittest.TestCase):
             checks = dict((l, (d, x)) for l, d, x in app.setup_status())
         self.assertFalse(any(done for done, _ in checks.values()))
         self.assertTrue(any("migration" in detail for _done, detail in checks.values()))
-
-    def test_business_date_is_checked_without_falling_back_to_the_wall_clock(self):
-        # business_date() falls back to today, so a probe built on it could never fail.
-        # The check asks get_setting() directly, which can.
-        checks = self._status([], self._answers(users=1, master=1, items=1, rooms=1,
-                                                rated=1), settings={})
-        self.assertFalse(checks["Business date"][0])
 
     def test_loyalty_row_only_appears_when_loyalty_is_on(self):
         answers = self._answers(users=1, master=1, items=1, rooms=1, rated=1)
@@ -751,7 +743,7 @@ class ChecklistGatingTests(unittest.TestCase):
 
     def test_admin_is_offered_the_actions(self):
         with mock.patch.object(app, "setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["7"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["6"])[0]), \
              mock.patch.object(app.ui, "show_menu") as show_menu:
             app.onboarding_checklist("admin")
         self.assertEqual(show_menu.call_args[0][0], "Setup actions")
@@ -760,7 +752,7 @@ class ChecklistGatingTests(unittest.TestCase):
         # An admin with a partially-filled catalogue needs to add their own item, which the
         # bare seed_default_items() call could not do.
         with mock.patch.object(app, "setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["3", "7"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["3", "6"])[0]), \
              mock.patch.object(app, "_offer_item_catalogue", return_value=2) as offer_items, \
              mock.patch.object(app, "seed_default_items") as seed, \
              mock.patch.object(app.ui, "pause"):
@@ -772,7 +764,7 @@ class ChecklistGatingTests(unittest.TestCase):
         # wizard=True would label the exit "Skip for now", which reads wrong from a screen
         # an admin deliberately navigated to.
         with mock.patch.object(app, "setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["3", "7"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["3", "6"])[0]), \
              mock.patch.object(app, "_offer_item_catalogue", return_value=0) as offer_items, \
              mock.patch.object(app.ui, "pause"):
             app.onboarding_checklist("admin")
@@ -782,7 +774,7 @@ class ChecklistGatingTests(unittest.TestCase):
         # Not create_first_user(): that one refuses once any account exists, which is
         # right for an unauthenticated wizard and wrong for a logged-in admin.
         with mock.patch.object(app, "setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["1", "bob", "s", "7"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["1", "bob", "s", "6"])[0]), \
              mock.patch.object(app, "user_exists", return_value=False), \
              mock.patch.object(app, "_prompt_new_password", return_value="pw"), \
              mock.patch.object(app, "add_user_with_password") as add_user, \
@@ -797,7 +789,7 @@ class ChecklistGatingTests(unittest.TestCase):
             with self.subTest(role=expected):
                 with mock.patch.object(app, "setup_status", return_value=self.READY), \
                      mock.patch("builtins.input",
-                                self._scripted_input(["1", "bob", letter, "7"])[0]), \
+                                self._scripted_input(["1", "bob", letter, "6"])[0]), \
                      mock.patch.object(app, "user_exists", return_value=False), \
                      mock.patch.object(app, "_prompt_new_password", return_value="pw"), \
                      mock.patch.object(app, "add_user_with_password") as add_user, \
@@ -810,7 +802,7 @@ class ChecklistGatingTests(unittest.TestCase):
         # no branch would create an account nobody can sign in to.
         with mock.patch.object(app, "setup_status", return_value=self.READY), \
              mock.patch.object(app, "_prompt_role", return_value="manager") as prompt_role, \
-             mock.patch("builtins.input", self._scripted_input(["1", "bob", "m", "7"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["1", "bob", "m", "6"])[0]), \
              mock.patch.object(app, "user_exists", return_value=False), \
              mock.patch.object(app, "_prompt_new_password", return_value="pw"), \
              mock.patch.object(app, "add_user_with_password"), \
@@ -820,7 +812,7 @@ class ChecklistGatingTests(unittest.TestCase):
 
     def test_existing_username_is_not_re_inserted(self):
         with mock.patch.object(app, "setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["1", "bob", "a", "7"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["1", "bob", "a", "6"])[0]), \
              mock.patch.object(app, "user_exists", return_value=True), \
              mock.patch.object(app, "_prompt_new_password", return_value="pw"), \
              mock.patch.object(app, "add_user_with_password") as add_user, \
@@ -830,7 +822,7 @@ class ChecklistGatingTests(unittest.TestCase):
 
     def test_role_check_is_case_insensitive(self):
         with mock.patch.object(app, "setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["7"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["6"])[0]), \
              mock.patch.object(app.ui, "show_menu") as show_menu:
             app.onboarding_checklist("ADMIN")
         show_menu.assert_called_once()
@@ -838,7 +830,7 @@ class ChecklistGatingTests(unittest.TestCase):
     def test_seven_returns_rather_than_looping_forever(self):
         # The menu must have a way out that does not depend on the database.
         with mock.patch.object(app, "setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["7"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["6"])[0]), \
              mock.patch.object(app.ui, "show_menu") as show_menu:
             app.onboarding_checklist("admin")
         self.assertEqual(show_menu.call_count, 1)
@@ -1009,13 +1001,13 @@ class WizardStepGuardsTests(unittest.TestCase):
         self._run(self._answers(users=6, items=15, rooms=138180))
         self.assertIn((app.ONBOARDING_SETTING, "1"), self.settings_written)
 
-    def test_only_the_business_date_is_left_to_confirm(self):
-        # With items, rooms and accounts all present, the business date is the one step
-        # still worth asking about -- it is a clock, not a catalogue, and "today" is a
-        # reasonable thing to offer. Anything else here means a guard is missing.
+    def test_no_business_date_prompt_remains_in_the_wizard(self):
+        # The wizard no longer asks about the business date: with items, rooms and
+        # accounts present its only remaining job is to mark itself complete. Asking
+        # about it again means the stored clock crept back in.
         fake_ui = self._run(self._answers(users=6, items=15, rooms=138180))
         asked = [c.args[0] for c in fake_ui.ask_confirmation.call_args_list]
-        self.assertEqual(asked, ["Set it to today instead?"])
+        self.assertNotIn("Set it to today instead?", asked)
         self.assertTrue(fake_ui.box.called)
 
 

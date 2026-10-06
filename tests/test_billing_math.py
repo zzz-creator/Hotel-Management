@@ -207,66 +207,15 @@ class CapturedRateTests(unittest.TestCase):
 class BusinessDateTests(unittest.TestCase):
     """One clock for "which day is it", and reports that can be re-run for a past day."""
 
-    def test_reads_the_stored_business_date(self):
-        # Not GETDATE(), and not the desk terminal's clock: the value the operator set.
-        with mock.patch.object(app, "get_setting", return_value="2026-03-04") as get_setting:
-            self.assertEqual(app.business_date(), date(2026, 3, 4))
-        get_setting.assert_called_once_with(app.BUSINESS_DATE_SETTING, None)
+    def test_business_date_is_just_today(self):
+        # As of 5 October 2026 the operator-set clock was removed at the owner's request:
+        # "today" is the wall clock. Reports take an explicit date/window for re-runs.
+        self.assertEqual(app.business_date(), datetime.now().date())
 
-    def test_close_day_moves_one_day_at_a_time(self):
-        with mock.patch.object(app, "get_setting", return_value="2026-03-04"), \
-             mock.patch.object(app, "set_setting", return_value=True) as set_setting:
-            self.assertEqual(app.close_day(), date(2026, 3, 5))
-        set_setting.assert_called_once_with(app.BUSINESS_DATE_SETTING, "2026-03-05")
-
-    def test_close_day_touches_nothing_else(self):
-        # A night audit would post folios, roll occupancy, clean rooms and re-read rates.
-        # This must not, and pretending it does is how a PMS ends up billing a guest on a
-        # day nobody closed. Checked on the names close_day() actually CALLS, so the
-        # docstring saying "no room is cleaned" cannot fail the test.
-        called = " ".join(app.close_day.__code__.co_names)
-        self.assertIn("business_date", called)
-        self.assertIn("set_business_date", called)
-        for forbidden in ("award_stay_points", "post_room_charge", "clean_room",
-                          "update_room_status", "get_connection", "log_audit"):
-            self.assertNotIn(forbidden, called, f"close_day() must not call {forbidden}")
-
-    def test_set_business_date_rejects_an_impossible_date(self):
-        self.assertIsNone(app.set_business_date("2026-13-45"))
-        self.assertIsNone(app.set_business_date(None))
-
-    def test_set_business_date_reports_a_failed_write(self):
-        with mock.patch.object(app, "set_setting", return_value=False):
-            self.assertIsNone(app.set_business_date(date(2026, 3, 5)))
-
-    def test_missing_setting_falls_back_to_the_wall_clock(self):
-        # A database without migration 023 must still check guests out; the fallback is
-        # logged at ERROR precisely because it is the difference between a reproducible
-        # report and a silently different one.
-        with mock.patch.object(app, "get_setting", return_value=None), \
-             self.assertLogs(app.logging.root, level="ERROR"):
-            self.assertIsInstance(app.business_date(), date)
-
-    def test_unparseable_setting_falls_back_instead_of_raising(self):
-        with mock.patch.object(app, "get_setting", return_value="not-a-date"), \
-             self.assertLogs(app.logging.root, level="ERROR"):
-            self.assertIsInstance(app.business_date(), date)
-
-    def test_blank_setting_falls_back_instead_of_raising(self):
-        with mock.patch.object(app, "get_setting", return_value="   "), \
-             self.assertLogs(app.logging.root, level="ERROR"):
-            self.assertIsInstance(app.business_date(), date)
-
-    def test_a_dead_connection_does_not_stop_check_out(self):
-        with mock.patch.object(app, "get_setting", side_effect=Exception("no connection")):
-            with self.assertLogs(app.logging.root, level="ERROR"):
-                self.assertIsInstance(app.business_date(), date)
-
-    def test_a_pyodbc_datetime_still_parses(self):
-        # If the column is ever typed DATETIME, pyodbc hands back a datetime and the
-        # reader must not fall back to the wall clock on a perfectly good value.
-        with mock.patch.object(app, "get_setting", return_value="2026-03-04T00:00:00"):
-            self.assertEqual(app.business_date(), date(2026, 3, 4))
+    def test_business_date_ignores_the_stored_setting(self):
+        # A stale HotelSettings row must not move the clock.
+        with mock.patch.object(app, "get_setting", return_value="1999-01-01"):
+            self.assertEqual(app.business_date(), datetime.now().date())
 
 
 class ReportDateWindowTests(unittest.TestCase):
@@ -274,7 +223,8 @@ class ReportDateWindowTests(unittest.TestCase):
 
     They disagreed with each other about the same rows -- occupancy counted a night as
     sold while `CheckOutDate > night`, housekeeping used `>=` -- and neither could be
-    re-run for a day that had already closed.
+    re-run for a day that had already closed. Each takes an explicit date/window so a
+    closed day can be re-run by passing its date.
     """
 
     def _capture(self, fn, **kwargs):
@@ -307,8 +257,9 @@ class ReportDateWindowTests(unittest.TestCase):
 
     def test_housekeeping_uses_the_half_open_window(self):
         sql = " ".join(s for s, _ in self._capture(reports.export_housekeeping))
-        self.assertNotIn("GETDATE()", sql,
-                         "the board must not read the wall clock")
+        self.assertNotIn("GETDATE()", sql)
+        self.assertNotIn("HotelSettings", sql,
+                         "the stored business-date clock was removed; today's date comes from the wall clock")
         self.assertIn("CheckOutDate >", sql,
                       "a guest departing on the 4th is not in house on the 4th")
         self.assertNotIn("CheckOutDate >=", sql)
@@ -320,7 +271,7 @@ class ReportDateWindowTests(unittest.TestCase):
             if "CheckOutDate >" in sql:
                 self.assertEqual(params[1], date(2026, 3, 4))
 
-    def test_housekeeping_falls_back_to_the_business_date(self):
+    def test_housekeeping_defaults_to_the_wall_clock(self):
         conn_seen = []
 
         class FakeCursor:
@@ -345,8 +296,9 @@ class ReportDateWindowTests(unittest.TestCase):
                 reports.export_housekeeping()
             except Exception:
                 pass
-        self.assertTrue(any("HotelSettings" in sql for sql, _ in conn_seen),
-                        "the board must default to the stored business date")
+        sql = " ".join(s for s, _ in conn_seen)
+        self.assertNotIn("HotelSettings", sql,
+                         "the board no longer reads the stored business date")
 
     def test_occupancy_takes_a_window(self):
         seen = self._capture(reports.export_occupancy, start_date="2026-03-01",

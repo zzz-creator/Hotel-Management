@@ -44,7 +44,7 @@ python main.py
 
 On first run the app detects that setup has not happened and walks you through it: it creates
 your first administrator login, then offers a starter item catalogue (or lets you type your
-own), a room layout, a `master` override account, and the business date. It runs once. After
+own), a room layout, and a `master` override account. It runs once. After
 that, **Admin Panel → 34. Setup Checklist** shows what is still outstanding and can finish the
 job.
 

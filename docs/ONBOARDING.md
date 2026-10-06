@@ -9,7 +9,7 @@ Read this after `database.sql` has been applied and before anyone tries to log i
 > **Most of this runbook is now automated.** The first time you start the app against a
 > database that has never been set up, a **first-run wizard** runs before the main menu and
 > walks you through it: it creates your first administrator, and offers starter items,
-> rooms and the business date. Every step after the login is optional and skippable.
+> and rooms. Every step after the login is optional and skippable.
 >
 > **Admin Panel → 34. Setup Checklist** shows what is still outstanding at any time, and can
 > re-run the setup actions. It lives in the Admin Panel rather than the main menu on
@@ -203,15 +203,15 @@ checks in.
 
 ## 8. The business date
 
-**Admin Panel → 26. Business Date**. This app's "today" is a stored value, not the wall
-clock, so that yesterday's report still says yesterday after you close the day.
-`close_day()` moves it forward one day. It does **not** post folios, roll occupancy or clean
-rooms — see DEVIATIONS.md §3, because the difference is load-bearing.
+As of 5 October 2026 there is nothing to set: the business date IS today's date, and
+`close_day` / the stored `HotelSettings['business_date']` clock were removed. (If your
+run of this guide predates that change, the stored clock and the Admin Panel
+**Business Date** entry are gone; the migrations 001-025 already applied still carry the
+row, which the app now ignores.)
 
-Set it once at go-live and close it daily. Do not set it backwards casually; reports are
-re-runnable for any date you choose, which is the point.
-
----
+A report for a day that has closed still works -- occupancy and the housekeeping board
+take an explicit date or window (`on_date`, `start_date`/`end_date`); pass the date, the
+clock does not need to be rewound.
 
 ## 9. Smoke test
 
@@ -249,7 +249,7 @@ Everything the wizard cannot reach, in order:
    `[hotel] master_secret`. Copy `config.ini.example` and fill it in, or there is no
    connection at all and `get_connection()` yields `None` on every call.
 3. **Applying migrations 001-025** in order, for a database that already has data.
-4. **Setting the business date once at go-live**, and closing it daily (§8).
+4. **Nothing** -- the business date is just today, as of 5 October 2026.
 5. **Nightly rates** if the seeded `RoomTypes` prices are wrong for your hotel (§4).
 
 One warning that catches everyone: **never run `database.sql` against a database that

@@ -102,22 +102,10 @@ def main():
                 problems += 1
         print()
 
-        print('023 business_date row:')
+        print('023 business_date row (historical, no longer read by the app):')
         row = one(cursor, 'SELECT SettingValue FROM dbo.HotelSettings '
                            "WHERE SettingKey = N'business_date'")
-        if row is None or row[0] is None or str(row[0]).strip() == '':
-            print('%-42s MISSING or blank -- business_date() falls back to the wall clock'
-                  % 'HotelSettings.business_date')
-            problems += 1
-        else:
-            value = str(row[0]).strip()
-            try:
-                parsed = datetime.strptime(value, '%Y-%m-%d').date()
-            except ValueError:
-                print('%-42s NOT AN ISO DATE: %r' % ('HotelSettings.business_date', value))
-                problems += 1
-            else:
-                print('%-42s OK (%s)' % ('HotelSettings.business_date', parsed))
+        print('%-42s %r' % ('HotelSettings.business_date (informational)', None if row is None else row[0]))
         print()
 
         print('024 order accrual (must be a positive fraction, not 0):')
@@ -184,8 +172,7 @@ def main():
     else:
         print('%-42s OK' % 'captured-rate probe')
 
-    settings = app.get_setting(app.BUSINESS_DATE_SETTING, None)
-    print('%-42s %r' % ('app.get_setting("business_date")', settings))
+    print('%-42s informational: busDate is the wall clock as of 5 Oct 2026' % 'app.business_date()')
 
     # The earn-rate ordering. A fresh install and a migrated one must agree, or the
     # calibration in the settings screen means different things on each.

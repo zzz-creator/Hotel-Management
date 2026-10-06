@@ -43,7 +43,8 @@ LOYALTY_POINTS_PER_NIGHT = config.getint('loyalty', 'points_per_night', fallback
 LOYALTY_REDEMPTION_POINTS_PER_CURRENCY_UNIT = config.getint('loyalty', 'redemption_points_per_currency_unit', fallback=100)
 # The floor for "which day is it", used only when HotelSettings has no usable
 # business_date row (before migration 023, or if an admin blanks it).
-BUSINESS_DATE_SETTING = "business_date"
+# The 'business_date' HotelSettings row (migration 023) is historical: the app no longer
+# reads or writes it; "today" is the wall clock. See docs/DEVIATIONS.md §3 (rewritten 5 Oct 2026).
 # HotelSettings key recording that the first-run wizard finished. Nothing seeds this row on
 # purpose: ABSENCE is what "not onboarded yet" means, so a fresh database is correctly
 # read as needing setup without anyone having had to remember to insert a '0' first.
@@ -328,82 +329,15 @@ def reservation_window_active(check_in, check_out, today):
 
 
 def business_date():
-    """The hotel's current business date -- the ONE clock for "which day is it".
+    """The hotel's current business date -- as of 5 October 2026, just the wall clock.
 
-    Read from `HotelSettings['business_date']`, seeded to the day the database was
-    created and advanced one day at a time by `close_day()`. Every "today" in the app
-    comes from here, so the housekeeping board, the arrivals board, the refund window,
-    availability and both occupancy reports are all answering about the same day and can
-    be re-run for a day that has already closed.
-
-    Deliberately NOT a night audit: it does not bill, expire, or roll anything forward.
-    It is a clock the operator controls, nothing more.
-
-    Falls back to the wall clock when the setting is missing or unparseable, because a
-    missing clock must not stop the front desk from checking a guest out. The fallback
-    says so at error level, since it is the difference between a reproducible report and
-    a wrong one.
+    The operator-controlled `HotelSettings['business_date']` clock and `close_day()` were
+    removed at the owner's request: "today" now IS today, on the desk terminal. Reports
+    that should speak about another day still can -- occupancy, housekeeping and the
+    invoice/day views take an explicit date or window -- so a day that has closed can be
+    re-run by passing its date, not by rewinding the clock.
     """
-    try:
-        raw = get_setting(BUSINESS_DATE_SETTING, None)
-    except Exception as e:
-        logging.error(f"Could not read the business date ({type(e).__name__}: {e}); using today.")
-        return datetime.now().date()
-    if raw is None or str(raw).strip() == "":
-        logging.error(
-            f"Setting '{BUSINESS_DATE_SETTING}' is missing or blank (migration 023 not "
-            "applied?); using today. Reports for a closed day will not be reproducible "
-            "until it is set.")
-        return datetime.now().date()
-    text = str(raw).strip()
-    for pattern in ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%m/%d/%Y"):
-        try:
-            return datetime.strptime(text, pattern).date()
-        except ValueError:
-            continue
-    # A datetime string is what pyodbc hands back if the column was ever typed DATETIME.
-    try:
-        return datetime.fromisoformat(text).date()
-    except ValueError:
-        pass
-    logging.error(f"Setting '{BUSINESS_DATE_SETTING}' is not a date ('{text}'); using today.")
     return datetime.now().date()
-
-
-def set_business_date(on_date):
-    """Write the business date. Returns the stored date, or None when it could not be set.
-
-    Deliberately NOT gated on the master override: rolling the clock back or forward is
-    a pricing-neutral, reversible setting, and requiring an override to open the next
-    business day would make it a thing staff avoid using. `close_day()` still asks for
-    confirmation, because that is the irreversible-looking one.
-    """
-    if on_date is None:
-        return None
-    if hasattr(on_date, "date"):
-        on_date = on_date.date()
-    if not isinstance(on_date, date):
-        try:
-            on_date = datetime.strptime(str(on_date).strip(), "%Y-%m-%d").date()
-        except ValueError:
-            logging.info("A business date must be YYYY-MM-DD.")
-            return None
-    # set_setting() already writes the AuditLog row for this key; the date is the value
-    # being stored, so there is nothing extra to record here.
-    if not set_setting(BUSINESS_DATE_SETTING, on_date.isoformat()):
-        return None
-    return on_date
-
-
-def close_day():
-    """Advance the business date by one day. Returns the new date, or None.
-
-    Nothing else happens: no room is cleaned, no rate re-read, no point balance touched.
-    The advance exists so that "today" is an operator-controlled value the reports can
-    be re-run against, and that is the whole of it.
-    """
-    current = business_date()
-    return set_business_date(current + timedelta(days=1))
 
 
 ## =========================
@@ -4153,7 +4087,6 @@ def admin_panel():
                 "24. Manage Discount Codes",
                 "---- Pricing & Settings ----",
                 "25. Manage Pricing & Settings",
-                "26. Business Date (Close the Day)",
                 "---- Loyalty ----",
                 "27. Loyalty Management",
                 "---- Reports ----",
@@ -4312,8 +4245,6 @@ def admin_panel():
                 manage_discount_codes()
             elif choice == '25':
                 manage_pricing_rules()
-            elif choice == '26':
-                manage_business_date()
             elif choice == '27':
                 loyalty_admin_menu()
             elif choice == '28':
@@ -4850,61 +4781,6 @@ def view_room_type_rates():
             logging.info("Nightly rate cannot be negative.")
             continue
         update_room_type_rate(room_type, new_rate)
-
-
-def manage_business_date():
-    """Admin: see the business date, close the day, or set it by hand.
-
-    Closing the day is one button, not a procedure, and says exactly what it does: it
-    moves the one clock. It does not clean rooms, re-read rates, expire points, or bill
-    anything -- there is no night audit in this app, and pretending otherwise would be
-    worse than not having it.
-    """
-    current = business_date()
-    ui.show_table("Business Date", ["Setting", "Value"], [
-        ("Current business date", str(current)),
-        ("Wall-clock date", str(datetime.now().date())),
-    ])
-    ui.show_menu("Business Date", [
-        "1. Close the day (advance to the next date)",
-        "2. Set the business date to a specific date",
-        "3. Back to Admin Panel",
-    ])
-    choice = input("Enter your choice: ").strip()
-    if choice == '1':
-        if not ui.ask_confirmation(
-                f"Advance the business date from {current} to {current + timedelta(days=1)}?",
-                default="n"):
-            logging.info("The business date was not changed.")
-            return
-        new_date = close_day()
-        if new_date is None:
-            logging.info("Could not write the business date. It is unchanged at "
-                         f"{current}. Is the settings table writable?")
-            return
-        logging.info(f"Business date is now {new_date}. Every board and report now reads "
-                     f"that day, and you can re-run any of them for it.")
-    elif choice == '2':
-        on_date = ui.ask_date("Enter the business date (YYYY-MM-DD)", default=str(current))
-        if on_date is None:
-            return
-        if on_date == current:
-            logging.info(f"The business date is already {on_date}.")
-            return
-        if not ui.ask_confirmation(f"Set the business date to {on_date} (it is currently "
-                                   f"{current})?", default="n"):
-            logging.info("The business date was not changed.")
-            return
-        new_date = set_business_date(on_date)
-        if new_date is None:
-            logging.info("Could not write the business date. It is unchanged at "
-                         f"{current}. Is the settings table writable?")
-            return
-        logging.info(f"Business date set to {new_date}.")
-    elif choice == '3':
-        return
-    else:
-        logging.info("Invalid choice. Please try again.")
 
 
 def manage_pricing_rules():
@@ -8514,13 +8390,6 @@ def setup_status():
     else:
         checks.append(("Nightly rates", True, f"{rated} priced category(s)"))
 
-    raw_date = get_setting(BUSINESS_DATE_SETTING, None)
-    if raw_date is None or str(raw_date).strip() == "":
-        checks.append(("Business date", False,
-                       "not set -- reports cannot be re-run for a day that has closed"))
-    else:
-        checks.append(("Business date", True, f"{business_date().isoformat()}"))
-
     if LOYALTY_ENABLED:
         tiers = _scalar_count("SELECT COUNT(*) FROM LoyaltyTiers")
         if tiers is None:
@@ -8665,14 +8534,6 @@ def run_first_run_onboarding():
                      "Skipping this is fine: the first booking registers its own room.")
         _offer_room_layout(wizard=True)
 
-    # --- 5. Business date. ---
-    ui.info("\n-- Step 5: business date --")
-    logging.info("This app's 'today' is a stored value, not the wall clock, so yesterday's "
-                 "report still says yesterday after you close the day. It is currently %s.",
-                 business_date().isoformat())
-    if ui.ask_confirmation("Set it to today instead?", default="n"):
-        set_business_date(datetime.now().date())
-
     mark_onboarding_complete()
     log_audit("CREATE", "Setting", ONBOARDING_SETTING, "First-run onboarding completed")
 
@@ -8738,9 +8599,8 @@ def onboarding_checklist(role="admin"):
             "2. Create the 'master' override account",
             "3. Add items (starter catalogue, or your own)",
             "4. Seed rooms",
-            "5. Set the business date to today",
-            "6. Re-check",
-            "7. Back to Admin Panel",
+            "5. Re-check",
+            "6. Back to Admin Panel",
         ])
         choice = input("Enter your choice: ").strip()
         if choice == '1':
@@ -8778,11 +8638,8 @@ def onboarding_checklist(role="admin"):
         elif choice == '4':
             _offer_room_layout()
         elif choice == '5':
-            set_business_date(datetime.now().date())
-            logging.info("Business date set to %s.", business_date().isoformat())
-        elif choice == '6':
             continue
-        elif choice == '7':
+        elif choice == '6':
             return
         else:
             logging.info("Invalid choice. Please try again.")
