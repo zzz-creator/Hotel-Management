@@ -403,18 +403,18 @@ class SettingsTests(unittest.TestCase):
         with mock.patch.object(app, "get_setting", return_value="0.0825"):
             self.assertAlmostEqual(app.get_tax_rate(), 0.0825)
 
-    def test_tax_rate_falls_back_to_the_config_default(self):
+    def test_tax_rate_falls_back_to_the_default(self):
         with mock.patch.object(app, "get_setting", return_value=None):
-            self.assertAlmostEqual(app.get_tax_rate(), app.TAX_RATE)
+            self.assertAlmostEqual(app.get_tax_rate(), 0.13)
 
     def test_garbage_tax_rate_falls_back_instead_of_raising(self):
         # A typo in the settings table must not be able to break check-out.
         with mock.patch.object(app, "get_setting", return_value="not-a-number"):
-            self.assertAlmostEqual(app.get_tax_rate(), app.TAX_RATE)
+            self.assertAlmostEqual(app.get_tax_rate(), 0.13)
 
     def test_blank_tax_rate_falls_back(self):
         with mock.patch.object(app, "get_setting", return_value="   "):
-            self.assertAlmostEqual(app.get_tax_rate(), app.TAX_RATE)
+            self.assertAlmostEqual(app.get_tax_rate(), 0.13)
 
     def test_garbage_price_factor_falls_back(self):
         with mock.patch.object(app, "get_setting", return_value="high"):
@@ -423,9 +423,9 @@ class SettingsTests(unittest.TestCase):
 
     def test_garbage_loyalty_settings_fall_back(self):
         with mock.patch.object(app, "get_setting", return_value="lots"):
-            self.assertEqual(app.get_loyalty_points_per_night(), app.LOYALTY_POINTS_PER_NIGHT)
+            self.assertEqual(app.get_loyalty_points_per_night(), 100)
             self.assertEqual(app.get_loyalty_accrual_points_per_unit(),
-                             app.LOYALTY_ACCRUAL_POINTS_PER_UNIT)
+                             0.5)
 
     def test_expiration_settings_are_gone(self):
         # Migration 025 removed a knob that was editable on screen but read by nothing,
@@ -464,16 +464,16 @@ class SettingsTests(unittest.TestCase):
         # a typo in HotelSettings silently switched the whole order programme off.
         with mock.patch.object(app, "get_setting", return_value="   "):
             self.assertEqual(app.get_loyalty_accrual_points_per_unit(),
-                             app.LOYALTY_ACCRUAL_POINTS_PER_UNIT)
-        self.assertGreater(app.LOYALTY_ACCRUAL_POINTS_PER_UNIT, 0)
+                             0.5)
+        self.assertGreater(0.5, 0)
 
     def test_order_rate_is_below_the_room_rate(self):
         # The calibration: 100 points on a $120 Standard night is 0.83 pts/$, so the order
         # rate has to sit below it. At the old 3 pts/$, a guest earned 3.6x more per
         # dollar ordering than for the room they slept in.
         order, room = app.points_per_dollar_order_vs_room(
-            order_rate=app.LOYALTY_ACCRUAL_POINTS_PER_UNIT,
-            per_night=app.LOYALTY_POINTS_PER_NIGHT,
+            order_rate=0.5,
+            per_night=100,
             nightly_rate=120.0)
         self.assertLess(order, room, "ordering must not out-earn the room")
 
@@ -489,7 +489,7 @@ class SettingsTests(unittest.TestCase):
         # Pinned to the seed on purpose: a database that has re-priced Standard must not
         # silently move the calibration the settings screen is judged against.
         _order, room = app.points_per_dollar_order_vs_room()
-        expected = app.LOYALTY_POINTS_PER_NIGHT / app.DEFAULT_ROOM_TYPE_RATES["Standard"]
+        expected = 100 / app.DEFAULT_ROOM_TYPE_RATES["Standard"]
         self.assertAlmostEqual(room, expected)
 
     def test_an_unknown_room_rate_does_not_invert_the_calibration(self):

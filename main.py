@@ -25,22 +25,10 @@ server = config.get('database', 'server', fallback='' )
 database = config.get('database', 'database', fallback='')
 username = config.get('database', 'username', fallback='')
 password = config.get('database', 'password', fallback='')
-#HOTEL
-HOTEL_NAME = config.get('hotel', 'name', fallback='')
-TAX_RATE = config.getfloat('hotel', 'tax', fallback=0)
-LOCKOUT_THRESHOLD = config.getint('hotel', 'lockout_threshold', fallback=3)
-LOCKOUT_DURATION = config.getint('hotel', 'lockout_duration', fallback=5)
-MASTER_OVERRIDE = config.get('hotel', 'master_override', fallback='master')
-MASTER_SECRET = config.get('hotel', 'master_secret', fallback='master')
-# Loyalty configuration
-LOYALTY_ENABLED = config.getboolean('loyalty', 'enabled', fallback=False)
-# A FLOAT, not an int: order accrual has to sit BELOW the room earn rate (see
-# points_per_dollar_order_vs_room) to stay calibrated, and any integer rate is either
-# equal to or larger than it. 0.5 pts/$ of F&B against 0.83 pts/$ for a Standard room is
-# the ordering a real programme has -- the room is the thing being bought.
-LOYALTY_ACCRUAL_POINTS_PER_UNIT = config.getfloat('loyalty', 'accrual_points_per_unit', fallback=0.5)
-LOYALTY_POINTS_PER_NIGHT = config.getint('loyalty', 'points_per_night', fallback=100)
-LOYALTY_REDEMPTION_POINTS_PER_CURRENCY_UNIT = config.getint('loyalty', 'redemption_points_per_currency_unit', fallback=100)
+# config.ini carries ONLY the database connection. Everything hotel-specific (name, tax,
+# lockout, loyalty rates) lives in the HotelSettings table and is edited from the admin
+# "Pricing & Settings" menu -- see docs/SCHEMA.md. _ensure_database_config()
+# prompts for these values and writes config.ini when it is missing.
 # The floor for "which day is it", used only when HotelSettings has no usable
 # business_date row (before migration 023, or if an admin blanks it).
 # The 'business_date' HotelSettings row (migration 023) is historical: the app no longer
@@ -92,8 +80,6 @@ CURRENT_USER = "system"
 # Like CURRENT_USER it stays set across menus, but Sign Out on the Customer or Bookings
 # menu clears it: the next visitor must log in fresh rather than inherit this session.
 CURRENT_CUSTOMER = None
-# Failed booking-desk login attempts before the guest is told to stop.
-CUSTOMER_LOGIN_MAX_ATTEMPTS = 3
 # Folio charge groups. The room charge is never discounted; discount codes and loyalty
 # tier discounts apply to F&B only (see bill_room_transactions).
 CHARGE_GROUP_ROOM = "Room"
@@ -108,6 +94,53 @@ CONNECTION_STRING = (
 )
 import db
 db.init(CONNECTION_STRING)
+
+
+def _ensure_database_config():
+    """Make sure config.ini holds a usable [database] section, prompting if it does not.
+
+    Runs before anything that opens a connection -- including the onboarding marker
+    check -- because a fresh checkout has no config.ini at all, so there is nothing to
+    read the marker through. On a non-interactive run (tests, piped stdin) it only
+    warns and leaves the database connection down; every get_connection() caller
+    already handles a None connection.
+    """
+    global server, database, username, password, CONNECTION_STRING
+    if (config.get('database', 'server', fallback='').strip()
+            and config.get('database', 'database', fallback='').strip()
+            and config.get('database', 'username', fallback='').strip()):
+        return
+    if not sys.stdin.isatty():
+        logging.warning("config.ini is missing its [database] section and stdin is not "
+                        "interactive -- cannot prompt. Copy config.ini.example to "
+                        "config.ini and fill in server, database, username and password.")
+        return
+    ui.info("No database connection is configured yet. Let's set one up.")
+    server = input("SQL Server host [localhost]: ").strip() or 'localhost'
+    database = input("Database name [hotelSystem]: ").strip() or 'hotelSystem'
+    username = input("Database user [admin]: ").strip() or 'admin'
+    import getpass as _getpass
+    password = _getpass.getpass("Database password: ")
+    try:
+        with open(config_path, 'w', encoding='utf-8') as fh:
+            fh.write("[database]\n")
+            fh.write(f"server = {server}\n")
+            fh.write(f"database = {database}\n")
+            fh.write(f"username = {username}\n")
+            fh.write(f"password = {password}\n")
+        logging.info("Wrote %s. Everything else is configured from the admin menus.", config_path)
+    except OSError as e:
+        logging.error("Could not write %s: %s", config_path, e)
+        return
+    config.read(config_path)
+    CONNECTION_STRING = (
+        'DRIVER={ODBC Driver 17 for SQL Server};'
+        f'SERVER={server};'
+        f'DATABASE={database};'
+        f'UID={username};'
+        f'PWD={password}'
+    )
+    db.init(CONNECTION_STRING)
 # Set up logging
 #logging.basicConfig(filename='hotel_management.log', level=logging.DEBUG, format='%(asctime)s:%(levelname)s:%(message)s')
 class CustomFormatter(logging.Formatter):
@@ -149,17 +182,14 @@ def require_master_override(prompt="Enter master override secret: "):
     """Verify the master override secret, returning True when it is granted.
 
     Centralises the check used by admin_login(), the fraud-unlock path, and the
-    destructive admin actions. The configured [hotel] master_secret is tried first; if
-    config.ini has none, the plaintext 'master' account in Users is accepted, so the
-    override still works on a fresh checkout. Compare is plaintext on purpose (see
-    AGENTS.md -- this is a teaching project and passwords are stored in the clear).
+    destructive admin actions. The secret is the password of the plaintext 'master'
+    account in Users, matching on username alone. Compare is plaintext on purpose
+    (see AGENTS.md -- this is a teaching project and passwords are stored in the clear).
     """
     secret = getpass.getpass(prompt).strip()
     if not secret:
         logging.info("A master override secret is required for this action.")
         return False
-    if MASTER_SECRET is not None and secret == MASTER_SECRET:
-        return True
     try:
         with get_connection() as conn:
             if conn is None:
@@ -289,7 +319,42 @@ def get_offpeak_factor():
 
 def get_tax_rate():
     """Current sales tax rate as a decimal (e.g. 0.13 == 13%)."""
-    return _setting_float('tax_rate', TAX_RATE)
+    return _setting_float('tax_rate', 0.13)
+
+
+def get_hotel_name():
+    """The hotel's display name, seeded into HotelSettings and editable by admins."""
+    try:
+        name = get_setting('hotel_name', None)
+        return str(name).strip() if name and str(name).strip() else "The Grand Oasis Hotel"
+    except Exception:
+        return "The Grand Oasis Hotel"
+
+
+def get_loyalty_enabled():
+    """Whether the loyalty programme is on. Stored as '1'/'0' text in HotelSettings."""
+    try:
+        raw = get_setting('loyalty_enabled', None)
+        if raw is None or str(raw).strip() == '':
+            return True
+        return str(raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+    except Exception:
+        return True
+
+
+def get_lockout_threshold():
+    """Failed admin login attempts before lockout."""
+    return _setting_int('lockout_threshold', 3)
+
+
+def get_lockout_duration():
+    """Lockout length in minutes."""
+    return _setting_int('lockout_duration', 5)
+
+
+def get_customer_login_max_attempts():
+    """Failed guest (booking desk) login attempts before the menu stops asking."""
+    return _setting_int('customer_login_max_attempts', 3)
 
 
 def get_loyalty_accrual_points_per_unit():
@@ -299,16 +364,16 @@ def get_loyalty_accrual_points_per_unit():
     rate -- see `points_per_dollar_order_vs_room()`, which fails if the two are ever
     reordered. `_setting_float` keeps an admin typo from breaking check-out.
     """
-    return _setting_float('loyalty_accrual_points_per_unit', LOYALTY_ACCRUAL_POINTS_PER_UNIT)
+    return _setting_float('loyalty_accrual_points_per_unit', 0.5)
 
 
 def get_loyalty_redemption_points_per_currency_unit():
-    return _setting_int('loyalty_redemption_points_per_currency_unit', LOYALTY_REDEMPTION_POINTS_PER_CURRENCY_UNIT)
+    return _setting_int('loyalty_redemption_points_per_currency_unit', 100)
 
 
 def get_loyalty_points_per_night():
     """Base loyalty points awarded per night stayed (before category/tier multipliers)."""
-    return _setting_int('loyalty_points_per_night', LOYALTY_POINTS_PER_NIGHT)
+    return _setting_int('loyalty_points_per_night', 100)
 
 
 def points_per_dollar_order_vs_room(order_rate=None, per_night=None, nightly_rate=None):
@@ -321,8 +386,8 @@ def points_per_dollar_order_vs_room(order_rate=None, per_night=None, nightly_rat
     which is the whole point. `nightly_rate` defaults to the seeded Standard rate, so a
     database that has re-priced Standard does not silently move the calibration.
     """
-    order = float(order_rate if order_rate is not None else LOYALTY_ACCRUAL_POINTS_PER_UNIT)
-    per_night_value = int(per_night if per_night is not None else LOYALTY_POINTS_PER_NIGHT)
+    order = float(order_rate if order_rate is not None else 0.5)
+    per_night_value = int(per_night if per_night is not None else 100)
     rate = float(nightly_rate if nightly_rate is not None else DEFAULT_ROOM_TYPE_RATES["Standard"])
     room = (per_night_value / rate) if rate > 0 else 0.0
     return order, room
@@ -758,7 +823,7 @@ def ensure_room_types_seeded():
 ## =========================
 def ensure_loyalty_tables():
     """Create loyalty tables if they don't exist."""
-    if not LOYALTY_ENABLED:
+    if not get_loyalty_enabled():
         return
     with get_connection() as conn:
         if conn is None:
@@ -810,7 +875,7 @@ def customer_id_for_stay(room_number, check_in=None):
 
 def ensure_customer_loyalty_account(customer_id) -> bool:
     """Ensure a loyalty account exists for this customer. No-op without migration 019."""
-    if not LOYALTY_ENABLED or not customer_id:
+    if not get_loyalty_enabled() or not customer_id:
         return False
     with get_connection() as conn:
         if conn is None:
@@ -831,7 +896,7 @@ def ensure_customer_loyalty_account(customer_id) -> bool:
 
 def get_points_by_customer(customer_id) -> int:
     """Spendable loyalty balance for a CUSTOMER, across every room they have stayed in."""
-    if not LOYALTY_ENABLED or not customer_id:
+    if not get_loyalty_enabled() or not customer_id:
         return 0
     with get_connection() as conn:
         if conn is None:
@@ -849,7 +914,7 @@ def get_points_by_customer(customer_id) -> int:
 def add_points_to_customer(customer_id, delta_points, reason='adjust', source_id=None,
                            room_number=None) -> bool:
     """Move a signed delta on a customer's balance and write one ledger row."""
-    if not LOYALTY_ENABLED or not customer_id or not delta_points:
+    if not get_loyalty_enabled() or not customer_id or not delta_points:
         return False
     with get_connection() as conn:
         if conn is None:
@@ -875,7 +940,7 @@ def add_points_to_customer(customer_id, delta_points, reason='adjust', source_id
 
 
 def redeem_points_by_customer(customer_id, points, reason='redeem', room_number=None) -> bool:
-    if not LOYALTY_ENABLED or not customer_id or points <= 0:
+    if not get_loyalty_enabled() or not customer_id or points <= 0:
         return False
     with get_connection() as conn:
         if conn is None:
@@ -955,7 +1020,7 @@ def redeem_points_for_invoice(customer_id, points, room_number, reason, conn,
 
 def get_lifetime_points_by_customer(customer_id) -> int:
     """Lifetime points ever earned by a customer (sum of positive ledger deltas)."""
-    if not LOYALTY_ENABLED or not customer_id:
+    if not get_loyalty_enabled() or not customer_id:
         return 0
     with get_connection() as conn:
         if conn is None:
@@ -1041,7 +1106,7 @@ def get_tier_for_points(lifetime_points: int) -> str:
 
 def get_tier_details_by_customer(customer_id):
     """Return tier details (name, multiplier, discount %, perks, lifetime points) for a customer."""
-    if not LOYALTY_ENABLED or not customer_id:
+    if not get_loyalty_enabled() or not customer_id:
         return None
     lifetime = get_lifetime_points_by_customer(customer_id)
     tiers = _tiers_from_db() or DEFAULT_TIERS
@@ -1082,7 +1147,7 @@ def get_tier_details_by_room(room_number: str, check_in=None):
 
 def recompute_tier_by_customer(customer_id) -> str:
     """Recalculate and persist a customer's tier from lifetime points."""
-    if not LOYALTY_ENABLED or not customer_id:
+    if not get_loyalty_enabled() or not customer_id:
         return ""
     tier = get_tier_for_points(get_lifetime_points_by_customer(customer_id))
     with get_connection() as conn:
@@ -1109,7 +1174,7 @@ def recompute_tier(room_number: str, check_in=None) -> str:
 
 def recompute_all_tiers() -> int:
     """Recompute tiers for all loyalty accounts. Returns the number of accounts processed."""
-    if not LOYALTY_ENABLED:
+    if not get_loyalty_enabled():
         return 0
     with get_connection() as conn:
         if conn is None:
@@ -1133,7 +1198,7 @@ def award_stay_points(room_number, check_in, check_out, customer_id=None):
     Idempotent per stay via SourceID, so running check-out twice cannot double-award.
     Returns the number of points awarded (0 if none).
     """
-    if not LOYALTY_ENABLED or not room_number or not check_in or not check_out:
+    if not get_loyalty_enabled() or not room_number or not check_in or not check_out:
         return 0
     if customer_id is None:
         customer_id = customer_id_for_stay(room_number, check_in)
@@ -1199,7 +1264,7 @@ def award_billed_order_points(room_number, tx_ids, customer_id=None):
     service and the room was worth less than a coffee. `points_per_dollar_order_vs_room()`
     is the calibration and tests/test_billing_math.py fails if the two are reordered.
     """
-    if not LOYALTY_ENABLED or not room_number or not tx_ids:
+    if not get_loyalty_enabled() or not room_number or not tx_ids:
         return 0
     tx_list = [int(t) for t in tx_ids if t is not None]
     if not tx_list:
@@ -2319,7 +2384,7 @@ def customer_login():
     global CURRENT_CUSTOMER
     if CURRENT_CUSTOMER is not None:
         return CURRENT_CUSTOMER
-    for attempt in range(1, CUSTOMER_LOGIN_MAX_ATTEMPTS + 1):
+    for attempt in range(1, get_customer_login_max_attempts() + 1):
         email = input("Email address: ").strip()
         if not email:
             logging.info("Your email address is required to book a room.")
@@ -2370,7 +2435,7 @@ def customer_login():
             log_audit("LOGIN", "CustomerProfile", email, "Booking desk sign-in")
             logging.info(f"Welcome back, {first_name}.")
             return CURRENT_CUSTOMER
-        remaining = CUSTOMER_LOGIN_MAX_ATTEMPTS - attempt
+        remaining = get_customer_login_max_attempts() - attempt
         if remaining > 0:
             logging.info(f"Wrong password. {remaining} attempt(s) left.")
     logging.info("Too many failed attempts. Please try again later, or contact the front desk "
@@ -3212,7 +3277,7 @@ def edit_reservation():
                     moved_inv = cursor.rowcount
                     if moved_inv:
                         logging.info(f"Moved {moved_inv} invoice(s) to room {new_room_number}.")
-                    if LOYALTY_ENABLED:
+                    if get_loyalty_enabled():
                         # Loyalty is NOT moved, deliberately. The account is keyed on
                         # CustomerID, so the balance already travels with the guest and there
                         # is nothing to transfer. `LoyaltyTransactions.RoomNumber` is left
@@ -3524,28 +3589,7 @@ def admin_login():
     global CURRENT_USER
     while True:
         try:
-            username = input("Enter admin username (or master override): ").strip()
-
-            # Master override path: special short-circuit to unlock or obtain admin session
-            if username == MASTER_OVERRIDE:
-                secret = getpass.getpass("Enter master override secret: ").strip()
-                if MASTER_SECRET is not None and secret == MASTER_SECRET:
-                    target = input("Enter username to unlock (leave blank to start admin session): ").strip()
-                    if target:
-                        if clear_lockout(target):
-                            logging.info("Account unlocked successfully for %s", target)
-                        else:
-                            logging.info("Failed to unlock account %s", target)
-                        continue
-                    else:
-                        logging.info("Master override granted admin session.")
-                        CURRENT_USER = MASTER_OVERRIDE
-                        log_audit("LOGIN", "User", MASTER_OVERRIDE, "Master override admin session granted")
-                        return True, 'admin', False
-                else:
-                    logging.info("Invalid master override secret.")
-                    continue
-
+            username = input("Enter admin username: ").strip()
             password = getpass.getpass("Enter admin password: ").strip()
 
             with get_connection() as conn:
@@ -3578,17 +3622,17 @@ def admin_login():
                     return True, role, False  # Return role and reauthentication status
                 else:
                     failed_attempts = (failed_attempts or 0) + 1
-                    logging.info(f"Invalid credentials. Attempt {failed_attempts}/{LOCKOUT_THRESHOLD}.")
+                    logging.info(f"Invalid credentials. Attempt {failed_attempts}/{get_lockout_threshold()}.")
                     log_audit("LOGIN_FAILED", "User", username,
-                              f"Failed attempt {failed_attempts}/{LOCKOUT_THRESHOLD}")
+                              f"Failed attempt {failed_attempts}/{get_lockout_threshold()}")
 
                     # Display a warning message after the second failed attempt
-                    if failed_attempts == LOCKOUT_THRESHOLD - 1:
+                    if failed_attempts == get_lockout_threshold() - 1:
                         logging.info("Warning: One more failed attempt will lock you out.")
 
                     # Lock out the user after exceeding the threshold
-                    if failed_attempts >= LOCKOUT_THRESHOLD:
-                        lockout_time = datetime.now() + timedelta(minutes=LOCKOUT_DURATION)
+                    if failed_attempts >= get_lockout_threshold():
+                        lockout_time = datetime.now() + timedelta(minutes=get_lockout_duration())
                         cursor.execute("UPDATE Users SET FailedAttempts = ?, LockoutTime = ? WHERE Username = ?", (failed_attempts, lockout_time, username))
                         conn.commit()
                         logging.info("Maximum login attempts exceeded. Account locked.")
@@ -3596,8 +3640,7 @@ def admin_login():
                                   f"Locked until {lockout_time} after {failed_attempts} failed attempts")
                         unlockpassword = input("Would you like to attempt manager override to unlock this account? (Y/N) ")
                         if unlockpassword.upper() == "Y":
-                            check = getpass.getpass("Enter master override secret: ")
-                            if MASTER_SECRET is not None and check == MASTER_SECRET:
+                            if require_master_override():
                                 cursor.execute("UPDATE Users SET FailedAttempts = 0, LockoutTime = NULL WHERE Username = ?", (username,))
                                 conn.commit()
                                 logging.info("Account unlocked successfully!")
@@ -3820,19 +3863,12 @@ def view_users():
             passwords = input("Would you like to see the passwords? (Y/N): ").strip().upper()
             show_passwords = False
             if passwords == 'Y':
-                mpwd = getpass.getpass("Please enter the master password: ").strip()
-                # Verify master secret from config if available, otherwise check DB master account
-                if MASTER_SECRET is not None and mpwd == MASTER_SECRET:
-                    logging.info("Master secret verified (config). Displaying passwords.")
+                # Same check every other master-gated screen uses.
+                if require_master_override(prompt="Please enter the master password: "):
+                    logging.info("Master password is correct. Displaying passwords.")
                     show_passwords = True
                 else:
-                    cursor.execute("SELECT Password FROM Users WHERE Username = ?", ('master',))
-                    row = cursor.fetchone()
-                    if row and mpwd == row[0]:
-                        logging.info("Master password is correct. Displaying passwords.")
-                        show_passwords = True
-                    else:
-                        logging.info("Incorrect master password. Cannot display passwords.")
+                    logging.info("Incorrect master password. Cannot display passwords.")
 
             cursor.execute("SELECT Username, Password, Role FROM Users")
             rows = cursor.fetchall()
@@ -4970,7 +5006,7 @@ def _pick_loyalty_customer(prompt="Enter the guest's name or email: "):
     Accepts a full name or an email so staff do not have to remember which spelling
     the guest registered under. Returns the CustomerID, or None if not found.
     """
-    if not LOYALTY_ENABLED:
+    if not get_loyalty_enabled():
         logging.info("Loyalty program is not enabled.")
         return None
     query = input(prompt).strip()
@@ -5016,7 +5052,7 @@ def _pick_loyalty_customer(prompt="Enter the guest's name or email: "):
 
 def admin_view_loyalty_accounts():
     """Admin: list loyalty accounts and point balances, by GUEST."""
-    if not LOYALTY_ENABLED:
+    if not get_loyalty_enabled():
         logging.info("Loyalty program is not enabled.")
         return
     try:
@@ -5051,7 +5087,7 @@ def admin_view_loyalty_accounts():
 
 def admin_view_loyalty_transactions():
     """Admin: view loyalty transactions."""
-    if not LOYALTY_ENABLED:
+    if not get_loyalty_enabled():
         logging.info("Loyalty program is not enabled.")
         return
     try:
@@ -5087,7 +5123,7 @@ def admin_view_loyalty_transactions():
 
 def admin_adjust_loyalty_points():
     """Admin: add or remove points for a GUEST."""
-    if not LOYALTY_ENABLED:
+    if not get_loyalty_enabled():
         logging.info("Loyalty program is not enabled.")
         return
     customer_id = _pick_loyalty_customer()
@@ -5126,7 +5162,7 @@ def admin_adjust_loyalty_points():
 
 def admin_manage_loyalty_tiers():
     """Admin: view and edit loyalty tier thresholds/perks."""
-    if not LOYALTY_ENABLED:
+    if not get_loyalty_enabled():
         logging.info("Loyalty program is not enabled.")
         return
     while True:
@@ -5236,7 +5272,7 @@ def admin_manage_loyalty_tiers():
 
 def admin_recompute_all_tiers():
     """Admin: recompute every loyalty account's tier from lifetime points."""
-    if not LOYALTY_ENABLED:
+    if not get_loyalty_enabled():
         logging.info("Loyalty program is not enabled.")
         return
     count = recompute_all_tiers()
@@ -5520,10 +5556,7 @@ def check_in():
             logging.info(f"Your key card number is {key_card} and is ready for use.")
         else:
             logging.info("Your key card is ready for use. Please collect it from the front desk.")
-        if HOTEL_NAME:
-            logging.info(f"Check-in successful! Welcome to {HOTEL_NAME}, {first_name.capitalize()}!")
-        else:
-            logging.info(f"Check-in successful! Welcome, {first_name.capitalize()}!")
+        logging.info(f"Check-in successful! Welcome to {get_hotel_name()}, {first_name.capitalize()}!")
         logging.info("Please enjoy your stay!")
         logging.info(f"If you need assistance, please call the front desk at {room_number}-56.\n")
         amenities = get_amenities()
@@ -5565,7 +5598,7 @@ def compute_and_apply_discounts(subtotal, room_number):
         discount_code_amount = subtotal - discounted_subtotal
         if discount_code_amount > 0:
             lines.append(f"Discount: -${discount_code_amount:.2f}")
-    tier_details = get_tier_details_by_room(room_number) if LOYALTY_ENABLED else None
+    tier_details = get_tier_details_by_room(room_number) if get_loyalty_enabled() else None
     tier_discount_pct = tier_details["discount_percent"] if tier_details else 0.0
     if tier_discount_pct > 0:
         tier_discount_amount = discounted_subtotal * (tier_discount_pct / 100.0)
@@ -5689,7 +5722,7 @@ def bill_room_transactions(room_number, require_payment=True):
             ui.box("Receipt", "\n".join(receipt_lines))
 
             # Loyalty redemption
-            if LOYALTY_ENABLED:
+            if get_loyalty_enabled():
                 try:
                     points = get_points_by_room(room_number)
                     if final_total > 0 and points > 0:
@@ -5827,7 +5860,7 @@ def bill_room_transactions(room_number, require_payment=True):
             logging.error(f"Failed to finalize bill / invoice: {e}")
             return False
 
-        if LOYALTY_ENABLED and tx_ids:
+        if get_loyalty_enabled() and tx_ids:
             award_billed_order_points(room_number, tx_ids)
         return True
     except Exception as e:
@@ -6140,7 +6173,7 @@ def settlement_outstanding(room_number, check_in=None, check_out=None, customer_
             room_status = row[0] if row else None
 
             stay_awarded = None
-            if LOYALTY_ENABLED and customer_id and check_in and check_out:
+            if get_loyalty_enabled() and customer_id and check_in and check_out:
                 cursor.execute(
                     "SELECT COUNT(*) FROM LoyaltyTransactions WHERE CustomerID = ? "
                     "AND SourceID = ?",
@@ -6249,10 +6282,7 @@ def check_out():
                               customer_id=matched_reservation.CustomerID)
             log_audit("UPDATE", "Reservation", room_number,
                       f"Check-out completed for {first_name} {matched_reservation.LastName}")
-            if HOTEL_NAME:
-                logging.info(f"Check-out complete for room {room_number}. Thanks for visiting {HOTEL_NAME}, {first_name.capitalize()}! We hope to see you again soon!")
-            else:
-                logging.info(f"Check-out complete for room {room_number}. Thanks for visiting, {first_name.capitalize()}! We hope to see you again soon!")
+            logging.info(f"Check-out complete for room {room_number}. Thanks for visiting {get_hotel_name()}, {first_name.capitalize()}! We hope to see you again soon!")
         else:
             logging.info("Payment declined. Please settle the bill before completing check-out.")
             announce_settlement_outstanding(room_number, matched_reservation)
@@ -7285,7 +7315,7 @@ def valet_vehicle_management():
    
 def view_my_loyalty_status():
     """Customer: show current loyalty tier, perks, multiplier, discount, and progress to next tier."""
-    if not LOYALTY_ENABLED:
+    if not get_loyalty_enabled():
         logging.info("Loyalty program is not enabled. Contact administration to enable it.")
         return
     room_number, first_name = validate_room()
@@ -7545,7 +7575,7 @@ def customer_panel():
         elif cust_choice == '6':
             view_promotions()
         elif cust_choice == '7':
-            if not LOYALTY_ENABLED:
+            if not get_loyalty_enabled():
                 logging.info("Loyalty Program is not enabled. Contact administration to enable it.")
             else:
                 room_number = input("Enter your room number to join/verify loyalty account: ").strip()
@@ -8369,19 +8399,15 @@ def setup_status():
     else:
         checks.append(("Staff accounts", True, f"{users} account(s)"))
 
-    # The master row is what require_master_override() falls back to when config.ini has no
-    # [hotel] master_secret -- which is the shipped default, so on a fresh install it is the
-    # only thing that makes the override work at all.
+    # The master row is the only thing that makes require_master_override() work on a
+    # fresh install -- with no master_secret anywhere else, the 'master' account IS the
+    # override.
     master = _scalar_count("SELECT COUNT(*) FROM Users WHERE Username = ?", ("master",))
     if master:
         checks.append(("Master override account", True, "'master' exists"))
-    elif str(MASTER_SECRET or "").strip():
-        checks.append(("Master override account", True,
-                       "using the master_secret from config.ini"))
     else:
         checks.append(("Master override account", False,
-                       "no 'master' login and no master_secret in config.ini -- the "
-                       "override will refuse every caller"))
+                       "no 'master' login -- the override will refuse every caller"))
 
     items = _scalar_count("SELECT COUNT(*) FROM Items")
     if items is None:
@@ -8412,7 +8438,7 @@ def setup_status():
     else:
         checks.append(("Nightly rates", True, f"{rated} priced category(s)"))
 
-    if LOYALTY_ENABLED:
+    if get_loyalty_enabled():
         tiers = _scalar_count("SELECT COUNT(*) FROM LoyaltyTiers")
         if tiers is None:
             checks.append(("Loyalty tiers", False, "LoyaltyTiers is unreachable"))
@@ -8442,6 +8468,75 @@ def _prompt_new_password(prompt):
         return first
 
 
+def _offer_hotel_settings(wizard=False):
+    """Ask the core hotel settings, keeping the current value on a blank answer.
+
+    Shared by the first-run wizard (as its settings step) and safe to call again
+    every time: every prompt shows the value an empty answer would keep, so
+    skipping through changes nothing, and set_setting() writes an audit row for
+    each change that does land. Nothing here is required -- a database seeded
+    from database.sql already carries workable defaults.
+    """
+    logging.info("Press Enter to keep the value in [brackets]. Anything you skip can be "
+                 "changed later from Admin Panel -> 25. Pricing & Settings.")
+
+    def _ask(key, label, current, parse, valid):
+        raw = input(f"{label} [{current}]: ").strip()
+        if not raw:
+            return current
+        try:
+            value = parse(raw)
+        except (TypeError, ValueError):
+            logging.info("That is not a number -- keeping %s.", current)
+            return current
+        if not valid(value):
+            logging.info("Out of range -- keeping %s.", current)
+            return current
+        set_setting(key, value)
+        return value
+
+    _ask('hotel_name', "Hotel name", get_hotel_name(), str, lambda v: bool(v.strip()))
+    _ask('tax_rate', "Tax rate as a decimal (0.13 = 13%)", f"{get_tax_rate():g}",
+         float, lambda v: v >= 0)
+    _ask('peak_factor', "Peak price factor (sale = base x factor)", f"{get_peak_factor():g}",
+         float, lambda v: v > 0)
+    _ask('offpeak_factor', "Off-peak price factor", f"{get_offpeak_factor():g}",
+         float, lambda v: v > 0)
+
+    old_accrual, old_per_night = (get_loyalty_accrual_points_per_unit(),
+                                  get_loyalty_points_per_night())
+    enabled_raw = get_loyalty_enabled()
+    raw_enabled = input(f"Loyalty programme enabled? (y/n) [{'y' if enabled_raw else 'n'}]: ").strip().lower()
+    if raw_enabled in ('y', 'yes', '1', 'true', 'on', 'n', 'no', '0', 'false', 'off'):
+        set_setting('loyalty_enabled', '1' if raw_enabled in ('y', 'yes', '1', 'true', 'on') else '0')
+    new_per_night = _ask('loyalty_points_per_night', "Points per night stayed",
+                         old_per_night, int, lambda v: v >= 0)
+    new_accrual = _ask('loyalty_accrual_points_per_unit', "Points per $1 of F&B orders (a fraction, e.g. 0.5)",
+                       old_accrual, float, lambda v: v >= 0)
+    _ask('loyalty_redemption_points_per_currency_unit', "Points per $1 credit when redeeming",
+         get_loyalty_redemption_points_per_currency_unit(), int, lambda v: v > 0)
+    # The order rate must stay below what a night earns, or guests earn more by ordering
+    # a coffee than by staying. Same calibration the Pricing & Settings menu enforces.
+    order_rate, room_rate = points_per_dollar_order_vs_room(new_accrual, new_per_night)
+    if new_accrual > room_rate:
+        logging.info("%g pts per $1 of room service is MORE than the %.2f pts per $1 a Standard "
+                     "night earns -- restoring the previous accrual rate.", new_accrual, room_rate)
+        set_setting('loyalty_accrual_points_per_unit', old_accrual)
+
+    _ask('lockout_threshold', "Failed admin logins before lockout", get_lockout_threshold(),
+         int, lambda v: v > 0)
+    _ask('lockout_duration', "Lockout length in minutes", get_lockout_duration(),
+         int, lambda v: v > 0)
+    _ask('customer_login_max_attempts', "Failed guest logins before the menu stops asking",
+         get_customer_login_max_attempts(), int, lambda v: v > 0)
+    _ask('booking_refund_cutoff_days', "Free-cancellation window in days (0 = none)",
+         get_booking_refund_cutoff_days(), int, lambda v: v >= 0)
+    logging.info("Hotel settings saved. Current values: Prices/tax %.2f%%, lockout after %d "
+                 "attempts for %d min, loyalty %s.", get_tax_rate() * 100,
+                 get_lockout_threshold(), get_lockout_duration(),
+                 "on" if get_loyalty_enabled() else "off")
+
+
 def run_first_run_onboarding():
     """The first-run wizard. Runs once, before the main menu, on a database not yet onboarded.
 
@@ -8457,7 +8552,7 @@ def run_first_run_onboarding():
     refuses outright if any account already exists, so it cannot become a way to add an
     admin to a live system.
     """
-    hotel = HOTEL_NAME or "this hotel"
+    hotel = get_hotel_name()
     ui.box(
         f"Welcome to {hotel} - First-Time Setup",
         "This runs once, before the app is usable.\n\n"
@@ -8465,7 +8560,8 @@ def run_first_run_onboarding():
         "defaults. Every step after the login is optional and can be skipped --\n"
         "Admin Panel -> 34. Setup Checklist shows what is still outstanding at any time.\n\n"
         "Before any of this, database.sql has to have been applied to the server,\n"
-        "and config.ini has to point at it. See docs/ONBOARDING.md.",
+        "and the [database] section of config.ini has to point at it (the startup\n"
+        "prompt creates that section when it is missing). See docs/ONBOARDING.md.",
         border_style="cyan",
     )
 
@@ -8500,8 +8596,8 @@ def run_first_run_onboarding():
     if _scalar_count("SELECT COUNT(*) FROM Users WHERE Username = ?", ("master",)):
         logging.info("A 'master' account already exists. Leaving it alone.")
     elif ui.ask_confirmation(
-            "Create a 'master' account for the master override? Without one, and without "
-            "a master_secret in config.ini, the override refuses every caller.", default="y"):
+            "Create a 'master' account for the master override? Without it the override "
+            "refuses every caller.", default="y"):
         master_password = _prompt_new_password("Master password: ")
         # Role 'admin', not 'master'. require_master_override() matches on the username
         # alone, but admin_panel() has no 'master' branch and add_user() only offers
@@ -8521,10 +8617,15 @@ def run_first_run_onboarding():
         if created:
             logging.info("Master override is now backed by a real account.")
         else:
-            logging.info("Could not create the 'master' account. The override will still "
-                         "work if you set master_secret in config.ini.")
+            logging.info("Could not create the 'master' account. Create one from Admin "
+                         "Panel -> Add User, or the override will refuse every caller.")
     else:
-        logging.info("Skipped. Set [hotel] master_secret in config.ini if you skip this.")
+        logging.info("Skipped. The master override will refuse every caller until you "
+                     "create a 'master' account (Admin Panel -> Add User).")
+
+    # --- 2b. Hotel settings. ---
+    ui.info("\n-- Step 2b: hotel settings --")
+    _offer_hotel_settings(wizard=True)
 
     # --- 3. Starter catalogue. ---
     ui.info("\n-- Step 3: item catalogue --")
@@ -8903,6 +9004,10 @@ def _offer_room_layout(wizard=False):
 # Main Entry Point
 ## =========================
 def main():
+    # A fresh checkout has no config.ini, so before anything that opens a connection
+    # (the loyalty-table probe and the onboarding marker check included) give the
+    # operator a chance to type in the database settings and get a connection at all.
+    _ensure_database_config()
     # Ensure loyalty DB objects exist if loyalty is enabled
     try:
         ensure_loyalty_tables()
@@ -8926,7 +9031,7 @@ def main():
     while True:
         ui.pause()
         ui.clear_screen()
-        ui.show_menu(f"Welcome to {HOTEL_NAME}!" if HOTEL_NAME else "Hotel Management System", [
+        ui.show_menu(f"Welcome to {get_hotel_name()}!", [
             "1. Customer",
             "2. Admin",
             "3. Bookings",

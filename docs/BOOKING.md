@@ -24,8 +24,8 @@ clears it; within one signed-in session it is never re-prompted. `book_room()`,
   no account cannot book, and therefore has no way to be recognised on a return visit.
 - Blank email or blank password is refused — both are the only handle the account has, and
   a booking always has an owner.
-- `CUSTOMER_LOGIN_MAX_ATTEMPTS` (3) caps password guessing. This is a **public** menu; it
-  must not be an unlimited oracle.
+- The `customer_login_max_attempts` `HotelSettings` key (default 3) caps password
+  guessing. This is a **public** menu; it must not be an unlimited oracle.
 - The login lookup is by email, which is why the filtered unique index
   `UX_CustomerProfiles_Email` is load-bearing — see SCHEMA.md §2.
 

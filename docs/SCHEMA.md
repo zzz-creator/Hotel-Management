@@ -46,10 +46,11 @@ install and is kept in sync by hand — a schema change lands in **both** places
 | 024 | `024_loyalty_order_accrual.sql` | Recalibrates `loyalty_accrual_points_per_unit` 3 → 0.5, so F&B cannot out-earn the room |
 | 025 | `025_drop_loyalty_expiration.sql` | Deletes `loyalty_expiration_days`, a setting nothing ever read |
 | 026 | `026_audit_log_diffs.sql` | `AuditLog.OldValue` / `AuditLog.NewValue` so an update records the before-image, not just a sentence |
+| 027 | `027_hotel_settings_keys.sql` | Seeds the `HotelSettings` rows the app reads directly (`hotel_name`, `loyalty_enabled`, `lockout_threshold`, `lockout_duration`, `customer_login_max_attempts`); data only, no DDL |
 
 ### Fresh database
 
-Either run `database.sql` once, or apply `migrations/001` … `migrations/025` in order in
+Either run `database.sql` once, or apply `migrations/001` … `migrations/027` in order in
 SSMS. The migrations are individually re-runnable (guarded by `IF NOT EXISTS` /
 `IF OBJECT_ID(...) IS NULL`) so a partially-applied run is a normal state to resume from.
 
@@ -185,13 +186,19 @@ folio.** `PaymentID` identity PK, `RoomNumber`, `BookingRef`, `StayCheckIn`, `Ki
 
 **`HotelSettings`** — `SettingKey` PK, `SettingValue` `NVARCHAR(100)`. Admin-editable free
 text, so **every numeric read goes through `_setting_float()` / `_setting_int()`**, which
-fall back to the `config.ini` default on a blank or non-numeric value. A typo in this
+fall back to a built-in default on a blank or non-numeric value. A typo in this
 table must never be able to break check-out.
 
 Keys: `business_date`, `peak_factor`, `offpeak_factor`, `tax_rate`,
 `loyalty_accrual_points_per_unit` (order/room-service spend only),
 `loyalty_redemption_points_per_currency_unit`,
-`loyalty_points_per_night`, `loyalty_mult_<room-type-slug>`.
+`loyalty_points_per_night`, `loyalty_mult_<room-type-slug>`,
+`booking_refund_cutoff_days`, `hotel_name`, `loyalty_enabled`,
+`lockout_threshold`, `lockout_duration`, `customer_login_max_attempts`.
+
+Every one of these was asked for (with a default shown) during the first-run wizard's
+hotel-settings step and is editable from Admin → Pricing & Settings. `config.ini` carries
+no hotel values at all -- only the database connection.
 
 - `business_date` (023) is an ISO `YYYY-MM-DD` **date string, not a number**.
   As of 5 October 2026 nothing reads it: `business_date()` in `main.py` and

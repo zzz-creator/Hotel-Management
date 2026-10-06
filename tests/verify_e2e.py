@@ -122,10 +122,10 @@ def load_targets():
     user = cfg.get('database', 'username', fallback='')
     password = cfg.get('database', 'password', fallback='')
 
-    # Deliberately NOT the [database] key. A default keeps the script runnable without a
-    # config edit, but the name can never be the live one -- that is checked below, not
-    # assumed from the default.
-    scratch = cfg.get('verify', 'verify_database', fallback='').strip() or 'hotelSystem_verify'
+    # Deliberately NOT the [database] name. There is no config key for this any more, so
+    # the scratch database is always '<live>_verify' -- derived, never typed, which makes
+    # the mistake of pointing verification at the live database structurally impossible.
+    scratch = live + '_verify'
 
     if not server or not live:
         raise SystemExit('[database] needs both server and database set.')
@@ -133,8 +133,8 @@ def load_targets():
     # Conditions 1 and 2: the live name must not appear in the scratch connection string,
     # and this must refuse rather than trust config.ini to be correct.
     if scratch.lower() == live.lower():
-        raise SystemExit('Refusing to run: [verify] verify_database is the live database (%s). '
-                         'Point it somewhere else.' % live)
+        raise SystemExit('Refusing to run: the scratch database name would be the live database (%s).'
+                         % live)
     if scratch.lower() in FORBIDDEN:
         raise SystemExit('Refusing to run: %s is a system database.' % scratch)
     if not SAFE_NAME.match(scratch):
@@ -498,7 +498,7 @@ def phase_live_convergence(server, live, user, password):
     scratch = None
     cfg = configparser.ConfigParser()
     cfg.read(os.path.join(ROOT, 'config.ini'))
-    scratch = cfg.get('verify', 'verify_database', fallback='').strip() or 'hotelSystem_verify'
+    scratch = live + '_verify'
 
     live_conn = connect(server, live, user, password)
     try:
@@ -615,7 +615,6 @@ def phase_exercise(server, scratch, user, password):
     # config default, which is allowed to be off. This phase is about the code running at
     # all, so both are set to the permissive value.
     app._RESERVATIONS_CAPTURED_RATE_SUPPORT = None
-    app.LOYALTY_ENABLED = True
 
     # --- how the app reaches the database at all -----------------------------------
     # Two probes, both regression guards for the deletion of main.py's second copy of
@@ -888,9 +887,9 @@ def phase_exercise(server, scratch, user, password):
     for label, got, want in (
             ('stay_nights counts calendar nights', app.stay_nights(check_in, check_out), 2),
             ('booking_quote totals the nights plus tax',
-             app.booking_quote(2, 100.0, app.TAX_RATE)['total'], 226.00),
+             app.booking_quote(2, 100.0, 0.13)['total'], 226.00),
             ('booking_payment_options offers a deposit and pay-in-full',
-             len(app.booking_payment_options(2, 100.0, app.TAX_RATE)), 2),
+             len(app.booking_payment_options(2, 100.0, 0.13)), 2),
             ('refund_decision refunds outside the cutoff',
              app.refund_decision(10, 7, 100.0)['action'], 'refund'),
             ('refund_decision forfeits inside the cutoff',

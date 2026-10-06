@@ -1,44 +1,18 @@
 ; Copy this file to config.ini and fill in the [database] values for your machine.
-; config.ini is untracked (.gitignore) because it holds the SQL Server password and
-; the master override secret. This template is tracked instead.
+; config.ini is untracked (.gitignore) because it holds the SQL Server password.
+; This template is tracked instead.
 ;
-; Every read in the app uses a fallback=, so a missing or blank value degrades rather
-; than crashing -- but a blank [database] block means no connection at all, and
-; get_connection() will yield None on every call.
+; config.ini carries ONLY the database connection. Everything hotel-specific -- the
+; hotel name, tax rate, lockout, loyalty points rates -- lives in the HotelSettings
+; table and is asked for during the first-run wizard (and editable afterwards from
+; Admin Panel -> Pricing & Settings).
+;
+; If config.ini is missing entirely, starting the app prompts for these four values
+; and writes the file for you, then the first-run wizard continues in the same run.
+; A blank [database] block means no connection at all: get_connection() will yield
+; None on every call, and the onboarding wizard cannot run.
 [database]
 server = localhost
 database = hotelSystem
 username = admin
 password =
-
-; tests/verify_e2e.py builds a throwaway database here, runs the schema through both
-; install paths, exercises the booking code and drops it again. It NEVER opens the
-; [database] target above, and it refuses to run if this name resolves to it.
-; Leave blank to use the built-in default. Requires a login with CREATE DATABASE.
-[verify]
-verify_database = hotelSystem_verify
-
-[hotel]
-name = The Grand Oasis Hotel
-tax = 0.13
-lockout_threshold = 3
-lockout_duration = 5
-; Master override settings - set a secure secret value
-; Leaving this blank is safe: require_master_override() rejects an empty entry
-; before comparing it, then falls back to the plaintext 'master' account in Users.
-master_override = master
-master_secret =
-
-[loyalty]
-enabled = true
-# How many points are awarded per 1 unit of currency spent on orders (room service).
-# A FRACTION on purpose: a Standard night's 100 points on a $120 room is 0.83 pts/$, so
-# the order rate has to sit below that or guests earn more by ordering than by staying.
-accrual_points_per_unit = 0.5
-# Base loyalty points awarded per night stayed (multiplied by room category + tier)
-points_per_night = 100
-# How many points equal 1 unit of currency when redeeming (e.g. 100 points => 1 unit)
-redemption_points_per_currency_unit = 100
-; There is no `expiration_days` key, and that is deliberate. It used to exist and was
-; shown in the admin settings screen, but nothing ever read it to expire anything, so
-; it was a knob that lied. Migration 025 deletes the row. Points do not expire.

@@ -49,8 +49,8 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 | `ui.py` | `rich`-based console helpers (menus, tables, prompts, `clear_screen`/`pause`) |
 | `reports.py` | CSV report exports, also a standalone CLI |
 | `db.py` | Connection string + `get_connection()` context manager |
-| `config.ini` | DB connection, hotel, and loyalty defaults. **Untracked** — copy `config.ini.example` |
-| `config.ini.example` | The tracked template for the above; blank `password` / `master_secret` |
+| `config.ini` | DB connection only. **Untracked** — copy `config.ini.example` |
+| `config.ini.example` | The tracked template for the above; blank `password` |
 | `.gitignore` | Keeps `config.ini`, `__pycache__/`, `exports/*.csv` and the generated council artifacts out of history |
 | `.gitattributes` | Pins LF in the repository and native endings in the working tree, so `core.autocrlf` stops deciding per machine |
 | `README.md` | What the project is, requirements, setup, tests, and the "not production software" warnings. The first thing anyone landing on the repo reads |
@@ -63,7 +63,7 @@ New interactive output goes through `ui.py`, never inline `rich`.
 | File | Role |
 |---|---|
 | `database.sql` | **Authoritative fresh-install script.** Creates the database if absent, then every table, constraint, index and seed row. Never relies on a migration to produce a table |
-| `migrations/001..025_*.sql` | Incremental changes, applied in order, for databases that already exist |
+| `migrations/001..027_*.sql` | Incremental changes, applied in order, for databases that already exist |
 | `docs/SCHEMA.md` | Per-table reference, migration inventory, degradation matrix |
 | `docs/DEVIATIONS.md` | Behaviours this app deliberately does **not** have, and what would close each |
 | `docs/ONBOARDING.md` | Staff first-run order: bootstrap login, items, prices, rooms, business date |
@@ -100,7 +100,7 @@ before reworking a feature it covers.
 ## 3. Intentional design decisions (do NOT "fix")
 
 - **Plaintext passwords are intentional.** This is a teaching/demo project.
-  `Users.Password`, `CustomerProfiles.Password`, `config.ini` -> `[hotel] master_secret`,
+  `Users.Password`, `CustomerProfiles.Password`,
   and all login flows store and compare passwords in plaintext on purpose. Do not introduce
   hashing, salting, or similar security changes without being asked.
 - Interactive/UI output uses `logging.info` plus `ui.py` helpers rather than raw
@@ -113,9 +113,9 @@ before reworking a feature it covers.
   and clears it on every rejection, so a failed payment can never attribute digits to a
   later one.
 - **Master override goes through `require_master_override()`**, not an inline secret check.
-  It tries the configured `[hotel] master_secret` first and falls back to the plaintext
-  `master` account in `Users`, so a fresh checkout with no configured secret still works.
-  Destructive admin actions must call it **and** require an exact typed confirmation — being
+  It is backed by the plaintext `master` account in `Users` -- the password of that
+  account, and nothing from config.ini. Destructive admin actions must call it **and**
+  require an exact typed confirmation — being
   admin is not sufficient on its own. Both onboarding paths create that account with the
   **admin** role, not a role called `master`: the override matches on the username alone, while
   `admin_panel()` has no `master` branch and `add_user()` only offers admin/staff/manager, so
@@ -163,8 +163,8 @@ before reworking a feature it covers.
   produce a traceback (the same rule as the card prompts in §3).
 - **`GuestRequests` is a dead table** in `database.sql`, referenced by no code. It is a
   pre-015 leftover; `ConciergeRequests` replaced it. Do not wire it up.
-- **`config.ini` is untracked on purpose.** It holds the SQL Server password and
-  `[hotel] master_secret`. Commit `config.ini.example` (same keys, blank secrets) instead,
+- **`config.ini` is untracked on purpose.** It holds the SQL Server password.
+  Commit `config.ini.example` (same keys, blank secret) instead,
   and never `git add -f config.ini`. This does not weaken §3 above: plaintext is a storage
   decision inside the app, not a reason to publish a credential.
 
@@ -300,7 +300,7 @@ parse fine as text. That is the whole argument for §4's scratch database.
   caller in `main.py` loses the real exception type; see §7 for what that costs. **The rule is
   about both.**
 - `HotelSettings` values are admin-editable free text: every numeric read goes through
-  `_setting_float()` / `_setting_int()`, which fall back to the `config.ini` default on a
+  `_setting_float()` / `_setting_int()`, which fall back to a built-in default on a
   blank or non-numeric value. A typo there must never break check-out.
 
 ### Git: commit at the end of every change
@@ -406,7 +406,10 @@ missing from the inventory, when a function or table named in `docs/` no longer 
 and when the §2 file map drifts from the repo.
 
 **Apply migrations in order, or re-run `database.sql` on a fresh database.** Migrations
-001-025 are all applied to the developer's live database. 001-018 were verified end-to-end
+001-025 are applied to the developer's live database; 026 and 027 are new as of 6 October
+2026 and are still pending on it (026 adds the audit diff columns, so a live checklist
+against `verify_e2e.py` Phase 4 will report `AuditLog.OldValue`/`NewValue` missing until
+you apply 026). 001-018 were verified end-to-end
 (book → check out with credit → cancel, plus the declined-card and full-refund paths).
 019-021 were verified read-only against the catalog. Their T-SQL and the flows they back now
 run on every `verify_e2e.py` invocation — but against a *disposable* database.

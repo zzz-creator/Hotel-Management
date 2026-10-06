@@ -162,7 +162,7 @@ class StayPointsAreGuestScopedTests(unittest.TestCase):
     def _award(self, customer_id, results=None):
         log = []
         with mock.patch.object(app, "get_connection", return_value=_FakeConn(log, results)), \
-             mock.patch.object(app, "LOYALTY_ENABLED", True), \
+             mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
              mock.patch.object(app, "customer_id_for_stay", return_value=customer_id), \
              mock.patch.object(app, "get_room_type", return_value="Standard"), \
              mock.patch.object(app, "get_room_type_multiplier", return_value=1.0), \
@@ -196,7 +196,7 @@ class StayPointsAreGuestScopedTests(unittest.TestCase):
         # would collect these points.
         log = []
         with mock.patch.object(app, "get_connection", return_value=_FakeConn(log)), \
-             mock.patch.object(app, "LOYALTY_ENABLED", True), \
+             mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
              mock.patch.object(app, "customer_id_for_stay", return_value=None), \
              mock.patch.object(app, "add_points_by_room") as by_room:
             points = app.award_stay_points("9012", date(2026, 3, 1), date(2026, 3, 4))
@@ -208,7 +208,7 @@ class StayPointsAreGuestScopedTests(unittest.TestCase):
         log = []
         with mock.patch.object(app, "get_connection",
                                return_value=_FakeConn(log, [[(1,)]])), \
-             mock.patch.object(app, "LOYALTY_ENABLED", True), \
+             mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
              mock.patch.object(app, "customer_id_for_stay", return_value=7), \
              mock.patch.object(app, "add_points_to_customer") as add:
             points = app.award_stay_points("9012", date(2026, 3, 1), date(2026, 3, 4))
@@ -225,7 +225,7 @@ class OrderPointsAreGuestScopedTests(unittest.TestCase):
         log = []
         with mock.patch.object(app, "get_connection",
                                return_value=_FakeConn(log, [[], [(40.0,)]])), \
-             mock.patch.object(app, "LOYALTY_ENABLED", True), \
+             mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
              mock.patch.object(app, "customer_id_for_stay", return_value=7), \
              mock.patch.object(app, "get_loyalty_accrual_points_per_unit", return_value=3), \
              mock.patch.object(app, "get_tier_details_by_customer",
@@ -241,7 +241,7 @@ class OrderPointsAreGuestScopedTests(unittest.TestCase):
         for tx_ids in ([6, 5], [5, 6]):
             with mock.patch.object(app, "get_connection",
                                    return_value=_FakeConn(log, [[], [(40.0,)]])), \
-                 mock.patch.object(app, "LOYALTY_ENABLED", True), \
+                 mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
                  mock.patch.object(app, "customer_id_for_stay", return_value=7), \
                  mock.patch.object(app, "get_loyalty_accrual_points_per_unit", return_value=3), \
                  mock.patch.object(app, "get_tier_details_by_customer",
@@ -258,7 +258,7 @@ class LoyaltyFollowsThePersonTests(unittest.TestCase):
     def test_get_points_by_room_resolves_the_guest_first(self):
         log = []
         with mock.patch.object(app, "get_connection", return_value=_FakeConn(log, [(4321,)])), \
-             mock.patch.object(app, "LOYALTY_ENABLED", True), \
+             mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
              mock.patch.object(app, "customer_id_for_stay", return_value=7):
             points = app.get_points_by_room("9012")
         sql, params = log[0]
@@ -272,7 +272,7 @@ class LoyaltyFollowsThePersonTests(unittest.TestCase):
         for room in ("9012", "1207"):
             log = []
             with mock.patch.object(app, "get_connection", return_value=_FakeConn(log, [(2500,)])), \
-                 mock.patch.object(app, "LOYALTY_ENABLED", True), \
+                 mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
                  mock.patch.object(app, "customer_id_for_stay", return_value=7):
                 balances.append(app.get_points_by_room(room))
         self.assertEqual(balances, [2500, 2500])
@@ -280,25 +280,25 @@ class LoyaltyFollowsThePersonTests(unittest.TestCase):
     def test_a_different_guest_of_the_same_room_reads_a_different_balance(self):
         # The regression that motivated 019: same room, different person, no leak.
         with mock.patch.object(app, "get_connection", return_value=_FakeConn([], [(1000,)])), \
-             mock.patch.object(app, "LOYALTY_ENABLED", True), \
+             mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
              mock.patch.object(app, "customer_id_for_stay", return_value=8):
             self.assertEqual(app.get_points_by_room("9012"), 1000)
         with mock.patch.object(app, "get_connection", return_value=_FakeConn([], [(0,)])), \
-             mock.patch.object(app, "LOYALTY_ENABLED", True), \
+             mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
              mock.patch.object(app, "customer_id_for_stay", return_value=9):
             self.assertEqual(app.get_points_by_room("9012"), 0)
 
     def test_unlinked_room_reports_zero_instead_of_erroring(self):
         # A pre-019 stay has no CustomerID. It must read as zero, not raise.
         with mock.patch.object(app, "get_connection"), \
-             mock.patch.object(app, "LOYALTY_ENABLED", True), \
+             mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
              mock.patch.object(app, "customer_id_for_stay", return_value=None):
             self.assertEqual(app.get_points_by_room("9012"), 0)
 
     def test_lifetime_points_come_from_the_customer_ledger(self):
         log = []
         with mock.patch.object(app, "get_connection", return_value=_FakeConn(log, [(9000,)])), \
-             mock.patch.object(app, "LOYALTY_ENABLED", True):
+             mock.patch.object(app, "get_loyalty_enabled", return_value=True):
             lifetime = app.get_lifetime_points_by_customer(7)
         sql, params = log[0]
         self.assertIn("FROM LoyaltyTransactions", sql)
@@ -310,7 +310,7 @@ class LoyaltyFollowsThePersonTests(unittest.TestCase):
     def test_tier_is_recomputed_per_customer(self):
         log = []
         with mock.patch.object(app, "get_connection", return_value=_FakeConn(log, [(9000,)])), \
-             mock.patch.object(app, "LOYALTY_ENABLED", True), \
+             mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
              mock.patch.object(app, "get_lifetime_points_by_customer", return_value=9000):
             tier = app.recompute_tier_by_customer(7)
         self.assertEqual(tier, "Platinum")
@@ -322,7 +322,7 @@ class LoyaltyFollowsThePersonTests(unittest.TestCase):
         log = []
         with mock.patch.object(app, "get_connection",
                                return_value=_FakeConn(log, [(1,), (2,), (3,)])), \
-             mock.patch.object(app, "LOYALTY_ENABLED", True), \
+             mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
              mock.patch.object(app, "recompute_tier_by_customer") as recompute:
             count = app.recompute_all_tiers()
         self.assertEqual(count, 3)
@@ -330,14 +330,14 @@ class LoyaltyFollowsThePersonTests(unittest.TestCase):
 
     def test_redemption_cannot_go_negative(self):
         with mock.patch.object(app, "get_connection", return_value=_FakeConn([])), \
-             mock.patch.object(app, "LOYALTY_ENABLED", True), \
+             mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
              mock.patch.object(app, "get_points_by_customer", return_value=100):
             self.assertFalse(app.redeem_points_by_customer(7, 500, reason='checkout'))
 
     def test_redemption_writes_a_negative_ledger_row(self):
         log = []
         with mock.patch.object(app, "get_connection", return_value=_FakeConn(log)), \
-             mock.patch.object(app, "LOYALTY_ENABLED", True), \
+             mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
              mock.patch.object(app, "get_points_by_customer", return_value=1000):
             self.assertTrue(app.redeem_points_by_customer(7, 400, reason='checkout'))
         insert = [entry for entry in log if entry[0].startswith("INSERT INTO LoyaltyTransactions")]
@@ -450,7 +450,8 @@ class BookingLoginTests(unittest.TestCase):
         with mock.patch("builtins.input", lambda _="": next(prompts)), \
              mock.patch.object(app, "get_connection", return_value=_FakeConn(
                  [], [_row(CustomerID=7, FirstName="Ada", LastName="Smith", Password="hunter2")])), \
-             mock.patch.object(app, "CURRENT_CUSTOMER", None), \
+             mock.patch.object(app, "get_customer_login_max_attempts", return_value=3), \
+mock.patch.object(app, "CURRENT_CUSTOMER", None), \
              mock.patch.object(app, "log_audit"):
             self.assertEqual(app.customer_login(), 7)
             # Asserted inside the patch: mock.patch.object restores the module global on
@@ -462,7 +463,8 @@ class BookingLoginTests(unittest.TestCase):
         with mock.patch("builtins.input", lambda _="": next(prompts)), \
              mock.patch.object(app, "get_connection", return_value=_FakeConn(
                  [], [_row(CustomerID=7, FirstName="Ada", LastName="Smith", Password="hunter2")])), \
-             mock.patch.object(app, "CURRENT_CUSTOMER", None), \
+             mock.patch.object(app, "get_customer_login_max_attempts", return_value=3), \
+mock.patch.object(app, "CURRENT_CUSTOMER", None), \
              mock.patch.object(app, "log_audit"):
             self.assertIsNone(app.customer_login())
         self.assertIsNone(app.CURRENT_CUSTOMER)
@@ -473,15 +475,18 @@ class BookingLoginTests(unittest.TestCase):
         with mock.patch("builtins.input", lambda _="": next(prompts)), \
              mock.patch.object(app, "get_connection", return_value=_FakeConn(
                  [], [_row(CustomerID=7, FirstName="Ada", LastName="Smith", Password="hunter2")])), \
+             mock.patch.object(app, "get_customer_login_max_attempts", return_value=3), \
              mock.patch.object(app, "CURRENT_CUSTOMER", None):
             app.customer_login()
-        self.assertLessEqual(app.CUSTOMER_LOGIN_MAX_ATTEMPTS, 5)
+        with mock.patch.object(app, "get_setting", return_value="3"):
+            self.assertLessEqual(app.get_customer_login_max_attempts(), 5)
 
     def test_a_blank_email_is_refused(self):
         # The email is the only handle on the account.
         prompts = iter(["", "", ""])
         with mock.patch("builtins.input", lambda _="": next(prompts)), \
              mock.patch.object(app, "get_connection") as conn, \
+             mock.patch.object(app, "get_customer_login_max_attempts", return_value=3), \
              mock.patch.object(app, "CURRENT_CUSTOMER", None):
             self.assertIsNone(app.customer_login())
         conn.assert_not_called()
@@ -491,7 +496,8 @@ class BookingLoginTests(unittest.TestCase):
         with mock.patch("builtins.input", lambda _="": next(prompts)), \
              mock.patch.object(app, "get_connection", return_value=_FakeConn([], [])), \
              mock.patch.object(app, "register_customer", return_value=42) as register, \
-             mock.patch.object(app, "CURRENT_CUSTOMER", None), \
+             mock.patch.object(app, "get_customer_login_max_attempts", return_value=3), \
+mock.patch.object(app, "CURRENT_CUSTOMER", None), \
              mock.patch.object(app, "log_audit"):
             self.assertEqual(app.customer_login(), 42)
             register.assert_called_once_with("new@example.com", "Smith", "Ada", "hunter2")
@@ -505,6 +511,7 @@ class BookingLoginTests(unittest.TestCase):
         with mock.patch("builtins.input", lambda _="": next(cycle)), \
              mock.patch.object(app, "get_connection", return_value=_FakeConn([], [])), \
              mock.patch.object(app, "register_customer") as register, \
+             mock.patch.object(app, "get_customer_login_max_attempts", return_value=3), \
              mock.patch.object(app, "CURRENT_CUSTOMER", None):
             self.assertIsNone(app.customer_login())
         register.assert_not_called()
@@ -514,6 +521,7 @@ class BookingLoginTests(unittest.TestCase):
         # a sentence, not a traceback.
         with mock.patch("builtins.input", lambda _="": "ada@example.com"), \
              mock.patch.object(app, "get_connection", side_effect=RuntimeError("Invalid column")), \
+             mock.patch.object(app, "get_customer_login_max_attempts", return_value=3), \
              mock.patch.object(app, "CURRENT_CUSTOMER", None):
             self.assertIsNone(app.customer_login())
 

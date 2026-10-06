@@ -8,8 +8,10 @@ Read this after `database.sql` has been applied and before anyone tries to log i
 
 > **Most of this runbook is now automated.** The first time you start the app against a
 > database that has never been set up, a **first-run wizard** runs before the main menu and
-> walks you through it: it creates your first administrator, and offers starter items,
-> and rooms. Every step after the login is optional and skippable.
+> walks you through it: it creates your first administrator, then offers the hotel
+> settings, starter items, and rooms. Every step after the login is optional and
+> skippable. The database connection itself (`config.ini`) is prompted for at startup
+> when it is missing, so the wizard has something to connect through.
 >
 > **Admin Panel → 34. Setup Checklist** shows what is still outstanding at any time, and can
 > re-run the setup actions. It lives in the Admin Panel rather than the main menu on
@@ -72,11 +74,8 @@ offers to create a `master` account — see the note below for why that one matt
 > Passwords are stored and compared in plaintext here, on purpose — this is a teaching
 > project (see AGENTS.md §3, DEVIATIONS.md §8). Change the bootstrap password anyway.
 
-`require_master_override()` falls back to an account literally named `master` when
-`config.ini` has no `[hotel] master_secret`, so if you want that fallback to work, create
-that account too. The wizard asks. `config.ini.example` ships with a **blank**
-`master_secret`, so on a fresh checkout the `master` account is the only thing that makes
-the override work at all — which is why **Setup Checklist** flags it.
+`require_master_override()` is backed by an account literally named `master`, so if
+you want the override to work, create that account too. The wizard asks.
 
 The `master` account is created with the **admin** role, not a role of its own. The
 override matches on the username alone, but the Admin Panel only branches on
@@ -94,6 +93,17 @@ Once you are logged in as `admin`, use **Admin Panel → 19. Add User** for ever
 > hand-inserted accounts, the wizard says so and skips the step rather than looping.
 
 ---
+
+## 2b. Hotel settings (the wizard offers this)
+
+Step 2b of the wizard walks the core `HotelSettings` rows one at a time — hotel name,
+tax rate, peak/off-peak factors, loyalty rates and on/off, admin and guest lockout, the
+free-cancellation window — showing the current value in brackets. Pressing Enter keeps
+the bracketed value, so skipping through changes nothing. Everything it asks is
+re-editable later from **Admin Panel → 25. Manage Pricing & Settings**, and the defaults
+it shows are the same ones `database.sql` seeds, so a skipped step leaves a working
+setup rather than an empty one. The loyalty order-accrual prompt enforces the same
+calibration the Pricing menu does: the F&B rate must stay below what a night earns.
 
 ## 3. Add items (the wizard offers this)
 
@@ -245,10 +255,10 @@ Everything the wizard cannot reach, in order:
 
 1. **Applying `database.sql`**, and creating the database and the SQL Server login. The app
    never issues DDL for these — schema ships as `.sql` files you run yourself (AGENTS.md §4).
-2. **`config.ini`.** It is untracked and holds the SQL Server password and the
-   `[hotel] master_secret`. Copy `config.ini.example` and fill it in, or there is no
-   connection at all and `get_connection()` yields `None` on every call.
-3. **Applying migrations 001-025** in order, for a database that already has data.
+2. **`config.ini`** is created automatically by the startup prompt (server, database,
+   username, password — the only things it may ever hold). Filling it in yourself from
+   `config.ini.example` is still fine and skips the prompt.
+3. **Applying migrations 001-027** in order, for a database that already has data.
 4. **Nothing** -- the business date is just today, as of 5 October 2026.
 5. **Nightly rates** if the seeded `RoomTypes` prices are wrong for your hotel (§4).
 

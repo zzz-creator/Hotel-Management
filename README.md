@@ -103,7 +103,7 @@ not be "fixed", the schema rules, and the verification commands.
 Read this before taking any of it anywhere real.
 
 - **Passwords are stored and compared in plaintext.** `Users.Password`,
-  `CustomerProfiles.Password`, and the `[hotel] master_secret` in `config.ini`. This is
+  `CustomerProfiles.Password`, and the password in `config.ini` `[database]`. This is
   deliberate, for teaching, and documented in `AGENTS.md` §3. Do not build on it.
 - **There is no real email or SMS.** `Notifications.Channel` is a label; delivery is in-app.
   "Open door" and "test card at reader" stand in for hardware.

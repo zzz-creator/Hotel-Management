@@ -128,6 +128,67 @@ class OnboardingMarkerTests(unittest.TestCase):
         setter.assert_called_once_with(app.ONBOARDING_SETTING, "1")
 
 
+class EnsureDatabaseConfigTests(unittest.TestCase):
+    """_ensure_database_config() is what writes config.ini on a fresh checkout."""
+
+    def _blank_config(self, tmp):
+        import configparser
+        cfg = configparser.ConfigParser()
+        cfg.read_dict({"database": {"server": "", "database": "", "username": "", "password": ""}})
+        path = tmp / "config.ini"
+        return cfg, str(path)
+
+    def test_interactive_prompt_writes_a_database_only_config(self):
+        import tempfile, os
+        from pathlib import Path
+        tmp = Path(tempfile.mkdtemp())
+        cfg, path = self._blank_config(tmp)
+        answers = iter(["db.example.com", "myhotel", "sa"])
+        import io
+        with mock.patch.object(app, "config", cfg), \
+             mock.patch.object(app, "config_path", path), \
+             mock.patch.object(app, "db") as fake_db, \
+             mock.patch("builtins.input", lambda prompt="": next(answers)), \
+             mock.patch("getpass.getpass", return_value="s3cret"), \
+             mock.patch("sys.stdin") as fake_stdin:
+            fake_stdin.isatty.return_value = True
+            app._ensure_database_config()
+        text = Path(path).read_text(encoding="utf-8")
+        self.assertIn("server = db.example.com", text)
+        self.assertIn("database = myhotel", text)
+        self.assertIn("username = sa", text)
+        self.assertIn("password = s3cret", text)
+        # Nothing but [database]: no [hotel], no [loyalty], no master secret.
+        self.assertNotIn("[hotel]", text)
+        self.assertNotIn("[loyalty]", text)
+        self.assertNotIn("master", text)
+        fake_db.init.assert_called_once()
+
+    def test_non_interactive_run_does_not_prompt_and_writes_nothing(self):
+        import tempfile
+        from pathlib import Path
+        tmp = Path(tempfile.mkdtemp())
+        cfg, path = self._blank_config(tmp)
+        Path(path).write_text("[database]\nserver =\n", encoding="utf-8")
+        with mock.patch.object(app, "config", cfg), \
+             mock.patch.object(app, "config_path", path), \
+             mock.patch("sys.stdin") as fake_stdin, \
+             mock.patch("builtins.input", side_effect=AssertionError("must not prompt")):
+            fake_stdin.isatty.return_value = False
+            app._ensure_database_config()
+        self.assertEqual(Path(path).read_text(encoding="utf-8"), "[database]\nserver =\n")
+
+    def test_complete_config_is_left_alone(self):
+        import configparser
+        cfg = configparser.ConfigParser()
+        cfg.read_dict({"database": {"server": "h", "database": "d", "username": "u", "password": "p"}})
+        with mock.patch.object(app, "config", cfg), \
+             mock.patch("builtins.input", side_effect=AssertionError("must not prompt")), \
+             mock.patch.object(app, "db") as fake_db:
+            app._ensure_database_config()
+        fake_db.init.assert_not_called()
+
+
 class CreateFirstUserTests(unittest.TestCase):
     """The one step the wizard exists for, and the guard that keeps it that way."""
 
@@ -618,13 +679,12 @@ class RoomSeedSqlTests(unittest.TestCase):
 class SetupStatusTests(unittest.TestCase):
     """A checklist that lies is worse than no checklist, so failure has to be visible."""
 
-    def _status(self, log, answers=(), raises=None, settings=None, master_secret=""):
-        # master_secret and loyalty are patched explicitly rather than inherited: config.ini
-        # is untracked and per-machine, so a developer's own secret would otherwise decide
-        # these assertions.
+    def _status(self, log, answers=(), raises=None, settings=None):
+        # loyalty and the settings rows are patched explicitly rather than inherited:
+        # the live config.ini is per-machine, so a developer's own values would
+        # otherwise decide these assertions.
         with run_with(log, answers, raises), \
-             mock.patch.object(app, "MASTER_SECRET", master_secret), \
-             mock.patch.object(app, "LOYALTY_ENABLED", True), \
+             mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
              mock.patch.object(app, "get_setting",
                                side_effect=lambda k, d=None: (settings or {}).get(k, d)):
             return dict((label, (done, detail)) for label, done, detail in app.setup_status())
@@ -664,16 +724,15 @@ class SetupStatusTests(unittest.TestCase):
                       "Rooms", "Nightly rates", "Loyalty tiers"):
             self.assertTrue(checks[label][0], label)
 
-    def test_missing_master_row_is_a_failure_only_without_a_config_secret(self):
+    def test_missing_master_row_is_a_failure(self):
+        # The 'master' account is the only backing for require_master_override() now
+        # that there is no master_secret anywhere else.
         answers = self._answers(users=1, master=0, items=3, rooms=3)
-        checks = self._status([], answers, settings={}, master_secret="")
+        checks = self._status([], answers, settings={})
         self.assertFalse(checks["Master override account"][0])
-        self.assertIn("master_secret", checks["Master override account"][1])
-        checks = self._status([], answers, settings={}, master_secret="s3cret")
-        self.assertTrue(checks["Master override account"][0])
-        # A row and a configured secret both count; neither is required.
+        self.assertNotIn("master_secret", checks["Master override account"][1])
         checks = self._status([], self._answers(users=1, master=1, items=3, rooms=3),
-                              settings={}, master_secret="")
+                              settings={})
         self.assertTrue(checks["Master override account"][0])
 
     def test_one_failing_probe_does_not_take_down_the_screen(self):
@@ -688,16 +747,14 @@ class SetupStatusTests(unittest.TestCase):
 
     def test_unreachable_database_marks_everything_not_ready(self):
         with mock.patch.object(app, "get_connection", return_value=None), \
-             mock.patch.object(app, "get_setting", return_value=None), \
-             mock.patch.object(app, "MASTER_SECRET", ""):
+             mock.patch.object(app, "get_setting", return_value=None):
             checks = dict((l, (d, x)) for l, d, x in app.setup_status())
         self.assertFalse(any(done for done, _ in checks.values()))
         self.assertTrue(any("migration" in detail for _done, detail in checks.values()))
 
     def test_loyalty_row_only_appears_when_loyalty_is_on(self):
         answers = self._answers(users=1, master=1, items=1, rooms=1, rated=1)
-        with mock.patch.object(app, "LOYALTY_ENABLED", False), \
-             mock.patch.object(app, "MASTER_SECRET", ""), \
+        with mock.patch.object(app, "get_loyalty_enabled", return_value=False), \
              mock.patch.object(app, "get_setting", return_value="2026-10-02"):
             log = []
             with run_with(log, answers):
@@ -902,6 +959,7 @@ class WizardStepGuardsTests(unittest.TestCase):
         self.settings_written = []
         self.catalogue = mock.MagicMock(return_value=0)
         self.rooms = mock.MagicMock()
+        self.settings = mock.MagicMock()
         fake_ui = mock.MagicMock()
         fake_ui.ask_confirmation.return_value = True
         fake_ui.ask_number.side_effect = [20, 40]
@@ -915,6 +973,7 @@ class WizardStepGuardsTests(unittest.TestCase):
              mock.patch.object(app, "log_audit"), \
              mock.patch.object(app, "_offer_item_catalogue", self.catalogue), \
              mock.patch.object(app, "_offer_room_layout", self.rooms), \
+             mock.patch.object(app, "_offer_hotel_settings", self.settings), \
              mock.patch("builtins.input", lambda prompt="": answer), \
              mock.patch.object(app, "_prompt_new_password", return_value="pw"), \
              run_with([], answers):
@@ -959,8 +1018,8 @@ class WizardStepGuardsTests(unittest.TestCase):
         self.assertEqual(create.call_args.args[2], "admin")
 
     def test_a_populated_database_still_gets_the_master_account_offered(self):
-        # The master account is the fallback that makes the override work with a blank
-        # master_secret, and it is exactly the step a hand-built database is most likely to
+        # The master account backs the override with no config secret, and it is
+        # exactly the step a hand-built database is most likely to
         # be missing -- so it is not gated on having zero rows.
         #
         # It must not go through create_first_user() here. That function refuses whenever

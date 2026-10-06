@@ -144,13 +144,16 @@ nothing.
 
 ## 8. Plaintext passwords
 
-**Where:** `Users.Password`, `CustomerProfiles.Password`, `config.ini` `[hotel] master_secret`.
+**Where:** `Users.Password`, `CustomerProfiles.Password`, `config.ini` `[database]` password.
 **Severity:** by design (teaching/demo project).
 
 Passwords are stored and compared in plaintext throughout. Do **not** introduce hashing or
 salting without being asked — see AGENTS.md §3. This is the one entry here that is
 knowingly insecure rather than merely incomplete, and it is the reason `require_master_override()`
-has a plaintext fallback to the `master` account.
+accepts the `master` account's plaintext password. The master override secret
+(`[hotel] master_secret` in config.ini) was removed on 6 October 2026: the `master`
+account's own password is now the only backing, so there is one less place a secret can
+sit in a file.
 
 ---
 

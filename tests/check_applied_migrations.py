@@ -112,7 +112,7 @@ def main():
         row = one(cursor, 'SELECT SettingValue FROM dbo.HotelSettings '
                            "WHERE SettingKey = N'loyalty_accrual_points_per_unit'")
         if row is None:
-            print('%-42s MISSING -- falls back to the config.ini default'
+            print('%-42s MISSING -- falls back to the built-in default'
                   % 'loyalty_accrual_points_per_unit')
             problems += 1
         else:

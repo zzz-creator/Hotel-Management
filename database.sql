@@ -297,7 +297,9 @@ PRIMARY KEY CLUSTERED
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
--- Seed default values (mirror config.ini). Editable from the admin "Pricing & Settings" menu.
+-- Seed default values (mirror the built-in fallbacks). Editable from the admin
+-- "Pricing & Settings" menu. config.ini is deliberately NOT the source for any of
+-- these: it carries only the database connection.
 -- 'business_date' (migration 023) is the hotel's single clock for "which day is it": every
 -- "today" in the app reads it, and the admin "Business Date" menu advances it one day at
 -- a time. It is seeded to the day this script is run, which is what preserves the meaning
@@ -320,7 +322,12 @@ INSERT INTO [dbo].[HotelSettings] ([SettingKey], [SettingValue]) VALUES
     (N'loyalty_accrual_points_per_unit', N'0.5'),
     (N'loyalty_redemption_points_per_currency_unit', N'100'),
     (N'loyalty_points_per_night', N'100'),
-    (N'booking_refund_cutoff_days', N'7');
+    (N'booking_refund_cutoff_days', N'7'),
+    (N'hotel_name', N'The Grand Oasis Hotel'),
+    (N'loyalty_enabled', N'1'),
+    (N'lockout_threshold', N'3'),
+    (N'lockout_duration', N'5'),
+    (N'customer_login_max_attempts', N'3');
 GO
 -- Per-room-category points multipliers (editable from "Pricing & Settings").
 INSERT INTO [dbo].[HotelSettings] ([SettingKey], [SettingValue]) VALUES
