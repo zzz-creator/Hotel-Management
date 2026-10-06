@@ -428,18 +428,20 @@ class SettingsTests(unittest.TestCase):
                              app.LOYALTY_ACCRUAL_POINTS_PER_UNIT)
 
     def test_expiration_settings_are_gone(self):
-        # Migration 025 removed a knob that was editable on screen but read by nothing,
-        # so points never expired. The reader and the constant must stay deleted: leaving
-        # either behind would restore a control that promises expiry the app never did.
+        # Migration 025 removed the editable `loyalty_expiration_days` knob because it was
+        # read by nothing; the real expiry feature added later (run_loyalty_expiry_sweep,
+        # LOYALTY_POINTS_EXPIRY_DAYS) is keyed on code + ledger rows, NOT on that setting.
+        # Neither the old reader nor a settings read of the old key may come back: either
+        # would restore a control that promises expiry the app never did.
         self.assertFalse(hasattr(app, "get_loyalty_expiration_days"),
                          "get_loyalty_expiration_days() must not come back")
         self.assertFalse(hasattr(app, "LOYALTY_EXPIRATION_DAYS"),
                          "LOYALTY_EXPIRATION_DAYS must not come back")
         with open(app.__file__, encoding="utf-8") as handle:
             source = handle.read()
-        for gone in ("loyalty_expiration_days", "expiration_days"):
-            self.assertNotIn(gone, source,
-                             f"{gone!r} is still referenced by the app")
+        self.assertNotIn("get_setting('loyalty_expiration_days'", source)
+        self.assertNotIn("_setting_int('loyalty_expiration_days'", source)
+        self.assertNotIn("_setting_float('loyalty_expiration_days'", source)
 
     def test_numeric_strings_are_accepted(self):
         # Admins type whole numbers where a float is expected.

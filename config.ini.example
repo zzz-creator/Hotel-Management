@@ -41,4 +41,7 @@ points_per_night = 100
 redemption_points_per_currency_unit = 100
 ; There is no `expiration_days` key, and that is deliberate. It used to exist and was
 ; shown in the admin settings screen, but nothing ever read it to expire anything, so
-; it was a knob that lied. Migration 025 deletes the row. Points do not expire.
+; it was a knob that lied. Migration 025 deletes the row. Points DO expire now: each
+; earn row ages out LOYALTY_POINTS_EXPIRY_DAYS (a code constant in main.py, currently
+; 365) after it was earned, via run_loyalty_expiry_sweep(), with the policy disclosed
+; to the guest.

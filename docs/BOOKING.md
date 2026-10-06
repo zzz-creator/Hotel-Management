@@ -316,9 +316,16 @@ nights = stay_nights(CheckInDate, CheckOutDate)
   Deluxe could not catch up. The order rate must stay **below** the room rate —
   `points_per_dollar_order_vs_room()` is that comparison, it returns both figures for the
   settings screen, and `tests/test_billing_math.py` fails if the ordering inverts.
-- **Points do not expire.** `loyalty_expiration_days` was editable on the settings screen
-  and read by nothing; migration 025 deletes it. Recency is rewarded through tier promotion
-  instead — see `docs/DEVIATIONS.md` §4.
+- **Points expire, per earn row.** `run_loyalty_expiry_sweep()` expires each POSITIVE
+  ledger row on its own `CreatedAt + LOYALTY_POINTS_EXPIRY_DAYS` (a code constant —
+  deliberately not a settings row, because the old `loyalty_expiration_days` knob was
+  editable but read by nothing, and 025 deleted that lie). Idempotent per earn row via
+  `SourceID = 'expire:{row_id}'`; redeemed points are FIFO-protected by clamping at the
+  current balance; the account balance is rebuilt from the whole ledger after the sweep.
+  The guest sees the policy in "My Loyalty Status". Staff run it from Loyalty Management
+  (option 6); see `docs/DEVIATIONS.md` §4.
+- Recency is still rewarded through tier promotion as well — expiry is the clock, tiers
+  are the carrot.
 - Tier thresholds (migration 010): Bronze 0 / Silver 1000 / Gold 2500 / Platinum 7500.
   `DEFAULT_TIERS` matches. The `UPDATE`s are guarded so they only fire while a tier is
   still at its old default.

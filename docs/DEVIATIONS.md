@@ -71,22 +71,26 @@ load-bearing: calling the current behaviour a night audit would be a lie.
 
 ---
 
-## 4. Loyalty points never expire
+## 4. Loyalty points never expire — closed 6 October 2026
 
-**Where:** 025. **Severity:** by design.
+**Where:** `run_loyalty_expiry_sweep()`, migration 025. **Severity:** was a missing
+feature. **Status:** closed — with the design DEVIATIONS.md §4 asked for, not the one it
+removed.
 
-`loyalty_expiration_days` used to be seeded at `0` ("0 = never expire") and editable from
-the admin settings screen — and read by **nothing**. It was a control that looked exactly
-like a control that worked; setting it to 90 would have been accepted, stored, displayed,
-and changed no behaviour. Migration 025 deletes it, because a knob that does nothing is
-worse than a missing feature: its only failure mode is invisible.
+`loyalty_expiration_days` used to be seeded at `0` and editable from the admin settings
+screen — and read by **nothing**. A knob that does nothing is worse than a missing
+feature, so migration 025 deleted it: points did not expire and no control pretended
+otherwise.
 
-Points are kept forever, and recency is rewarded through tier promotion rather than a time
-limit.
-
-**Fix, if expiry is ever wanted:** a real expiry sweep keyed on `LoyaltyTransactions.CreatedAt`
-with a `LoyaltyAccounts.Points` recompute, plus a disclosure the guest can see. Not a
-setting.
+**Closed by `run_loyalty_expiry_sweep()`** (6 October 2026). The sweep is keyed on
+`LoyaltyTransactions.CreatedAt`: each positive earn row ages out on its own
+CreatedAt + `LOYALTY_POINTS_EXPIRY_DAYS` (a code constant, not a setting — that is what
+keeps it from becoming the dead knob again). Each earn row's expiry is recorded with
+SourceID `expire:{row_id}`, so re-running never double-expires; redeemed points are
+FIFO-protected by clamping at the current balance; and the account balance is
+RECOMPUTED from the ledger after the sweep, so it is self-healing. The policy is
+disclosed to the guest in "My Loyalty Status". Staff run it from the Loyalty Management
+menu (option 6); it also logs an audit row.
 
 ---
 
