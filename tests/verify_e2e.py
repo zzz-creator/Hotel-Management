@@ -1491,6 +1491,28 @@ def phase_redemption_safety(app, base_date):
         ok('re-running check-out takes the points no further (%s points, %s redemption row(s))'
            % (after_second['points'], after_second['redemption rows']))
 
+    # --- more points than the guest holds is refused loudly, not silently --------------
+    # The UI clamps the prompt, so insufficient balance can only reach this helper
+    # directly. What the ledger must never see is a redemption row for points the guest
+    # did not have.
+    conn = conn_or_none()
+    cid = _fixture_customer(room, last, first)
+    before = _loyalty_reading(room, last, first)
+    try:
+        app.redeem_points_for_invoice(cid, 999999, room, 'checkout', conn,
+                                      source_id='verify:insufficient')
+    except app.LoyaltyRedemptionError:
+        after = _loyalty_reading(room, last, first)
+        if after['points'] != before['points'] or after['redemption rows'] != before['redemption rows']:
+            fail('an over-large redemption changed the balance (%s -> %s) or wrote a row'
+                 % (before['points'], after['points']))
+        else:
+            ok('redeeming more than the balance raises LoyaltyRedemptionError and writes nothing')
+    else:
+        fail('redeeming 999999 points against a balance of %s did not raise'
+             % before['points'])
+    conn.rollback()
+
 
 def phase_outstanding_signal(app, base_date):
     """A failed settlement must say what is left, not just that it broke.
