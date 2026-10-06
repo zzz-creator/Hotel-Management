@@ -406,10 +406,8 @@ missing from the inventory, when a function or table named in `docs/` no longer 
 and when the §2 file map drifts from the repo.
 
 **Apply migrations in order, or re-run `database.sql` on a fresh database.** Migrations
-001-025 are applied to the developer's live database; 026 and 027 are new as of 6 October
-2026 and are still pending on it (026 adds the audit diff columns, so a live checklist
-against `verify_e2e.py` Phase 4 will report `AuditLog.OldValue`/`NewValue` missing until
-you apply 026). 001-018 were verified end-to-end
+001-027 are all applied to the developer's live database (026's audit diff columns and
+027's `HotelSettings` keys included, as of 6 October 2026). 001-018 were verified end-to-end
 (book → check out with credit → cancel, plus the declined-card and full-refund paths).
 019-021 were verified read-only against the catalog. Their T-SQL and the flows they back now
 run on every `verify_e2e.py` invocation — but against a *disposable* database.
