@@ -33,23 +33,22 @@ how a working booking system stops booking.
 
 ---
 
-## 2. `AuditLog` records actions, not diffs
+## 2. `AuditLog` records actions, not diffs — closed 6 October 2026
 
-**Where:** `log_audit()`. **Severity:** forensic.
+**Where:** `log_audit()`, migration 026. **Severity:** forensic. **Status:** closed for the
+call sites that have the before-image in scope; the rest still log only free text.
 
-`log_audit("UPDATE", "Reservation", "9012", "…")` stores the free-text detail the caller
-passed and nothing else. There is no before-image, so the log cannot answer "what was this
-rate before Tuesday?" — only "something about a rate happened on Tuesday, and here is the
-sentence the code wrote".
+`log_audit("UPDATE", "Reservation", "9012", "…")` used to store only the free-text
+detail. There was no before-image, so the log could not answer "what was this rate
+before Tuesday?" — only "something about a rate happened on Tuesday".
 
-**Fix:** read the old row before the write and pass both values, or add `OldValue` /
-`NewValue` columns and have `log_audit()` populate them. The first is a per-callsite change
-in ~40 places; the second is a migration plus a signature change.
-
-**Why it is not done:** the callers are the only ones that know what the old value was, so
-this cannot be fixed centrally without either changing every callsite or re-reading the row
-inside `log_audit()` — and the latter is wrong for a re-let, where the "old row" has
-already been archived or overwritten by the time the audit call happens.
+**Closed by 026:** `AuditLog.OldValue` / `AuditLog.NewValue`, and `log_audit()`
+accepts them. The caller passes the old value rather than `log_audit()` re-reading the
+row, because for a re-let the old row has already been archived by the time the audit
+call runs. `set_setting()`, `set_room_status()`, `update_room_type_rate()` and the
+discount edit are wired; the other call sites opt in the same way as they need it. The
+columns stay NULL for creates and logins — an absent diff means "no diff", not "blank
+before".
 
 ---
 

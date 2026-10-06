@@ -76,6 +76,7 @@ New interactive output goes through `ui.py`, never inline `rich`.
 | `tests/test_billing_math.py` | Billing arithmetic, captured stay rate, the business date, loyalty calibration, report date windows |
 | `tests/test_booking.py` | Booking money rules and the check-out credit |
 | `tests/test_customer_loyalty.py` | Customer-keyed loyalty (019) and booking-desk login |
+| `tests/test_audit_diffs.py` | The OldValue/NewValue columns `log_audit()` writes (026) |
 | `tests/test_validate_room.py` | The guest identity check |
 | `tests/test_onboarding.py` | First-run wizard: the completion marker, the first-account guard, item/room seeding idempotency, room-layout bounds |
 | `tests/test_schema_sync.py` | The schema checker itself — a checker that parses nothing must fail |
@@ -358,8 +359,8 @@ finding rather than as "the harness is broken" — and do not respond by looseni
 assertion that caught it.
 
 Exit code 0 = pass. `check_schema_sync.py` compares the 20 tables that migrations 013-018
-`CREATE` (by column, type, and nullability), the columns and primary key that 019, 020 and
-022 `ALTER`, and every UNIQUE index any migration creates. **Not covered:** columns that 013
+`CREATE` (by column, type, and nullability), the columns and primary key that 019, 020,
+022 and 026 `ALTER`, and every UNIQUE index any migration creates. **Not covered:** columns that 013
 and 018 added to `Transactions` and `Invoices` (those tables are created by 011/012, outside
 its window) — if you touch the split-folio or `PrepaidAmount` columns, eyeball `database.sql`
 yourself.

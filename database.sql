@@ -640,6 +640,8 @@ CREATE TABLE [dbo].[AuditLog](
 	[EntityType] [nvarchar](50) NOT NULL,
 	[EntityID] [nvarchar](100) NULL,
 	[Details] [nvarchar](1000) NULL,
+	[OldValue] [nvarchar](500) NULL,
+	[NewValue] [nvarchar](500) NULL,
 PRIMARY KEY CLUSTERED
 (
 	[AuditID] ASC

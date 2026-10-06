@@ -45,6 +45,7 @@ install and is kept in sync by hand — a schema change lands in **both** places
 | 023 | `023_business_date.sql` | Seeds the (now historical) `business_date` `HotelSettings` row — the app's one-time clock for "which day is it" |
 | 024 | `024_loyalty_order_accrual.sql` | Recalibrates `loyalty_accrual_points_per_unit` 3 → 0.5, so F&B cannot out-earn the room |
 | 025 | `025_drop_loyalty_expiration.sql` | Deletes `loyalty_expiration_days`, a setting nothing ever read |
+| 026 | `026_audit_log_diffs.sql` | `AuditLog.OldValue` / `AuditLog.NewValue` so an update records the before-image, not just a sentence |
 
 ### Fresh database
 
@@ -279,7 +280,13 @@ within `[IssuedAt, ExpiresAt]`.
 ### Audit
 
 **`AuditLog`** — `AuditID` identity PK, `CreatedAt`, `Username`, `Action`, `EntityType`,
-`EntityID`, `Details`.
+`EntityID`, `Details`, `OldValue`, `NewValue` (026).
+
+For value changes the before/after belongs in `OldValue`/`NewValue`; the caller
+passes it, because only it knows what changed -- for a re-let the old row has
+already been archived by the time `log_audit()` runs. The two columns are NULL
+for actions that have no before-image (CREATE, LOGIN), so the absence of a diff
+means "no diff exists", not "the value was blank".
 
 `log_audit()` opens its **own** connection on purpose, so a business transaction rolling
 back cannot erase its audit trail, and it never raises — a missing table logs at debug
@@ -376,11 +383,11 @@ transaction should not be replaced as collateral damage of a schema change, and 
 no test in this repo that runs the full book → check out → cancel path against a live
 database. Fix it as its own change, with database-backed tests, not as a side effect.
 
-Known limitation in the audit trail: `AuditLog` records **actions, not diffs**, and
-`log_audit("UPDATE", ...)` cannot say what a value *was*. A rate edit or a business-date
-change is only as traceable as the free-text detail string the caller happened to pass.
-See `docs/DEVIATIONS.md` for that and the other standing limitations, each with the change
-that would actually close it.
+Audit-trail diffs: `AuditLog.OldValue` / `AuditLog.NewValue` (026) now record the
+before/after for value changes, at the call sites that have the old value in
+scope (`set_setting`, `set_room_status`, `update_room_type_rate`, discount edits). The
+remaining sites still log only the free-text `Details`; opt them in the same way
+when the before-image is cheap to read.
 
 ---
 

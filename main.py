@@ -176,8 +176,14 @@ def require_master_override(prompt="Enter master override secret: "):
     return False
 
 
-def log_audit(action, entity_type, entity_id="", details=""):
+def log_audit(action, entity_type, entity_id="", details="", old_value=None, new_value=None):
     """Record who changed what in dbo.AuditLog (migration 016).
+
+    `old_value` / `new_value` (migration 026) record the before/after for value
+    changes. The caller owns the before-image and passes it in: re-reading the
+    row inside log_audit would be wrong for a re-let, where the old row has
+    already been archived or overwritten by the time the audit call happens.
+    Both are optional and nullable, so every pre-026 call site keeps working.
 
     Opens its own connection deliberately: the surrounding business transaction may be
     mid-flight, and an audit write must neither be rolled back with it nor be blamed for
@@ -191,10 +197,12 @@ def log_audit(action, entity_type, entity_id="", details=""):
                 return False
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO AuditLog (Username, Action, EntityType, EntityID, Details) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO AuditLog (Username, Action, EntityType, EntityID, Details, OldValue, NewValue) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (str(CURRENT_USER or "system"), str(action or "UNKNOWN"),
-                 str(entity_type or "Unknown"), str(entity_id or ""), str(details or "")),
+                 str(entity_type or "Unknown"), str(entity_id or ""), str(details or ""),
+                 None if old_value is None else str(old_value),
+                 None if new_value is None else str(new_value)),
             )
             conn.commit()
             return True
@@ -228,14 +236,17 @@ def set_setting(setting_key, value):
             return False
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT 1 FROM HotelSettings WHERE SettingKey = ?", (setting_key,))
-            if cursor.fetchone():
+            cursor.execute("SELECT SettingValue FROM HotelSettings WHERE SettingKey = ?", (setting_key,))
+            old_row = cursor.fetchone()
+            old_value = old_row[0] if old_row is not None and old_row[0] is not None else None
+            if old_row is not None:
                 cursor.execute("UPDATE HotelSettings SET SettingValue = ? WHERE SettingKey = ?", (str(value), setting_key))
             else:
                 cursor.execute("INSERT INTO HotelSettings (SettingKey, SettingValue) VALUES (?, ?)", (setting_key, str(value)))
             conn.commit()
             logging.info("Setting '%s' updated to %s.", setting_key, value)
-            log_audit("UPDATE", "Setting", setting_key, f"{setting_key} -> {value}")
+            log_audit("UPDATE", "Setting", setting_key, f"{setting_key} -> {value}",
+                      old_value=old_value, new_value=value)
             return True
         except Exception as e:
             logging.error("Error updating setting '%s': %s", setting_key, e)
@@ -420,9 +431,13 @@ def set_room_status(room_number, status):
             return False
         try:
             cursor = conn.cursor()
+            cursor.execute("SELECT Status FROM Rooms WHERE RoomNumber = ?", (room_number,))
+            old_row = cursor.fetchone()
+            old_status = old_row[0] if old_row is not None else None
             cursor.execute("UPDATE Rooms SET Status = ? WHERE RoomNumber = ?", (status, room_number))
             conn.commit()
-            log_audit("UPDATE", "Room", room_number, f"Status -> {status}")
+            log_audit("UPDATE", "Room", room_number, f"Status -> {status}",
+                      old_value=old_status, new_value=status)
             return True
         except Exception as e:
             logging.error(f"Error setting room status: {e}")
@@ -682,6 +697,9 @@ def update_room_type_rate(room_type, nightly_rate):
             return False
         try:
             cursor = conn.cursor()
+            cursor.execute("SELECT NightlyRate FROM RoomTypes WHERE RoomType = ?", (room_type,))
+            old_row = cursor.fetchone()
+            old_rate = float(old_row[0]) if old_row is not None and old_row[0] is not None else None
             cursor.execute(
                 "UPDATE RoomTypes SET NightlyRate = ? WHERE RoomType = ?",
                 (nightly_rate, room_type),
@@ -693,7 +711,9 @@ def update_room_type_rate(room_type, nightly_rate):
                     (room_type, nightly_rate),
                 )
             conn.commit()
-            log_audit("UPDATE", "RoomType", room_type, f"NightlyRate -> {nightly_rate:.2f}")
+            log_audit("UPDATE", "RoomType", room_type, f"NightlyRate -> {nightly_rate:.2f}",
+                      old_value=f"{old_rate:.2f}" if old_rate is not None else None,
+                      new_value=f"{nightly_rate:.2f}")
             logging.info(f"Nightly rate for {room_type} set to ${nightly_rate:.2f}.")
             return True
         except Exception as e:
@@ -4719,7 +4739,9 @@ def manage_discount_codes():
                         )
                         conn.commit()
                         log_audit("UPDATE", "Discount", code,
-                                  f"{float(existing[0])}% -> {new_percentage}%")
+                                  f"{float(existing[0])}% -> {new_percentage}%",
+                                  old_value=f"{float(existing[0])}%",
+                                  new_value=f"{new_percentage}%")
                         logging.info(f"Discount code '{code}' updated successfully.")
                     else:
                         logging.info("Discount code not found.")

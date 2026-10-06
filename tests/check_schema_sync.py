@@ -28,7 +28,7 @@ import sys
 # Migrations that modify an existing table instead of creating one. Each is checked by its
 # ADD / ALTER COLUMN / PRIMARY KEY statements rather than a CREATE TABLE. Add a new
 # number here when a migration ALTERs rather than CREATEs.
-ALTER_MIGRATIONS = ('019', '020', '022')
+ALTER_MIGRATIONS = ('019', '020', '022', '026')
 
 # Order matters: longer type names must come before names that prefix them
 # (DATETIME2/DATETIME before DATE, TIME last), or "DATETIME" parses as "DATE".
