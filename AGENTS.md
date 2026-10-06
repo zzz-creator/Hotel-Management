@@ -77,7 +77,6 @@ New interactive output goes through `ui.py`, never inline `rich`.
 | `tests/test_booking.py` | Booking money rules and the check-out credit |
 | `tests/test_customer_loyalty.py` | Customer-keyed loyalty (019) and booking-desk login |
 | `tests/test_audit_diffs.py` | The OldValue/NewValue columns `log_audit()` writes (026) |
-| `tests/test_loyalty_expiry.py` | The loyalty points expiry sweep |
 | `tests/test_validate_room.py` | The guest identity check |
 | `tests/test_onboarding.py` | First-run wizard: the completion marker, the first-account guard, item/room seeding idempotency, room-layout bounds |
 | `tests/test_schema_sync.py` | The schema checker itself — a checker that parses nothing must fail |

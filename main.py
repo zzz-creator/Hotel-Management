@@ -41,12 +41,6 @@ LOYALTY_ENABLED = config.getboolean('loyalty', 'enabled', fallback=False)
 LOYALTY_ACCRUAL_POINTS_PER_UNIT = config.getfloat('loyalty', 'accrual_points_per_unit', fallback=0.5)
 LOYALTY_POINTS_PER_NIGHT = config.getint('loyalty', 'points_per_night', fallback=100)
 LOYALTY_REDEMPTION_POINTS_PER_CURRENCY_UNIT = config.getint('loyalty', 'redemption_points_per_currency_unit', fallback=100)
-# Points expire this many days after they were EARNED (per earn row's CreatedAt). This is
-# a code constant, not a setting on purpose: the old `loyalty_expiration_days` knob was
-# editable on screen but read by nothing, and 025 deleted it rather than keep a lie. If
-# expiry is wanted, it must be a real behaviour with a disclosure the guest can see --
-# which is the sweep below plus the row in "My Loyalty Status".
-LOYALTY_POINTS_EXPIRY_DAYS = 365
 # The floor for "which day is it", used only when HotelSettings has no usable
 # business_date row (before migration 023, or if an admin blanks it).
 # The 'business_date' HotelSettings row (migration 023) is historical: the app no longer
@@ -1130,88 +1124,6 @@ def recompute_all_tiers() -> int:
         except Exception as e:
             logging.debug(f"Error recomputing loyalty tiers: {e}")
             return 0
-
-
-def run_loyalty_expiry_sweep(now=None) -> dict:
-    """Expire loyalty points older than LOYALTY_POINTS_EXPIRY_DAYS.
-
-    Keyed on `LoyaltyTransactions.CreatedAt`: each POSITIVE ledger row ages out on
-    its own CreatedAt + LOYALTY_POINTS_EXPIRY_DAYS. Idempotent per earn row via
-    SourceID 'expire:{row_id}', so re-running the same day never double-expires;
-    a zero-delta row still carries the guard when there was no available balance
-    to debit, so a later run cannot backdate an expiry against fresh points.
-
-    Points are drawn FIFO from the current balance (clamped at zero): points the
-    guest already redeemed cannot be expired twice. After the per-row writes the
-    account's balance is RECOMPUTED from the whole ledger, which makes the
-    balance self-healing -- the ledger is the truth and the account row is a
-    cache of it.
-
-    Returns a stats dict {rows, accounts, points}; logs an audit row. Safe to
-    call whenever there is no scheduler: there is no night audit to hook.
-    """
-    if not LOYALTY_ENABLED:
-        return {"rows": 0, "accounts": 0, "points": 0}
-    if now is None:
-        now = datetime.now()
-    cutoff = now - timedelta(days=LOYALTY_POINTS_EXPIRY_DAYS)
-    stats = {"rows": 0, "accounts": 0, "points": 0}
-    with get_connection() as conn:
-        if conn is None:
-            return stats
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT DISTINCT CustomerID FROM LoyaltyTransactions "
-                "WHERE Delta > 0 AND CreatedAt < ?", (cutoff,))
-            for (customer_id,) in cursor.fetchall():
-                cursor.execute(
-                    "SELECT ISNULL(Points, 0) FROM LoyaltyAccounts WHERE CustomerID = ?",
-                    (customer_id,))
-                row = cursor.fetchone()
-                if row is None:
-                    continue
-                remaining = int(row[0])
-                cursor.execute(
-                    "SELECT ID, Delta FROM LoyaltyTransactions "
-                    "WHERE CustomerID = ? AND Delta > 0 AND CreatedAt < ? ORDER BY CreatedAt",
-                    (customer_id, cutoff))
-                expired_rows = cursor.fetchall()
-                touched = False
-                for earn_id, delta in expired_rows:
-                    source_id = f"expire:{earn_id}"
-                    cursor.execute(
-                        "SELECT 1 FROM LoyaltyTransactions WHERE CustomerID = ? AND SourceID = ?",
-                        (customer_id, source_id))
-                    if cursor.fetchone():
-                        continue
-                    take = min(int(delta or 0), max(remaining, 0))
-                    cursor.execute(
-                        "INSERT INTO LoyaltyTransactions (CustomerID, Delta, Reason, CreatedAt, SourceID) "
-                        "VALUES (?, ?, 'expire', ?, ?)",
-                        (customer_id, -take, now, source_id))
-                    remaining -= take
-                    stats["rows"] += 1
-                    stats["points"] += take
-                    touched = True
-                if touched:
-                    cursor.execute(
-                        "UPDATE LoyaltyAccounts SET Points = ("
-                        "  SELECT ISNULL(SUM(Delta), 0) FROM LoyaltyTransactions WHERE CustomerID = ?"
-                        "), LastUpdated = ? WHERE CustomerID = ?",
-                        (customer_id, now, customer_id))
-                    stats["accounts"] += 1
-            conn.commit()
-        except Exception as e:
-            logging.error(f"Loyalty expiry sweep failed: {e}")
-            return stats
-    if stats["rows"] or stats["points"]:
-        log_audit("UPDATE", "LoyaltyAccount", "ALL",
-                  f"Expiry sweep: {stats['points']} point(s) expired across "
-                  f"{stats['accounts']} account(s), {stats['rows']} ledger row(s)")
-        logging.info(f"Loyalty expiry sweep: {stats['points']} points expired "
-                     f"across {stats['accounts']} account(s).")
-    return stats
 
 
 def award_stay_points(room_number, check_in, check_out, customer_id=None):
@@ -5032,8 +4944,7 @@ def loyalty_admin_menu():
             "3. View Loyalty Transactions",
             "4. Manage Loyalty Tiers",
             "5. Recalculate All Tiers",
-            "6. Run Loyalty Points Expiry Sweep",
-            "7. Back to Admin Panel",
+            "6. Back to Admin Panel",
         ])
         sub = input("Enter your choice: ").strip()
         if sub == '1':
@@ -5047,10 +4958,6 @@ def loyalty_admin_menu():
         elif sub == '5':
             admin_recompute_all_tiers()
         elif sub == '6':
-            stats = run_loyalty_expiry_sweep()
-            logging.info(f"Expiry sweep complete: {stats['points']} point(s) expired across "
-                         f"{stats['accounts']} account(s), {stats['rows']} ledger row(s).")
-        elif sub == '7':
             break
         else:
             logging.info("Invalid choice.")
@@ -7406,7 +7313,6 @@ def view_my_loyalty_status():
         ("Points per Night", f"{get_loyalty_points_per_night() * get_room_type_multiplier(get_room_type(room_number)) * details['points_multiplier']:.0f} (base {get_loyalty_points_per_night()} x category x tier)"),
         ("Tier Discount", f"{details['discount_percent']:.0f}% off room-service bills"),
         ("Perks", details["perks"] if details.get("perks") else "None"),
-        ("Points expiry", f"Each point expires {LOYALTY_POINTS_EXPIRY_DAYS} days after it is earned"),
     ]
     tiers = _tiers_from_db() or DEFAULT_TIERS
     for i, (name, _min_pts, _mult, _disc, _perks) in enumerate(tiers):

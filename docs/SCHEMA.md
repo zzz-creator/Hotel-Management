@@ -204,10 +204,9 @@ Keys: `business_date`, `peak_factor`, `offpeak_factor`, `tax_rate`,
   through `_setting_float()`; reading it as an int turns 0.5 into 0 and silently pays
   nothing for every order. It must stay **below** what a night's stay earns — see
   `points_per_dollar_order_vs_room()`, and BOOKING.md §5.
-- `loyalty_expiration_days` **no longer exists** (025). Points are not expired by a setting:
-  they are expired by `run_loyalty_expiry_sweep()`, keyed on
-  `LoyaltyTransactions.CreatedAt` with `LOYALTY_POINTS_EXPIRY_DAYS` in `main.py`, with the
-  policy disclosed in "My Loyalty Status". See BOOKING.md §5.
+- `loyalty_expiration_days` **no longer exists** (025). It was seeded, editable on screen,
+  and read by nothing. Points do not expire, and there is no longer a control that
+  suggests otherwise.
 
 ### Guests and loyalty
 
