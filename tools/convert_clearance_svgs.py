@@ -14,15 +14,11 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import clearance  # noqa: E402
+from svglib.svglib import svg2rlg  # noqa: E402
+from reportlab.graphics import renderPM  # noqa: E402
 
 
 def main():
-    try:
-        from svglib.svglib import svg2rlg
-        from reportlab.graphics import renderPM
-    except ImportError:
-        print("svglib/reportlab not installed. Run: pip install svglib reportlab rlPyCairo")
-        return 1
     count = 0
     for filename in sorted(os.listdir(clearance.ASSETS_DIR)):
         if not filename.endswith(".svg"):

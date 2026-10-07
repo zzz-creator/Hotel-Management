@@ -12,6 +12,10 @@ import logging
 
 import tkinter as tk
 
+from PIL import Image, ImageTk
+from svglib.svglib import svg2rlg
+from reportlab.graphics import renderPM
+
 import clearance
 
 CARD_W, CARD_H = 338, 189  # 4x the 84.5 x 47.25 card viewBox
@@ -31,11 +35,6 @@ def _band_color(card):
 
 def _render_png(card):
     """Rasterize the actual SVG via svglib+reportlab; returns a temp PNG path."""
-    try:
-        from svglib.svglib import svg2rlg
-        from reportlab.graphics import renderPM
-    except ImportError:
-        return None
     try:
         fd, tmp = tempfile.mkstemp(prefix="clearance_", suffix=".png")
         os.close(fd)
@@ -116,7 +115,6 @@ class ClearanceWindow:
         shown_image = False
         if png and os.path.exists(png):
             try:
-                from PIL import Image, ImageTk
                 img = Image.open(png)
                 self._photo = ImageTk.PhotoImage(img)
                 label = tk.Label(self.image_frame, image=self._photo)

@@ -15,6 +15,7 @@ import argparse
 import re
 import reports
 import ui
+import clearance_ui
 
 # Database connection settings
 config = configparser.ConfigParser()
@@ -4230,7 +4231,6 @@ def admin_panel():
             elif choice == '13':
                 comp_item_to_room()
             elif choice == '14':
-                import clearance_ui
                 clearance_ui.open_clearance_window()
             elif choice == '12':
                 break
@@ -4283,7 +4283,6 @@ def admin_panel():
             elif choice == '22':
                 break
             elif choice == '23':
-                import clearance_ui
                 clearance_ui.open_clearance_window()
             else:
                 logging.info("Invalid choice. Please try again.")
@@ -4358,7 +4357,6 @@ def admin_panel():
             elif choice == '35':
                 break
             elif choice == '36':
-                import clearance_ui
                 clearance_ui.open_clearance_window()
             else:
                 logging.info("Invalid choice. Please try again.")
