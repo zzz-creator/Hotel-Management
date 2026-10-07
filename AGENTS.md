@@ -379,7 +379,8 @@ python reports.py --report loyalty --room 9012                  # report via the
 ```
 
 `reports.py` exposes a `REPORTS` registry (`transactions`, `reservations`, `loyalty`,
-`invoices`, `revenue`, `occupancy`, `housekeeping`, `audit`, `guest_satisfaction`); both
+`invoices`, `revenue`, `occupancy`, `housekeeping`, `audit`, `guest_satisfaction`,
+`booking_ledger`); both
 CLIs and the admin "Export Reports" menu dispatch through it, so a new report needs one
 entry, not three.
 

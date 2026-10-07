@@ -3965,7 +3965,8 @@ def export_reports_menu():
             "7. Export Housekeeping Board",
             "8. Export Guest Satisfaction",
             "9. Export Audit Log",
-            "10. Back to Admin Panel",
+            "10. Export Booking Ledger",
+            "11. Back to Admin Panel",
         ])
         choice = input("Enter your choice: ").strip()
         if choice == '1':
@@ -4013,6 +4014,10 @@ def export_reports_menu():
         elif choice == '9':
             _run_report("Audit log", reports.export_audit_log)
         elif choice == '10':
+            ref = input("Booking reference (blank for all): ").strip()
+            _run_report("Booking ledger", reports.export_booking_ledger,
+                        booking_ref=ref or None)
+        elif choice == '11':
             break
         else:
             logging.info("Invalid choice. Please try again.")
@@ -4029,6 +4034,7 @@ def handle_cli_args():
     parser.add_argument("--floor", help="Floor number to limit the housekeeping report")
     parser.add_argument("--date", help="Board date (YYYY-MM-DD) for the housekeeping report; "
                                        "defaults to the business date")
+    parser.add_argument("--booking-ref", help="Limit the booking_ledger report to one reference")
     args, _ = parser.parse_known_args()
     if not args.report:
         return False
@@ -4045,6 +4051,9 @@ def handle_cli_args():
         elif args.report == 'housekeeping':
             paths = reports.export_housekeeping(export_format=args.format, floor=args.floor,
                                                 on_date=args.date)
+        elif args.report == 'booking_ledger':
+            paths = reports.export_booking_ledger(export_format=args.format,
+                                                  booking_ref=args.booking_ref)
         else:
             paths = reports.REPORTS[args.report](export_format=args.format)
         for path in paths:
@@ -6321,8 +6330,113 @@ def void_invoice(invoice_id):
             log_audit("UPDATE", "Invoice", invoice_id, f"Voided: {reason}",
                       old_value="active", new_value="voided")
             logging.info(f"Invoice {invoice_id} voided. It is excluded from revenue reports.")
+            # The void stops the invoice counting; the refund returns the money. The two
+            # are independent choices a clerk can get wrong if offered as one flow, so
+            # they stay separate prompts -- a void with no refund when the guest was
+            # charged is a chargeback-shaped hole, and a refund with no void double-pays.
+            try:
+                paid = float(inv.AmountPaid)
+            except (TypeError, ValueError):
+                paid = 0.0
+            if paid > 0 and ui.ask_confirmation(
+                    f"Also post a refund row for the ${paid:,.2f} paid on this invoice?",
+                    default="n"):
+                refund_invoice(invoice_id, reason=reason)
     except Exception as e:
         logging.error(f"Error voiding invoice {invoice_id}: {e}")
+
+
+def refund_invoice(invoice_id, reason=None):
+    """Post a signed 'Refund' row on the stay the voided invoice was issued for.
+
+    Caps the refund at what was actually paid (AmountPaid) minus any refunds already
+    posted for the same invoice, so a voided-then-refunded-then-refunded-again loop
+    cannot pay out more than the guest gave. The row is signed negative under the
+    original booking reference, and stamped with AppliedToInvoiceID so it nets against
+    the voided invoice in the stay's payment history.
+
+    Requires the invoice to be voided first AND a reason: an unexplained refund is
+    the same audit gap as an unexplained void. ReservationPayments' Kind CHECK only
+    allows the documented values, and 'Refund' is one of them.
+    """
+    try:
+        with get_connection() as conn:
+            if conn is None:
+                return False
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT RoomNumber, InvoiceDate, TotalAmount, AmountPaid, VoidedAt "
+                "FROM Invoices WHERE InvoiceID = ?",
+                (invoice_id,),
+            )
+            inv = cursor.fetchone()
+            if not inv:
+                logging.info("Invoice not found.")
+                return False
+            if inv.VoidedAt is None:
+                logging.info("Void the invoice before posting a refund against it.")
+                return False
+            try:
+                paid = float(inv.AmountPaid)
+            except (TypeError, ValueError):
+                logging.info("Invoice has no usable paid total; nothing to refund.")
+                return False
+            cursor.execute(
+                "SELECT COALESCE(SUM(Amount), 0) FROM ReservationPayments "
+                "WHERE AppliedToInvoiceID = ? AND Kind = ?",
+                (invoice_id, PAYMENT_KIND_REFUND),
+            )
+            prior = float(cursor.fetchone()[0] or 0.0)
+            refundable = round(paid + prior, 2)  # prior is signed negative
+            if refundable <= 0:
+                logging.info(f"Invoice {invoice_id} has already been fully refunded.")
+                return False
+            if reason is None:
+                reason = input("Refund reason (required): ").strip()
+            if not reason:
+                logging.info("A reason is required; no refund posted.")
+                return False
+            cursor.execute(
+                "SELECT TOP 1 RoomNumber, BookingRef, StayCheckIn FROM ReservationPayments "
+                "WHERE AppliedToInvoiceID = ?",
+                (invoice_id,),
+            )
+            link = cursor.fetchone()
+            if not link:
+                cursor.execute(
+                    "SELECT TOP 1 p.RoomNumber, p.BookingRef, p.StayCheckIn "
+                    "FROM ReservationPayments p "
+                    "JOIN Reservations r ON r.RoomNumber = p.RoomNumber "
+                    "WHERE p.RoomNumber = ? AND p.StayCheckIn <= ? AND r.CheckOutDate >= ? "
+                    "ORDER BY p.StayCheckIn DESC",
+                    (inv.RoomNumber, inv.InvoiceDate, inv.InvoiceDate),
+                )
+                link = cursor.fetchone()
+            if not link:
+                logging.info("Cannot identify the original booking for this invoice, "
+                             "so no refund row can be attributed. Void only, for now.")
+                return False
+            payment_id = record_booking_payment(
+                link.RoomNumber, link.BookingRef, link.StayCheckIn,
+                PAYMENT_KIND_REFUND, -round(refundable, 2),
+                notes=f"Refund for voided invoice {invoice_id}: {reason}",
+                conn=conn,
+            )
+            if payment_id is None:
+                return False
+            cursor.execute(
+                "UPDATE ReservationPayments SET AppliedToInvoiceID = ? WHERE PaymentID = ?",
+                (invoice_id, payment_id),
+            )
+            conn.commit()
+            log_audit("CREATE", "ReservationPayment", str(payment_id),
+                      f"Refund of ${refundable:.2f} for voided invoice {invoice_id}: {reason}")
+            logging.info(f"Refund of ${refundable:,.2f} posted against invoice {invoice_id} "
+                         f"(payment {payment_id}).")
+            return True
+    except Exception as e:
+        logging.error(f"Error refunding invoice {invoice_id}: {e}")
+        return False
 
 
 def print_my_invoice():

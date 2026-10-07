@@ -423,6 +423,38 @@ def export_guest_satisfaction(export_format="csv"):
     return [_export_query("guest_satisfaction", query, "Guest Satisfaction Report")]
 
 
+def export_booking_ledger(export_format="csv", booking_ref=None):
+    """Every signed ReservationPayments row, one row per charge/refund/forfeit.
+
+    With no `booking_ref` this is the hotel-wide ledger; with one it is that
+    booking's whole money history -- the guest receipt that complements the loyalty
+    statement export. Rows are signed, so a stay's net position is a SUM over this
+    table, not a count of charges.
+    """
+    if export_format != "csv":
+        raise ValueError("Only csv export is supported.")
+    base = (
+        "SELECT p.PaymentID, p.BookingRef, p.Kind, p.Amount, p.AppliedAmount, "
+        "  CASE WHEN ISNULL(p.AppliedAmount, 0) >= ABS(p.Amount) THEN 'yes' ELSE 'no' END AS FullyApplied, "
+        "  p.CardLast4, p.PaidAt, p.RoomNumber, p.StayCheckIn, p.AppliedToInvoiceID, p.Notes "
+        "FROM ReservationPayments p"
+    )
+    if booking_ref:
+        csv_path = _export_query(
+            f"booking_ledger_{_slug(booking_ref)}",
+            base + " WHERE p.BookingRef = ? ORDER BY p.PaidAt, p.PaymentID",
+            f"Booking Ledger: {booking_ref}",
+            (booking_ref,),
+        )
+    else:
+        csv_path = _export_query(
+            "booking_ledger",
+            base + " ORDER BY p.BookingRef, p.PaidAt, p.PaymentID",
+            "Booking Ledger",
+        )
+    return [csv_path]
+
+
 REPORTS = {
     "transactions": export_transactions,
     "reservations": export_reservations,
@@ -433,6 +465,7 @@ REPORTS = {
     "housekeeping": export_housekeeping,
     "audit": export_audit_log,
     "guest_satisfaction": export_guest_satisfaction,
+    "booking_ledger": export_booking_ledger,
 }
 
 
@@ -451,6 +484,7 @@ def run_cli():
     parser.add_argument("--floor", help="Floor number to limit the housekeeping report")
     parser.add_argument("--date", help="Board date (YYYY-MM-DD) for the housekeeping report; "
                                        "defaults to the business date")
+    parser.add_argument("--booking-ref", help="Limit the booking_ledger report to one reference")
     args = parser.parse_args()
 
     if args.report == "loyalty":
@@ -461,6 +495,8 @@ def run_cli():
         paths = export_occupancy(args.format, args.start, args.end)
     elif args.report == "housekeeping":
         paths = export_housekeeping(args.format, args.floor, args.date)
+    elif args.report == "booking_ledger":
+        paths = export_booking_ledger(args.format, args.booking_ref)
     else:
         paths = REPORTS[args.report](args.format)
 
