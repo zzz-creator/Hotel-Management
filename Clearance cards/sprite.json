@@ -1,0 +1,257 @@
+{
+  "costumes": [
+    {
+      "name": "Visitor",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "0b2d6c6ff11e4c1c1c615b6c97a37d1b",
+      "md5ext": "0b2d6c6ff11e4c1c1c615b6c97a37d1b.svg",
+      "rotationCenterX": 42.25,
+      "rotationCenterY": 23.625
+    },
+    {
+      "name": "Alpha",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "50fc62bd2ac13c31981727cc9bb5bf86",
+      "md5ext": "50fc62bd2ac13c31981727cc9bb5bf86.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Beta",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "23c113d9f5208c10e40c5a2c213547cb",
+      "md5ext": "23c113d9f5208c10e40c5a2c213547cb.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708305000000024
+    },
+    {
+      "name": "Beta2",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "620a16d4756d1a50b8fc72924c72fe33",
+      "md5ext": "620a16d4756d1a50b8fc72924c72fe33.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708315
+    },
+    {
+      "name": "Gamma",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "7e0f9f282c8eecfc8c1f4e54c4b601be",
+      "md5ext": "7e0f9f282c8eecfc8c1f4e54c4b601be.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Gamma2",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "ad25cb6a92f34a6c8f0cbe3a3cc48cdd",
+      "md5ext": "ad25cb6a92f34a6c8f0cbe3a3cc48cdd.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Delta",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "4a8296b200b516aaff8998e37bc49548",
+      "md5ext": "4a8296b200b516aaff8998e37bc49548.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Epsilon",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "df65f5174758a0d1894f256df515a411",
+      "md5ext": "df65f5174758a0d1894f256df515a411.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Zeta",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "7d9f272eca2b1d48709ed59652f17f9c",
+      "md5ext": "7d9f272eca2b1d48709ed59652f17f9c.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Eta",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "fdd8a53975937ca61e606c7526ad9aef",
+      "md5ext": "fdd8a53975937ca61e606c7526ad9aef.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708315
+    },
+    {
+      "name": "Theta",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "1266e52478ef1af2829cebb0f35d3b45",
+      "md5ext": "1266e52478ef1af2829cebb0f35d3b45.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Iota",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "225c9ea9a4bcb8dd2f4a196d4c339f31",
+      "md5ext": "225c9ea9a4bcb8dd2f4a196d4c339f31.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Kappa",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "4ed82948fd673c79ef37af7acf6dd95a",
+      "md5ext": "4ed82948fd673c79ef37af7acf6dd95a.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.70829500000002
+    },
+    {
+      "name": "Lambda",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "7263f21d19d23ef10a624850ae0f211e",
+      "md5ext": "7263f21d19d23ef10a624850ae0f211e.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.70830500000008
+    },
+    {
+      "name": "Mu",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "bc59ea793d942771d67dab459d16a3e0",
+      "md5ext": "bc59ea793d942771d67dab459d16a3e0.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Nu",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "e9617d527d5ae029a2567869bc784236",
+      "md5ext": "e9617d527d5ae029a2567869bc784236.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Xi",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "cf61f1f80b31e0a0eab95fd0fdea07c5",
+      "md5ext": "cf61f1f80b31e0a0eab95fd0fdea07c5.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Ommicron",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "f9a190b290834e861f2e2e776cf17dc6",
+      "md5ext": "f9a190b290834e861f2e2e776cf17dc6.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Pi",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "dc4d9520fbe10fc9909f38d651b6f42d",
+      "md5ext": "dc4d9520fbe10fc9909f38d651b6f42d.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Rho",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "0b90cac7ff1aafd8ece95ebdbe8ca2db",
+      "md5ext": "0b90cac7ff1aafd8ece95ebdbe8ca2db.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Sigma",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "5967c7e1a964bd5b1d99f93325feb6c9",
+      "md5ext": "5967c7e1a964bd5b1d99f93325feb6c9.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Tau",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "5378116d14707d64236e2c0e0e660a0a",
+      "md5ext": "5378116d14707d64236e2c0e0e660a0a.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Upsilon",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "14da53dc8db394f92135982a83706c83",
+      "md5ext": "14da53dc8db394f92135982a83706c83.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Phi",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "1568567a998db922f6dad8b5355c4569",
+      "md5ext": "1568567a998db922f6dad8b5355c4569.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.70830500000008
+    },
+    {
+      "name": "Chi",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "3ba819724382187fdb8024ac6c0c4553",
+      "md5ext": "3ba819724382187fdb8024ac6c0c4553.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Psi",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "13e241d9c9e87d4b4265fee47d931eeb",
+      "md5ext": "13e241d9c9e87d4b4265fee47d931eeb.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708332619176588
+    },
+    {
+      "name": "Omega",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "89b8e5555d50559625b5e2f0efa8ab78",
+      "md5ext": "89b8e5555d50559625b5e2f0efa8ab78.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.708305000000053
+    },
+    {
+      "name": "Mayday",
+      "bitmapResolution": 1,
+      "dataFormat": "svg",
+      "assetId": "e2e8922a54cb407a0b28aa8d739d5631",
+      "md5ext": "e2e8922a54cb407a0b28aa8d739d5631.svg",
+      "rotationCenterX": 42.125,
+      "rotationCenterY": 23.70829500000002
+    }
+  ]
+  
+}

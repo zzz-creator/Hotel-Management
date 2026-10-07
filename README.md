@@ -19,6 +19,7 @@ programme. Python 3 on the console, SQL Server behind it.
 | **Loyalty** | Per-night points accrual, tiers, redemption, statements |
 | **Operations** | Door access, valet parking, IT panel, concierge requests, staff alerts |
 | **Reports** | 9 CSV exports — transactions, reservations, loyalty, invoices, revenue, occupancy, housekeeping, audit, guest satisfaction |
+| **Clearance cards** | Greek-letter clearance/keycard desk: tier × room-category matrix for guests, reserved cards for staff roles, tkinter "tap your card" window, name extracted from the SVG assets |
 
 ## Requirements
 
@@ -69,7 +70,7 @@ records every statement so a bad column name or a missing `?` fails in the test 
 against your data.
 
 ```powershell
-python -m unittest discover -s tests        # 345 tests
+python -m unittest discover -s tests        # 360 tests
 ```
 
 The static and live checks are separate, and each exits non-zero on failure:
@@ -89,6 +90,7 @@ python tests/check_applied_migrations.py    # the live server vs database.sql
 | `ui.py` | `rich` console helpers — menus, tables, prompts |
 | `reports.py` | CSV exports, also a standalone CLI |
 | `db.py` | Connection string and the `get_connection()` context manager |
+| `clearance.py` / `clearance_ui.py` | Clearance-card catalog/mapping and the tkinter keycard window |
 | `database.sql` | Authoritative fresh-install script |
 | `migrations/` | 25 incremental changes, applied in order |
 | `docs/` | Schema reference, booking/loyalty rules, deviations, onboarding |

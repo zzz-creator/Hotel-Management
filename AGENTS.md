@@ -49,6 +49,9 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 | `ui.py` | `rich`-based console helpers (menus, tables, prompts, `clear_screen`/`pause`) |
 | `reports.py` | CSV report exports, also a standalone CLI |
 | `db.py` | Connection string + `get_connection()` context manager |
+| `clearance.py` | Clearance-card catalog: SVG name extraction, tier×category guest matrix, role cards, room/username lookup, export |
+| `clearance_ui.py` | Tkinter "tap your keycard" window: card image, extracted name, scan entry at the bottom |
+| `tools/convert_clearance_svgs.py` | Optional one-shot SVG→PNG rasterizer for the cards (needs `cairosvg`) |
 | `config.ini` | DB connection only. **Untracked** — copy `config.ini.example` |
 | `config.ini.example` | The tracked template for the above; blank `password` |
 | `.gitignore` | Keeps `config.ini`, `__pycache__/`, `exports/*.csv` and the generated council artifacts out of history |
@@ -81,6 +84,7 @@ New interactive output goes through `ui.py`, never inline `rich`.
 | `tests/test_onboarding.py` | First-run wizard: the completion marker, the first-account guard, item/room seeding idempotency, room-layout bounds |
 | `tests/test_schema_sync.py` | The schema checker itself — a checker that parses nothing must fail |
 | `tests/test_checkin_window.py` | The half-open reservation-window predicate the check-in gate uses |
+| `tests/test_clearance.py` | Clearance-card SVG name extraction, the tier×category matrix, role cards |
 | `tests/check_schema_sync.py` | `database.sql` vs migrations (a **script**, not a test) |
 | `tests/check_migration_sql.py` | Static T-SQL lint (a **script**, not a test) |
 | `tests/check_applied_migrations.py` | The **live** database vs `database.sql` (a **script**, not a test) |
@@ -92,7 +96,7 @@ New interactive output goes through `ui.py`, never inline `rich`.
 
 `PLAN-room-rates-and-folios.md` (room rates, split folio, availability, guest features,
 reports), `PLAN-booking-system.md` (public booking desk), `PLAN-loyalty-per-night.md`,
-`PLAN-wire-up-rooms.md`, `PLAN-test-plan.md`. Approved designs — read the relevant one
+`PLAN-wire-up-rooms.md`, `PLAN-test-plan.md`, `PLAN-clearance-cards.md`. Approved designs — read the relevant one
 before reworking a feature it covers.
 
 ---
