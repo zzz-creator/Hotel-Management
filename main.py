@@ -4094,6 +4094,8 @@ def admin_panel():
                 "10. Staff Alerts",
                 "---- Rooms ----",
                 "11. Rooms & Housekeeping",
+                "---- Perks ----",
+                "13. Post Complimentary Charge (tier perk)",
                 "12. Exit Admin Panel",
             ])
         elif role == 'manager':
@@ -4222,6 +4224,8 @@ def admin_panel():
                 view_staff_alerts()
             elif choice == '11':
                 rooms_admin_menu(view_only=True)
+            elif choice == '13':
+                comp_item_to_room()
             elif choice == '12':
                 break
             else:
@@ -7682,6 +7686,70 @@ def _valet_list_parked():
         logging.error(f"Error listing parked vehicles: {e}")
 
    
+def comp_item_to_room():
+    """Staff: post a $0 'complimentary' line to the guest's folio, gated on their tier.
+
+    Only posts when the stay's tier's Perks text actually advertises a comped item
+    (breakfast / spa credit). The comp is a $0 F&B line -- visible on the folio so the
+    guest sees the perk applied -- and it earns nothing: award_billed_order_points()
+    pays on Amount x rate x multiplier, and Amount is zero, so a comp silently
+    accruing points is impossible rather than filtered. No new Perks table; this is
+    the scoped enforcement tier perks were promised but not honored.
+    """
+    if not get_loyalty_enabled():
+        logging.info("Loyalty is off, so no tier perks apply.")
+        return
+    room_number, first_name = validate_room()
+    if room_number is None or first_name is None:
+        logging.info("Could not verify the guest. No comp posted.")
+        return
+    details = get_tier_details_by_room(room_number)
+    if not details:
+        logging.info("No loyalty account for this stay; nothing to comp.")
+        return
+    perks = (details.get("perks") or "").lower()
+    logging.info(f"{details['tier']} perks on this stay: {details.get('perks') or 'none'}")
+    comped = [p for p in ("complimentary breakfast", "spa credit") if p in perks]
+    if not comped:
+        logging.info("This tier has no comped items (breakfast or spa credit), so the "
+                     "perk cannot be posted. The check stays at the full rate.")
+        return
+    logging.info("Comped perk(s) this stay qualifies for: " + ", ".join(comped))
+    try:
+        item_choice = input("ItemID of the complimentary item (blank to cancel): ").strip()
+        if not item_choice:
+            return
+        item_id = int(item_choice)
+        quantity = int(input("Quantity: ").strip() or "1")
+    except ValueError:
+        logging.info("Invalid item or quantity.")
+        return
+    if quantity <= 0:
+        logging.info("Quantity must be positive.")
+        return
+    try:
+        with get_connection() as conn:
+            if conn is None:
+                return
+            cursor = conn.cursor()
+            cursor.execute("SELECT Name FROM Items WHERE ItemID = ?", (item_id,))
+            row = cursor.fetchone()
+            if not row:
+                logging.info(f"Item {item_id} not found.")
+                return
+            cursor.execute(
+                "INSERT INTO Transactions (RoomNumber, ItemID, Quantity, UnitPrice, Amount, IsBilled, ChargeGroup, Description) "
+                "VALUES (?, ?, ?, 0, 0, 0, 'F&B', ?)",
+                (room_number, item_id, quantity, f"Comp: {row[0]} ({details['tier']} perk)"),
+            )
+            conn.commit()
+            log_audit("CREATE", "Transaction", str(item_id),
+                      f"Complimentary comp posted to room {room_number}: {row[0]} x{quantity} ({details['tier']} perk)")
+            logging.info(f"Posted $0 complimentary line for {row[0]} x{quantity} to room {room_number}.")
+    except Exception as e:
+        logging.error(f"Error posting comp: {e}")
+
+
 def view_my_loyalty_status():
     """Customer: show current loyalty tier, perks, multiplier, discount, and progress to next tier."""
     if not get_loyalty_enabled():
