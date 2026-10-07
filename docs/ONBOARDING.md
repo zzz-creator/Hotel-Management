@@ -216,8 +216,7 @@ checks in.
 As of 5 October 2026 there is nothing to set: the business date IS today's date, and
 `close_day` / the stored `HotelSettings['business_date']` clock were removed. (If your
 run of this guide predates that change, the stored clock and the Admin Panel
-**Business Date** entry are gone; the migrations 001-025 already applied still carry the
-row, which the app now ignores.)
+**Business Date** entry are gone; migration 029 deletes the legacy row itself.)
 
 A report for a day that has closed still works -- occupancy and the housekeeping board
 take an explicit date or window (`on_date`, `start_date`/`end_date`); pass the date, the
@@ -258,7 +257,7 @@ Everything the wizard cannot reach, in order:
 2. **`config.ini`** is created automatically by the startup prompt (server, database,
    username, password — the only things it may ever hold). Filling it in yourself from
    `config.ini.example` is still fine and skips the prompt.
-3. **Applying migrations 001-028** in order, for a database that already has data.
+3. **Applying migrations 001-029** in order, for a database that already has data.
 4. **Nothing** -- the business date is just today, as of 5 October 2026.
 5. **Nightly rates** if the seeded `RoomTypes` prices are wrong for your hotel (§4).
 

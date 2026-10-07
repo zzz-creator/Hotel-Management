@@ -48,10 +48,11 @@ install and is kept in sync by hand — a schema change lands in **both** places
 | 026 | `026_audit_log_diffs.sql` | `AuditLog.OldValue` / `AuditLog.NewValue` so an update records the before-image, not just a sentence |
 | 027 | `027_hotel_settings_keys.sql` | Seeds the `HotelSettings` rows the app reads directly (`hotel_name`, `loyalty_enabled`, `lockout_threshold`, `lockout_duration`, `customer_login_max_attempts`); data only, no DDL |
 | 028 | `028_invoice_voids.sql` | `Invoices.VoidedAt`/`VoidedBy`/`VoidReason`; voided invoices keep their snapshot but are excluded from revenue |
+| 029 | `029_drop_business_date.sql` | Deletes the legacy `business_date` `HotelSettings` row the app no longer reads |
 
 ### Fresh database
 
-Either run `database.sql` once, or apply `migrations/001` … `migrations/028` in order in
+Either run `database.sql` once, or apply `migrations/001` … `migrations/029` in order in
 SSMS. The migrations are individually re-runnable (guarded by `IF NOT EXISTS` /
 `IF OBJECT_ID(...) IS NULL`) so a partially-applied run is a normal state to resume from.
 
@@ -205,9 +206,9 @@ no hotel values at all -- only the database connection.
   As of 5 October 2026 nothing reads it: `business_date()` in `main.py` and
   `reports.py` return the wall clock, the admin **Business Date** menu and
   `close_day` are gone, and a report for another day takes an explicit date
-  or window (`on_date`, `start_date`/`end_date`). The row lingers; treat it as
-  historical. The wall clock is deliberately **not** a night audit — nothing
-  bills, expires, cleans or re-rates when the day turns over.
+  or window (`on_date`, `start_date`/`end_date`). Migration 029 (7 October
+  2026) deleted the row. Do not re-seed it: the app's one clock is the wall
+  clock, and absence of this key is the healthy state.
 - `loyalty_accrual_points_per_unit` is a **fraction** (0.5), not an integer. It is read
   through `_setting_float()`; reading it as an int turns 0.5 into 0 and silently pays
   nothing for every order. It must stay **below** what a night's stay earns — see

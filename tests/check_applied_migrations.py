@@ -102,10 +102,11 @@ def main():
                 problems += 1
         print()
 
-        print('023 business_date row (historical, no longer read by the app):')
+        print('023 business_date row (removed by 029):')
         row = one(cursor, 'SELECT SettingValue FROM dbo.HotelSettings '
                            "WHERE SettingKey = N'business_date'")
-        print('%-42s %r' % ('HotelSettings.business_date (informational)', None if row is None else row[0]))
+        print('%-42s %s' % ('HotelSettings.business_date',
+                             'deleted (good)' if row is None else f'still present: {row[0]!r} -- apply migration 029'))
         print()
 
         print('024 order accrual (must be a positive fraction, not 0):')

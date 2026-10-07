@@ -8705,12 +8705,24 @@ def setup_status():
     # Item 2: every core HotelSettings row present and parseable. The getters fall
     # back silently, so a missing or garbage row looks identical to a valid one unless
     # someone reads the raw values -- which is exactly what this probe does.
+    # Every HotelSettings row, not just the core defaults: a typo'd value under a
+    # loyalty_mult_<slug> or a booking_* key silently falls back through
+    # get_room_type_multiplier()/the _setting_* helpers, so the fallback can hide a
+    # garbage row indefinitely. Missing core keys are red; unparseable values are red.
+    all_rows = {}
+    try:
+        with get_connection() as conn:
+            if conn is not None:
+                cur = conn.cursor()
+                cur.execute("SELECT SettingKey, SettingValue FROM HotelSettings")
+                for r in cur.fetchall():
+                    all_rows[str(r[0])] = r[1]
+    except Exception:
+        all_rows = {}
+
     bad = []
     for key in DEFAULT_HOTEL_SETTINGS:
-        try:
-            raw = get_setting(key, None)
-        except Exception:
-            raw = None
+        raw = all_rows.get(key, None)
         if raw is None or str(raw).strip() == '':
             bad.append(f"{key} missing")
         elif key not in ('hotel_name', 'loyalty_enabled'):
@@ -8721,10 +8733,21 @@ def setup_status():
         elif key == 'loyalty_enabled':
             if str(raw).strip().lower() not in ('1', '0', 'true', 'false', 'yes', 'no', 'y', 'n', 'on', 'off'):
                 bad.append(f"loyalty_enabled not a boolean: {raw!r}")
+
+    for key, raw in all_rows.items():
+        if key in DEFAULT_HOTEL_SETTINGS or key == 'business_date':
+            continue
+        if raw is None or str(raw).strip() == '':
+            continue
+        try:
+            float(str(raw))
+        except (TypeError, ValueError):
+            bad.append(f"{key} not a number: {raw!r}")
+
     if bad:
         checks.append(("Hotel settings", False, "; ".join(bad)))
     else:
-        checks.append(("Hotel settings", True, f"all {len(DEFAULT_HOTEL_SETTINGS)} core rows present and parseable"))
+        checks.append(("Hotel settings", True, f"all {len(all_rows)} row(s) present and parseable"))
 
     return checks
 

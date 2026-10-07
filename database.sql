@@ -300,17 +300,13 @@ GO
 -- Seed default values (mirror the built-in fallbacks). Editable from the admin
 -- "Pricing & Settings" menu. config.ini is deliberately NOT the source for any of
 -- these: it carries only the database connection.
--- 'business_date' (migration 023) is the hotel's single clock for "which day is it": every
--- "today" in the app reads it, and the admin "Business Date" menu advances it one day at
--- a time. It is seeded to the day this script is run, which is what preserves the meaning
--- of every date already on record -- before it existed, "today" was the wall clock.
--- The value is a CONVERT, not GETDATE() itself, so the string is always ISO YYYY-MM-DD and
--- the two readers in the app can parse it without guessing a locale.
--- There is deliberately no 'loyalty_expiration_days' row: it used to be seeded here and
--- shown on the settings screen, but nothing ever read it to expire anything. Migration 025
--- removes it. Points do not expire.
+-- 'business_date' (migration 023) used to be the hotel's single clock for "which day
+-- is it". It is NOT seeded any more: as of 5 October 2026 business_date() is the wall
+-- clock, migration 029 deletes the legacy row from existing databases, and nothing
+-- reads or writes the key. There is deliberately no 'loyalty_expiration_days' row
+-- either: it used to be seeded here but nothing ever read it to expire anything.
+-- Points do not expire.
 INSERT INTO [dbo].[HotelSettings] ([SettingKey], [SettingValue]) VALUES
-    (N'business_date', CONVERT(NVARCHAR(10), CAST(GETDATE() AS DATE), 23)),
     (N'peak_factor', N'1.20'),
     (N'offpeak_factor', N'0.90'),
     (N'tax_rate', N'0.13'),
