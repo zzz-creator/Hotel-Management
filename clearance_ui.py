@@ -39,7 +39,7 @@ def _render_png(card):
         fd, tmp = tempfile.mkstemp(prefix="clearance_", suffix=".png")
         os.close(fd)
         drawing = svg2rlg(card["svg"])
-        renderPM.drawToFile(drawing, tmp, fmt="PNG", dpi=600)
+        renderPM.drawToFile(drawing, tmp, fmt="PNG", dpi=600) # pyright: ignore[reportArgumentType]
         return tmp
     except Exception as exc:
         logging.debug(f"svglib render failed: {exc}")
