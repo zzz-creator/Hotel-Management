@@ -85,7 +85,8 @@ class ClearanceWindow:
 
     def _set_image_widget(self, widget):
         for child in self.image_frame.winfo_children():
-            child.destroy()
+            if child is not widget:
+                child.destroy()
         self._image_widget = widget
         widget.pack()
 
