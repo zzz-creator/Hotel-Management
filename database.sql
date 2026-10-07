@@ -380,6 +380,10 @@ CREATE TABLE [dbo].[Invoices](
 	[PointsRedeemed] [int] NOT NULL DEFAULT ((0)),
 	[RedemptionValue] [decimal](12, 2) NOT NULL DEFAULT ((0)),
 	[AmountPaid] [decimal](12, 2) NOT NULL DEFAULT ((0)),
+	-- Migration 028: a voided invoice keeps its snapshot but stops counting toward revenue.
+	[VoidedAt] [datetime] NULL,
+	[VoidedBy] [nvarchar](50) NULL,
+	[VoidReason] [nvarchar](500) NULL,
 PRIMARY KEY CLUSTERED 
 (
 	[InvoiceID] ASC

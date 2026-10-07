@@ -258,7 +258,7 @@ Everything the wizard cannot reach, in order:
 2. **`config.ini`** is created automatically by the startup prompt (server, database,
    username, password — the only things it may ever hold). Filling it in yourself from
    `config.ini.example` is still fine and skips the prompt.
-3. **Applying migrations 001-027** in order, for a database that already has data.
+3. **Applying migrations 001-028** in order, for a database that already has data.
 4. **Nothing** -- the business date is just today, as of 5 October 2026.
 5. **Nightly rates** if the seeded `RoomTypes` prices are wrong for your hotel (§4).
 

@@ -6219,7 +6219,8 @@ def invoices_menu():
         ui.show_menu("Invoices & Printing", [
             "1. Print Invoice by Number",
             "2. Find Invoices by Room",
-            "3. Back to Admin Panel",
+            "3. Void an Invoice",
+            "4. Back to Admin Panel",
         ])
         choice = input("Enter your choice: ").strip()
         if choice == '1':
@@ -6244,9 +6245,73 @@ def invoices_menu():
             if raw.isdigit():
                 print_invoice(int(raw))
         elif choice == '3':
+            raw = input("Enter invoice number to void: ").strip()
+            if raw.isdigit():
+                void_invoice(int(raw))
+            else:
+                logging.info("Invalid invoice number.")
+        elif choice == '4':
             break
         else:
             logging.info("Invalid choice. Please try again.")
+
+
+def void_invoice(invoice_id):
+    """Void a stored invoice: it stays for the audit trail, but stops counting.
+
+    Sets Invoices.VoidedAt/VoidedBy/VoidReason, and every revenue reader filters on
+    VoidedAt IS NULL, so a voided invoice is excluded from the revenue report and ADR
+    without rewriting history. Rooms and guests keep their rows; only the reportable
+    totals change. Gated like any destructive admin action: master override plus an
+    exact typed confirmation. Requires a reason, because a void with no reason is an
+    audit gap, not a fix.
+    """
+    try:
+        with get_connection() as conn:
+            if conn is None:
+                return
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT InvoiceID, RoomNumber, InvoiceDate, TotalAmount, AmountPaid, VoidedAt "
+                "FROM Invoices WHERE InvoiceID = ?",
+                (invoice_id,),
+            )
+            inv = cursor.fetchone()
+            if not inv:
+                logging.info("Invoice not found.")
+                return
+            if inv.VoidedAt is not None:
+                logging.info(f"Invoice {invoice_id} was already voided at {inv.VoidedAt}.")
+                return
+            logging.info(f"Invoice {inv.InvoiceID} -- room {inv.RoomNumber}, {inv.InvoiceDate}, "
+                         f"total ${float(inv.TotalAmount):,.2f}, paid ${float(inv.AmountPaid):,.2f}.")
+            reason = input("Reason for voiding (required): ").strip()
+            if not reason:
+                logging.info("A reason is required; nothing was voided.")
+                return
+            if not ui.ask_confirmation("Void this invoice?", default="n"):
+                logging.info("Cancelled.")
+                return
+            if not require_master_override():
+                return
+            typed = input("Type VOID INVOICE to confirm: ").strip()
+            if typed != "VOID INVOICE":
+                logging.info("Confirmation text did not match. Nothing was voided.")
+                return
+            cursor.execute(
+                "UPDATE Invoices SET VoidedAt = GETDATE(), VoidedBy = ?, VoidReason = ? "
+                "WHERE InvoiceID = ? AND VoidedAt IS NULL",
+                (CURRENT_USER, reason, invoice_id),
+            )
+            if cursor.rowcount == 0:
+                logging.info(f"Invoice {invoice_id} was voided by someone else just now.")
+                return
+            conn.commit()
+            log_audit("UPDATE", "Invoice", invoice_id, f"Voided: {reason}",
+                      old_value="active", new_value="voided")
+            logging.info(f"Invoice {invoice_id} voided. It is excluded from revenue reports.")
+    except Exception as e:
+        logging.error(f"Error voiding invoice {invoice_id}: {e}")
 
 
 def print_my_invoice():

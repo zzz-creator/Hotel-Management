@@ -254,6 +254,7 @@ def export_invoices(export_format="csv"):
         "  i.FnbSubtotal, i.FnbDiscountCodeAmount, i.FnbTierDiscountAmount, i.FnbTaxAmount, "
         "  i.Subtotal, i.DiscountCodeAmount, i.TierDiscountAmount, i.TaxAmount, "
         "  i.TotalAmount, i.PointsRedeemed, i.RedemptionValue, i.AmountPaid, "
+        "  i.VoidedAt, i.VoidedBy, i.VoidReason, "
         "(SELECT COUNT(*) FROM Transactions t WHERE t.InvoiceID = i.InvoiceID) AS LineItems "
         "FROM Invoices i ORDER BY i.InvoiceID DESC"
     )
@@ -275,6 +276,7 @@ def export_revenue(export_format="csv", start_date=None, end_date=None):
         "  SUM(i.RedemptionValue) AS PointsRedemptionValue, "
         "  SUM(i.AmountPaid) AS AmountPaid "
         "FROM Invoices i WHERE 1 = 1"
+        " AND i.VoidedAt IS NULL"
     )
     params = []
     if start_date:
@@ -330,7 +332,7 @@ def export_occupancy(export_format="csv", start_date=None, end_date=None):
         "  GROUP BY c.Night"
         "), Revenue AS ("
         "  SELECT CAST(InvoiceDate AS date) AS Night, SUM(RoomSubtotal) AS RoomRevenue "
-        "  FROM Invoices GROUP BY CAST(InvoiceDate AS date)"
+        "  FROM Invoices WHERE VoidedAt IS NULL GROUP BY CAST(InvoiceDate AS date)"
         ") "
         "SELECT s.Night, s.RoomsSold, cap.TotalRooms, "
         "  CASE WHEN cap.TotalRooms = 0 THEN 0 "

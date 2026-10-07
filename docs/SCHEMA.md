@@ -47,10 +47,11 @@ install and is kept in sync by hand — a schema change lands in **both** places
 | 025 | `025_drop_loyalty_expiration.sql` | Deletes `loyalty_expiration_days`, a setting nothing ever read |
 | 026 | `026_audit_log_diffs.sql` | `AuditLog.OldValue` / `AuditLog.NewValue` so an update records the before-image, not just a sentence |
 | 027 | `027_hotel_settings_keys.sql` | Seeds the `HotelSettings` rows the app reads directly (`hotel_name`, `loyalty_enabled`, `lockout_threshold`, `lockout_duration`, `customer_login_max_attempts`); data only, no DDL |
+| 028 | `028_invoice_voids.sql` | `Invoices.VoidedAt`/`VoidedBy`/`VoidReason`; voided invoices keep their snapshot but are excluded from revenue |
 
 ### Fresh database
 
-Either run `database.sql` once, or apply `migrations/001` … `migrations/027` in order in
+Either run `database.sql` once, or apply `migrations/001` … `migrations/028` in order in
 SSMS. The migrations are individually re-runnable (guarded by `IF NOT EXISTS` /
 `IF OBJECT_ID(...) IS NULL`) so a partially-applied run is a normal state to resume from.
 

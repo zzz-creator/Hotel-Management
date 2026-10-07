@@ -63,7 +63,7 @@ New interactive output goes through `ui.py`, never inline `rich`.
 | File | Role |
 |---|---|
 | `database.sql` | **Authoritative fresh-install script.** Creates the database if absent, then every table, constraint, index and seed row. Never relies on a migration to produce a table |
-| `migrations/001..027_*.sql` | Incremental changes, applied in order, for databases that already exist |
+| `migrations/001..028_*.sql` | Incremental changes, applied in order, for databases that already exist |
 | `docs/SCHEMA.md` | Per-table reference, migration inventory, degradation matrix |
 | `docs/DEVIATIONS.md` | Behaviours this app deliberately does **not** have, and what would close each |
 | `docs/ONBOARDING.md` | Staff first-run order: bootstrap login, items, prices, rooms, business date |
@@ -407,7 +407,8 @@ and when the §2 file map drifts from the repo.
 
 **Apply migrations in order, or re-run `database.sql` on a fresh database.** Migrations
 001-027 are all applied to the developer's live database (026's audit diff columns and
-027's `HotelSettings` keys included, as of 6 October 2026). 001-018 were verified end-to-end
+027's `HotelSettings` keys included, as of 6 October 2026); 028 (invoice voids) is new
+and still pending on it. 001-018 were verified end-to-end
 (book → check out with credit → cancel, plus the declined-card and full-refund paths).
 019-021 were verified read-only against the catalog. Their T-SQL and the flows they back now
 run on every `verify_e2e.py` invocation — but against a *disposable* database.
