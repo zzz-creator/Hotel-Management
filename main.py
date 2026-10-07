@@ -5654,6 +5654,17 @@ def check_in():
         logging.info(f"Check-in successful! Welcome to {get_hotel_name()}, {first_name.capitalize()}!")
         logging.info("Please enjoy your stay!")
         logging.info(f"If you need assistance, please call the front desk at {room_number}-56.\n")
+        if get_loyalty_enabled():
+            try:
+                details = get_tier_details_by_room(room_number)
+            except Exception:
+                details = None
+            # Perks are text -- but at least the guest hears which ones this stay earns.
+            # The discount % and point multiplier are enforced at check-out and in the
+            # accrual functions; free-text extras (breakfast, late checkout) are honored
+            # by the front desk reading this line.
+            if details and details.get("perks"):
+                logging.info(f"Your {details['tier']} status includes: {details['perks']}")
         amenities = get_amenities()
         if amenities:
             logging.info("Amenities:")
