@@ -40,7 +40,7 @@ def _render_png(card):
         fd, tmp = tempfile.mkstemp(prefix="clearance_", suffix=".png")
         os.close(fd)
         drawing = svg2rlg(card["svg"])
-        renderPM.drawToFile(drawing, tmp, fmt="PNG", dpi=300)
+        renderPM.drawToFile(drawing, tmp, fmt="PNG", dpi=600)
         return tmp
     except Exception as exc:
         logging.debug(f"svglib render failed: {exc}")
@@ -56,7 +56,7 @@ class ClearanceWindow:
         self._fallback = None
 
         self.image_frame = tk.Frame(self.root)
-        self.image_frame.pack(padx=16, pady=(16, 4))
+        self.image_frame.pack(padx=16, pady=(16, 4), expand=True, fill="both")
 
         self.name_label = tk.Label(self.root, font=("Segoe UI", 14, "bold"))
         self.name_label.pack()
@@ -89,21 +89,24 @@ class ClearanceWindow:
             if child is not widget:
                 child.destroy()
         self._image_widget = widget
-        widget.pack()
+        widget.pack(expand=True, fill="both", anchor="center")
 
     def _draw_fallback(self, card):
-        canvas = tk.Canvas(self.image_frame, width=CARD_W, height=CARD_H,
+        W, H = CARD_W * 2, CARD_H * 2
+        ox, oy = CARD_W // 2, CARD_H // 2  # offset so the card is centered
+        canvas = tk.Canvas(self.image_frame, width=W, height=H,
                            bg="#d9d9d9", highlightthickness=0)
-        canvas.create_rectangle(4, 4, CARD_W - 4, CARD_H - 4,
+        canvas.create_rectangle(ox + 4, oy + 4, ox + CARD_W - 4, oy + CARD_H - 4,
                                 fill="#ebeff0", outline="#000000")
-        canvas.create_rectangle(4, CARD_H * 0.45, CARD_W - 4, CARD_H * 0.45 + 68,
+        canvas.create_rectangle(ox + 4, oy + CARD_H * 0.45, ox + CARD_W - 4,
+                                oy + CARD_H * 0.45 + 68,
                                 fill=_band_color(card), outline="")
-        canvas.create_text(CARD_W / 2, 60, text="CLEARANCE\nCARD",
+        canvas.create_text(ox + CARD_W / 2, oy + 60, text="CLEARANCE\nCARD",
                            font=("Segoe UI", 10))
-        canvas.create_text(CARD_W / 2, CARD_H * 0.45 + 22,
+        canvas.create_text(ox + CARD_W / 2, oy + CARD_H * 0.45 + 22,
                            text=card["badge"], fill="white",
                            font=("Segoe UI", 12, "bold"))
-        canvas.create_text(CARD_W / 2, CARD_H * 0.45 + 46,
+        canvas.create_text(ox + CARD_W / 2, oy + CARD_H * 0.45 + 46,
                            text=card["name"], fill="white",
                            font=("Segoe UI", 9))
         return canvas
