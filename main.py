@@ -4096,9 +4096,9 @@ def admin_panel():
                 "---- Rooms ----",
                 "11. Rooms & Housekeeping",
                 "---- Perks ----",
-                "13. Post Complimentary Charge (tier perk)",
-                "14. Clearance Card Desk",
-                "12. Exit Admin Panel",
+                "12. Post Complimentary Charge (tier perk)",
+                "13. Clearance Card Desk",
+                "14. Exit Admin Panel",
             ])
         elif role == 'manager':
             ui.pause()
@@ -4135,8 +4135,8 @@ def admin_panel():
                 "---- Security ----",
                 "21. Door Access Control",
                 "---- Other ----",
-                "23. Clearance Card Desk",
-                "22. Exit Admin Panel",
+                "22. Clearance Card Desk",
+                "23. Exit Admin Panel",
             ])
         elif role == 'admin':
             ui.pause()
@@ -4190,8 +4190,8 @@ def admin_panel():
                 "---- Setup ----",
                 "34. Setup Checklist",
                 "---- Other ----",
-                "36. Clearance Card Desk",
-                "35. Exit Admin Panel",
+                "35. Clearance Card Desk",
+                "36. Exit Admin Panel",
             ])
         elif role == 'valet':
             logging.info("Enter Valet Panel...")
@@ -4228,11 +4228,11 @@ def admin_panel():
                 view_staff_alerts()
             elif choice == '11':
                 rooms_admin_menu(view_only=True)
-            elif choice == '13':
-                comp_item_to_room()
-            elif choice == '14':
-                clearance_ui.open_clearance_window()
             elif choice == '12':
+                comp_item_to_room()
+            elif choice == '13':
+                clearance_ui.open_clearance_window()
+            elif choice == '14':
                 break
             else:
                 logging.info("Invalid choice. Please try again.")
@@ -4281,9 +4281,9 @@ def admin_panel():
             elif choice == '21':
                 door_access_menu(view_only=True)
             elif choice == '22':
-                break
-            elif choice == '23':
                 clearance_ui.open_clearance_window()
+            elif choice == '23':
+                break
             else:
                 logging.info("Invalid choice. Please try again.")
 
@@ -4355,9 +4355,9 @@ def admin_panel():
             elif choice == '34':
                 onboarding_checklist(role)
             elif choice == '35':
-                break
-            elif choice == '36':
                 clearance_ui.open_clearance_window()
+            elif choice == '36':
+                break
             else:
                 logging.info("Invalid choice. Please try again.")
         elif role == 'valet':
