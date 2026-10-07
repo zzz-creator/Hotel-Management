@@ -137,6 +137,7 @@ class ClearanceWindow:
 
 
 def open_clearance_window():
+    logging.info("keycards managed by AutoScale Lite")
     try:
         ClearanceWindow().run()
     except tk.TclError as exc:
