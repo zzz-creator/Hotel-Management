@@ -71,6 +71,22 @@ DEFAULT_ROOM_TYPE_RATES = {
     "Penthouse": 1200.00,
     "Presidential Suite": 2500.00,
 }
+# The full set of HotelSettings rows the app treats as core, with the values a fresh
+# database.sql install seeds. Item 3 of the settings work uses this as the reset target.
+DEFAULT_HOTEL_SETTINGS = {
+    'hotel_name': 'The Grand Oasis Hotel',
+    'tax_rate': '0.13',
+    'peak_factor': '1.20',
+    'offpeak_factor': '0.90',
+    'loyalty_enabled': '1',
+    'loyalty_points_per_night': '100',
+    'loyalty_accrual_points_per_unit': '0.5',
+    'loyalty_redemption_points_per_currency_unit': '100',
+    'lockout_threshold': '3',
+    'lockout_duration': '5',
+    'customer_login_max_attempts': '3',
+    'booking_refund_cutoff_days': '7',
+}
 # The operator signed in for the current session. Set by admin_login(); audit rows fall
 # back to 'system' for guest-facing actions that have no authenticated operator.
 CURRENT_USER = "system"
@@ -4853,7 +4869,9 @@ def manage_pricing_rules():
             "5. Edit Room-Type Points Multipliers",
             "6. View / Edit Room Types & Nightly Rates",
             "7. Edit Booking Cancellation Policy",
-            "8. Back to Admin Panel",
+            "8. Edit General Settings (name, lockout, guest attempts, loyalty on/off)",
+            "9. Reset All Settings To Seeded Defaults",
+            "10. Back to Admin Panel",
         ])
         choice = input("Enter your choice: ").strip()
         if choice == '1':
@@ -4868,6 +4886,11 @@ def manage_pricing_rules():
                 ("Loyalty stay accrual (points per night)", get_loyalty_points_per_night()),
                 ("Loyalty redemption (points per $1 credit)", get_loyalty_redemption_points_per_currency_unit()),
                 ("Booking free-cancellation (days before check-in)", get_booking_refund_cutoff_days()),
+                ("Hotel name", get_hotel_name()),
+                ("Loyalty programme", "on" if get_loyalty_enabled() else "off"),
+                ("Admin lockout after N failed attempts", get_lockout_threshold()),
+                ("Admin lockout length (minutes)", get_lockout_duration()),
+                ("Guest login attempts before stop", get_customer_login_max_attempts()),
             ]
             ui.show_table("Current Settings", ["Setting", "Value"], rows)
             ui.show_table("Room Types & Nightly Rates", ["Room Type", "Nightly Rate"],
@@ -4965,9 +4988,81 @@ def manage_pricing_rules():
                 continue
             set_setting('booking_refund_cutoff_days', days)
         elif choice == '8':
+            _edit_general_settings()
+        elif choice == '9':
+            reset_settings_to_defaults()
+        elif choice == '10':
             break
         else:
             logging.info("Invalid choice. Please try again.")
+
+
+def _edit_general_settings():
+    """Admin: the settings that are not pricing or loyalty rates."""
+    logging.info(f"Current: name '{get_hotel_name()}', loyalty "
+                 f"{'on' if get_loyalty_enabled() else 'off'}, lockout after "
+                 f"{get_lockout_threshold()} attempt(s) for {get_lockout_duration()} min, "
+                 f"guest logins capped at {get_customer_login_max_attempts()}.")
+    try:
+        name = input(f"Hotel name [{get_hotel_name()}]: ").strip()
+        threshold = input(f"Failed admin logins before lockout [{get_lockout_threshold()}]: ").strip()
+        duration = input(f"Lockout length in minutes [{get_lockout_duration()}]: ").strip()
+        attempts = input(f"Guest login attempts before stop [{get_customer_login_max_attempts()}]: ").strip()
+        enabled = input(f"Loyalty programme on? (y/n) [{'y' if get_loyalty_enabled() else 'n'}]: ").strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        logging.info("Cancelled. Nothing was changed.")
+        return
+    if name:
+        set_setting('hotel_name', name)
+    for key, raw, current in (('lockout_threshold', threshold, get_lockout_threshold()),
+                              ('lockout_duration', duration, get_lockout_duration()),
+                              ('customer_login_max_attempts', attempts, get_customer_login_max_attempts())):
+        if not raw:
+            continue
+        try:
+            value = int(raw)
+        except ValueError:
+            logging.info(f"'{raw}' is not a whole number; {key} kept at {current}.")
+            continue
+        if value <= 0:
+            logging.info(f"{key} must be positive; kept at {current}.")
+            continue
+        set_setting(key, value)
+    if enabled in ('y', 'yes', '1', 'true', 'on'):
+        set_setting('loyalty_enabled', '1')
+    elif enabled in ('n', 'no', '0', 'false', 'off'):
+        set_setting('loyalty_enabled', '0')
+
+
+def reset_settings_to_defaults():
+    """Admin: overwrite the core HotelSettings rows with the seeded defaults.
+
+    Gated the same way as every other destructive admin action: master override
+    plus an exact typed confirmation. Room-type multipliers and the per-room-type
+    rates are deliberately NOT reset here -- those are catalogue decisions, not
+    hotel policy, and would quietly re-price a hotel's whole inventory.
+    """
+    ui.box(
+        "Reset every core hotel setting to the seeded defaults",
+        "This overwrites the values the first-run wizard and Pricing & Settings\n"
+        "wrote: hotel name, tax, pricing factors, loyalty rates and on/off,\n"
+        "lockout policy, guest login cap and the refund window.\n\n"
+        "Room-type rates and points multipliers are NOT touched. AuditLog is kept.\n"
+        "This cannot be undone.",
+        border_style="red",
+    )
+    if not ui.ask_confirmation("Proceed?", default="n"):
+        logging.info("Cancelled. No settings were changed.")
+        return
+    if not require_master_override():
+        return
+    typed = input("Type RESET SETTINGS to confirm: ").strip()
+    if typed != "RESET SETTINGS":
+        logging.info("Confirmation text did not match. No settings were changed.")
+        return
+    for key, value in DEFAULT_HOTEL_SETTINGS.items():
+        set_setting(key, value)
+    logging.info("All core settings reset to the seeded defaults.")
 
 
 def loyalty_admin_menu():
@@ -8446,6 +8541,30 @@ def setup_status():
             checks.append(("Loyalty tiers", False, "no tiers -- nothing to promote anyone into"))
         else:
             checks.append(("Loyalty tiers", True, f"{tiers} tier(s)"))
+
+    # Item 2: every core HotelSettings row present and parseable. The getters fall
+    # back silently, so a missing or garbage row looks identical to a valid one unless
+    # someone reads the raw values -- which is exactly what this probe does.
+    bad = []
+    for key in DEFAULT_HOTEL_SETTINGS:
+        try:
+            raw = get_setting(key, None)
+        except Exception:
+            raw = None
+        if raw is None or str(raw).strip() == '':
+            bad.append(f"{key} missing")
+        elif key not in ('hotel_name', 'loyalty_enabled'):
+            try:
+                float(str(raw))
+            except (TypeError, ValueError):
+                bad.append(f"{key} not a number: {raw!r}")
+        elif key == 'loyalty_enabled':
+            if str(raw).strip().lower() not in ('1', '0', 'true', 'false', 'yes', 'no', 'y', 'n', 'on', 'off'):
+                bad.append(f"loyalty_enabled not a boolean: {raw!r}")
+    if bad:
+        checks.append(("Hotel settings", False, "; ".join(bad)))
+    else:
+        checks.append(("Hotel settings", True, f"all {len(DEFAULT_HOTEL_SETTINGS)} core rows present and parseable"))
 
     return checks
 
