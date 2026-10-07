@@ -4135,8 +4135,8 @@ def admin_panel():
                 "---- Security ----",
                 "21. Door Access Control",
                 "---- Other ----",
-                "22. Exit Admin Panel",
                 "23. Clearance Card Desk",
+                "22. Exit Admin Panel",
             ])
         elif role == 'admin':
             ui.pause()
@@ -4190,8 +4190,8 @@ def admin_panel():
                 "---- Setup ----",
                 "34. Setup Checklist",
                 "---- Other ----",
-                "35. Exit Admin Panel",
                 "36. Clearance Card Desk",
+                "35. Exit Admin Panel",
             ])
         elif role == 'valet':
             logging.info("Enter Valet Panel...")
