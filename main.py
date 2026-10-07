@@ -6061,6 +6061,32 @@ def print_invoice(invoice_id):
                 (invoice_id,),
             )
             items = cursor.fetchall()
+            # Payment-method breakdown: the booking desk's money, joined back on the
+            # stay. Applied rows name this exact invoice; unapplied rows that share
+            # the most recent check-in for the room are the fallback so a front-desk
+            # deposit still shows up on the folio even when it was never marked applied.
+            cursor.execute(
+                "SELECT Kind, Amount, CardLast4, PaidAt, Notes, AppliedToInvoiceID "
+                "FROM ReservationPayments WHERE RoomNumber = ? AND AppliedToInvoiceID = ? "
+                "ORDER BY PaidAt",
+                (inv.RoomNumber, invoice_id),
+            )
+            payment_rows = cursor.fetchall()
+            if not payment_rows:
+                cursor.execute(
+                    "SELECT TOP 1 StayCheckIn FROM ReservationPayments "
+                    "WHERE RoomNumber = ? ORDER BY StayCheckIn DESC",
+                    (inv.RoomNumber,),
+                )
+                stay = cursor.fetchone()
+                if stay:
+                    cursor.execute(
+                        "SELECT Kind, Amount, CardLast4, PaidAt, Notes, AppliedToInvoiceID "
+                        "FROM ReservationPayments WHERE RoomNumber = ? AND StayCheckIn = ? "
+                        "ORDER BY PaidAt",
+                        (inv.RoomNumber, stay[0]),
+                    )
+                    payment_rows = cursor.fetchall()
     except Exception as e:
         logging.error(f"Error loading invoice {invoice_id}: {e}")
         return False
@@ -6072,6 +6098,22 @@ def print_invoice(invoice_id):
         + (f"Guest: {guest}\n" if guest else "")
     )
     ui.box("Invoice", header.strip())
+
+    if payment_rows:
+        ui.show_table(
+            f"Invoice #{inv.InvoiceID} - Payments",
+            ["Kind", "Amount", "Method", "Paid At", "Notes"],
+            [
+                (
+                    p.Kind,
+                    f"${float(p.Amount):,.2f}",
+                    f"Card ending {p.CardLast4}" if p.CardLast4 else "Recorded payment",
+                    p.PaidAt,
+                    p.Notes or "-",
+                )
+                for p in payment_rows
+            ],
+        )
 
     def _line_rows(rows):
         out = []
@@ -7370,15 +7412,31 @@ def it_support_panel():
         ui.pause()
 
 def valet_vehicle_management():
-    """Valet: Manage vehicle check-in/check-out with database integration."""
-    logging.info("\n--- Valet: Vehicle Management ---")
+    """Valet: manage vehicle check-in/check-out and see what's parked."""
     while True:
-        action = input("Enter action: CI (Check In) / CO (Check Out) / E (Exit): ").strip().lower()
-        if action == 'e':
+        ui.pause()
+        ui.show_menu("Valet: Vehicle Management", [
+            "1. Check In a Vehicle",
+            "2. Check Out a Vehicle",
+            "3. View Parked Vehicles",
+            "4. Exit",
+        ])
+        choice = input("Enter your choice: ").strip()
+        if choice == '4':
             logging.info("Exiting Valet Vehicle Management.")
-            break
+            return
+        if choice == '3':
+            _valet_list_parked()
+            continue
+        if choice not in ('1', '2'):
+            logging.info("Invalid choice.")
+            continue
+        action = 'ci' if choice == '1' else 'co'
         license_plate = input("Enter vehicle license plate: ").strip()
         owner_name = input("Enter owner's name: ").strip()
+        if not license_plate or not owner_name:
+            logging.info("Both the license plate and the owner's name are required.")
+            continue
         try:
             with get_connection() as conn:
                 if conn is None:
@@ -7394,18 +7452,44 @@ def valet_vehicle_management():
                     )
                     conn.commit()
                     logging.info(f"Vehicle {license_plate} checked in for {owner_name} at spot {parking_spot}.")
-                elif action == "co":
+                else:
                     check_out_time = datetime.now()
                     cursor.execute(
                         "UPDATE ValetVehicles SET Status = ?, CheckOutTime = ? WHERE LicensePlate = ? AND OwnerName = ? AND Status = 'Checked-In'",
                         ("Checked-Out", check_out_time, license_plate, owner_name)
                     )
                     conn.commit()
-                    logging.info(f"Vehicle {license_plate} checked out for {owner_name}.")
-                else:
-                    logging.info("Invalid action. Please enter 'check-in' or 'check-out'.")
+                    if cursor.rowcount:
+                        logging.info(f"Vehicle {license_plate} checked out for {owner_name}.")
+                    else:
+                        logging.info(f"No checked-in vehicle matches {license_plate} / {owner_name}.")
         except Exception as e:
             logging.error(f"Error managing valet vehicle: {e}")
+
+
+def _valet_list_parked():
+    """Valet: every vehicle currently flagged as checked in."""
+    try:
+        with get_connection() as conn:
+            if conn is None:
+                logging.info("Database connection failed.")
+                return
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT LicensePlate, OwnerName, ParkingSpot, CheckInTime "
+                "FROM ValetVehicles WHERE Status = 'Checked-In' ORDER BY CheckInTime"
+            )
+            rows = cursor.fetchall()
+            if not rows:
+                logging.info("No vehicles are currently checked in.")
+                return
+            ui.show_table(
+                "Parked Vehicles",
+                ["License Plate", "Owner", "Spot", "Checked In"],
+                [(r[0], r[1], r[2], r[3]) for r in rows],
+            )
+    except Exception as e:
+        logging.error(f"Error listing parked vehicles: {e}")
 
    
 def view_my_loyalty_status():
