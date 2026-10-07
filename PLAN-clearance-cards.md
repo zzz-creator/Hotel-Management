@@ -30,7 +30,7 @@ Room category order matches `DEFAULT_ROOM_TYPE_MULTIPLIERS`.
    `lookup(scanned)` accepting a room number or username.
 2. `clearance_ui.py` — tkinter window: card image, extracted name, scan entry at bottom.
 3. `tools/convert_clearance_svgs.py` — optional: rasterize SVGs to PNG when
-   `cairosvg` is installed; runtime falls back to a drawn card otherwise.
+   `svglib`/`reportlab` is installed; runtime falls back to a drawn card otherwise.
 4. `main.py` — menu entry (admin panel + staff desk) opening the window.
 5. `tests/test_clearance.py` — name extraction over all SVGs, matrix coverage,
    Platinum-Chi rule, role mapping.

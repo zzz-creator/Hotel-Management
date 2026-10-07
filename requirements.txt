@@ -1,3 +1,7 @@
 pyodbc
 tqdm
 rich
+svglib
+reportlab
+rlPyCairo
+Pillow

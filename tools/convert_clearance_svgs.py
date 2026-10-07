@@ -1,11 +1,11 @@
 """Rasterize the clearance-card SVGs to PNGs next to the sources.
 
 Optional: the runtime falls back to a drawn card when no PNG (and no
-cairosvg) is present. Run once after changing an SVG:
+svglib/reportlab) is present. Run once after changing an SVG:
 
     python tools/convert_clearance_svgs.py
 
-Requires: pip install cairosvg
+Requires: pip install svglib reportlab rlPyCairo Pillow
 """
 
 import os
@@ -18,9 +18,10 @@ import clearance  # noqa: E402
 
 def main():
     try:
-        import cairosvg
+        from svglib.svglib import svg2rlg
+        from reportlab.graphics import renderPM
     except ImportError:
-        print("cairosvg is not installed. Run: pip install cairosvg")
+        print("svglib/reportlab not installed. Run: pip install svglib reportlab rlPyCairo")
         return 1
     count = 0
     for filename in sorted(os.listdir(clearance.ASSETS_DIR)):
@@ -28,8 +29,8 @@ def main():
             continue
         key = filename[:-4]
         out = clearance.card_png_path(key)
-        cairosvg.svg2png(url=os.path.join(clearance.ASSETS_DIR, filename),
-                         write_to=out, output_width=338, output_height=189)
+        drawing = svg2rlg(os.path.join(clearance.ASSETS_DIR, filename))
+        renderPM.drawToFile(drawing, out, fmt="PNG", dpi=300)
         count += 1
         print(f"  {filename} -> {os.path.basename(out)}")
     print(f"Converted {count} card(s).")

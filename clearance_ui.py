@@ -30,19 +30,20 @@ def _band_color(card):
 
 
 def _render_png(card):
-    """Rasterize the SVG to a temp PNG if cairosvg is available."""
+    """Rasterize the actual SVG via svglib+reportlab; returns a temp PNG path."""
     try:
-        import cairosvg  # optional dependency
+        from svglib.svglib import svg2rlg
+        from reportlab.graphics import renderPM
     except ImportError:
         return None
     try:
         fd, tmp = tempfile.mkstemp(prefix="clearance_", suffix=".png")
         os.close(fd)
-        cairosvg.svg2png(url=card["svg"], write_to=tmp,
-                         output_width=CARD_W, output_height=CARD_H)
+        drawing = svg2rlg(card["svg"])
+        renderPM.drawToFile(drawing, tmp, fmt="PNG", dpi=300)
         return tmp
     except Exception as exc:
-        logging.debug(f"cairosvg render failed: {exc}")
+        logging.debug(f"svglib render failed: {exc}")
         return None
 
 
@@ -112,12 +113,14 @@ class ClearanceWindow:
         shown_image = False
         if png and os.path.exists(png):
             try:
-                self._photo = tk.PhotoImage(file=png)
+                from PIL import Image, ImageTk
+                img = Image.open(png)
+                self._photo = ImageTk.PhotoImage(img)
                 label = tk.Label(self.image_frame, image=self._photo)
                 self._set_image_widget(label)
                 shown_image = True
-            except tk.TclError:
-                pass
+            except Exception as exc:
+                logging.debug(f"PIL render failed: {exc}")
         if not shown_image:
             self._set_image_widget(self._draw_fallback(card))
         self.name_label.configure(text=card["name"] or card["key"])

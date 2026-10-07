@@ -51,7 +51,7 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 | `db.py` | Connection string + `get_connection()` context manager |
 | `clearance.py` | Clearance-card catalog: SVG name extraction, tier×category guest matrix, role cards, room/username lookup, export |
 | `clearance_ui.py` | Tkinter "tap your keycard" window: card image, extracted name, scan entry at the bottom |
-| `tools/convert_clearance_svgs.py` | Optional one-shot SVG→PNG rasterizer for the cards (needs `cairosvg`) |
+| `tools/convert_clearance_svgs.py` | Optional one-shot SVG→PNG rasterizer for the cards (needs `svglib`/`reportlab`/`Pillow`) |
 | `config.ini` | DB connection only. **Untracked** — copy `config.ini.example` |
 | `config.ini.example` | The tracked template for the above; blank `password` |
 | `.gitignore` | Keeps `config.ini`, `__pycache__/`, `exports/*.csv` and the generated council artifacts out of history |

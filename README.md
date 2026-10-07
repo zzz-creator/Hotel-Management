@@ -25,7 +25,7 @@ programme. Python 3 on the console, SQL Server behind it.
 
 - Python 3.10+ (developed against 3.14)
 - SQL Server (LocalDB, Express, or full)
-- `pip install -r requirements.txt` — `pyodbc`, `rich`, `tqdm`
+- `pip install -r requirements.txt` — `pyodbc`, `rich`, `tqdm`, `svglib`, `reportlab`, `rlPyCairo`, `Pillow`
 
 ## Getting started
 
