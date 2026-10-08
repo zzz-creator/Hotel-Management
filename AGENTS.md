@@ -98,8 +98,9 @@ New interactive output goes through `ui.py`, never inline `rich`.
 
 `PLAN-room-rates-and-folios.md` (room rates, split folio, availability, guest features,
 reports), `PLAN-booking-system.md` (public booking desk), `PLAN-loyalty-per-night.md`,
-`PLAN-wire-up-rooms.md`, `PLAN-test-plan.md`, `PLAN-clearance-cards.md`. Approved designs — read the relevant one
-before reworking a feature it covers.
+`PLAN-wire-up-rooms.md`, `PLAN-test-plan.md`, `PLAN-clearance-cards.md`,
+`PLAN-split-main-py.md` (planned split of `main.py` into domain modules — not yet started).
+Approved designs — read the relevant one before reworking a feature it covers.
 
 ---
 
