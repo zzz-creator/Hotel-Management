@@ -13,7 +13,7 @@ Read this after `database.sql` has been applied and before anyone tries to log i
 > skippable. The database connection itself (`config.ini`) is prompted for at startup
 > when it is missing, so the wizard has something to connect through.
 >
-> **Admin Panel → 34. Setup Checklist** shows what is still outstanding at any time, and can
+> **Admin Panel → Setup & Destructive → Setup Checklist** shows what is still outstanding at any time, and can
 > re-run the setup actions. It lives in the Admin Panel rather than the main menu on
 > purpose: the main menu is the guest-facing surface, and this screen can write accounts.
 >
@@ -67,8 +67,9 @@ an administrator username and password and creates it (`create_first_user()`). I
 before the main menu, because a database with no accounts has nothing to log into.
 
 Roles are `admin`, `staff`, `manager` and `valet`, and they are not equal: the `manager`
-Admin Panel has no Items, Users or Pricing sections, and `staff` gets only reservations and
-guest services. Give people the narrowest role that lets them do their job. The wizard also
+Admin Panel has no user administration, amenities/promotions or pricing management, and
+`staff` gets only reservations and guest services (rooms view-only). Give people the
+narrowest role that lets them do their job. The wizard also
 offers to create a `master` account — see the note below for why that one matters.
 
 > Passwords are stored and compared in plaintext here, on purpose — this is a teaching
@@ -82,7 +83,7 @@ override matches on the username alone, but the Admin Panel only branches on
 `staff` / `manager` / `admin` / `valet` / `it`, and **Add User** only offers `a` / `s` / `m`.
 A row with role `master` would be an account that exists and cannot be signed in to.
 
-Once you are logged in as `admin`, use **Admin Panel → 19. Add User** for everyone else.
+Once you are logged in as `admin`, use **Admin Panel → Accounts → Add User** for everyone else.
 
 > The wizard runs unauthenticated. That is unavoidable: there is no account to authenticate
 > *against* yet, so it assumes what the database already assumes — that whoever is at the
@@ -100,10 +101,32 @@ Step 2b of the wizard walks the core `HotelSettings` rows one at a time — hote
 tax rate, peak/off-peak factors, loyalty rates and on/off, admin and guest lockout, the
 free-cancellation window — showing the current value in brackets. Pressing Enter keeps
 the bracketed value, so skipping through changes nothing. Everything it asks is
-re-editable later from **Admin Panel → 25. Manage Pricing & Settings**, and the defaults
+re-editable later from **Admin Panel → Discounts & Pricing → Manage Pricing & Settings**, and the defaults
 it shows are the same ones `database.sql` seeds, so a skipped step leaves a working
 setup rather than an empty one. The loyalty order-accrual prompt enforces the same
 calibration the Pricing menu does: the F&B rate must stay below what a night earns.
+
+## 2c. Guest accounts and the Customer menu
+
+The Customer menu is gated on a **booking account** (`CustomerProfiles`): a guest who
+cannot sign in is told to book a room first or ask the front desk, and is **not**
+registered there. Accounts belong to the booking desk and the Admin Panel:
+
+- **Bookings → Book a Room** registers a guest on first use — that is where
+  registration lives, because a guest with no account cannot book.
+- **Admin Panel → Accounts → Create Guest Account** is the front-desk path for a walk-in
+  who already has a stay. Takes name, email and password; the email is what the guest
+  signs in with at the Customer menu.
+- A stay booked at the front desk has no account link until one is made:
+  **Admin Panel → Accounts → Link Stay to Guest Account** lists stays with no customer and
+  attaches the chosen account. That is what credits the stay's loyalty to the person and
+  lets the Customer menu recognise them. Linking is idempotent and will not re-point a
+  stay that already belongs to someone.
+- **Accounts → Edit Guest Account / Reset Guest Password / Delete Guest Account** manage
+  the rest. Deleting refuses any account that holds stays or loyalty history (the foreign
+  keys would forbid it anyway; the screen says why instead of erroring). Names are not
+  editable from the profile — history is keyed on them — so correct a typed name at the
+  reservation instead.
 
 ## 3. Add items (the wizard offers this)
 
@@ -129,7 +152,7 @@ it. Every row in `Items` is a genuine F&B line.
 `ItemID` is a plain `int` primary key, not an identity column — a typed id that collides with
 a row that already exists gives the operator a constraint violation instead of an item.
 
-**Admin Panel → 13. Add Item** (`add_item()`) is the older path and is still there. It *does*
+**Admin Panel → Items & Services → Add Item** (`add_item()`) is the older path and is still there. It *does*
 ask for the `ItemID`, so use it when you want a deliberate numbering scheme (by category, say)
 rather than a contiguous one. It does not validate the id or the price, so prefer
 `add_custom_item()` unless you specifically need to choose the number.
@@ -139,13 +162,13 @@ written on the `Transactions` row when the charge is billed, `'Room'` for the ro
 and `'F&B'` for anything ordered (`ChargeGroup`). Getting this wrong double-counts loyalty
 points, which is why `award_billed_order_points()` filters on `'F&B'` only.
 
-**Admin Panel → 16. View Items** to confirm.
+**Admin Panel → Items & Services → View Items** to confirm.
 
 ---
 
 ## 4. Set prices
 
-**Admin Panel → 25. Manage Pricing & Settings → 6. View / Edit Room Types & Nightly
+**Admin Panel → Discounts & Pricing → Manage Pricing & Settings → 6. View / Edit Room Types & Nightly
 Rates** (`update_room_type_rate()`).
 
 A `RoomTypes` row is a **price list**. A confirmed booking is a **contract**: the nightly
@@ -164,8 +187,8 @@ points earned per dollar on the room). The screen shows both rates side by side.
 
 Either let them appear as bookings are made (see step 1), or use the wizard / **Setup
 Checklist → 4. Seed rooms**, or apply `migrations/008_rooms_seed.sql` for the full tower. To
-check what you have: **Admin Panel → 29. Rooms & Housekeeping → 1. Room Dashboard**. Status
-changes are **→ 3. Update Room Status**.
+check what you have: **Admin Panel → Rooms & Housekeeping → 1. Room Dashboard**. Status
+changes are **Rooms & Housekeeping → 3. Update Room Status**.
 
 A room number is `<floor><3-digit code>` (floor 9, code 012 = `9012`) and the column is
 free text — there is no foreign key from a stay to a room, deliberately.
@@ -195,9 +218,9 @@ Two things worth knowing:
 
 Only needed if you skipped the migrations. All of it is editable afterwards.
 
-- **Amenities** — Admin Panel → 17. Manage Amenities (`manage_amenities_menu()`)
-- **Promotions** — Admin Panel → 18. Manage Promotions (`manage_promotions_menu()`)
-- **Discount codes** — Admin Panel → 24. Manage Discount Codes (`manage_discount_codes()`)
+- **Amenities** — Admin Panel → Items & Services → Manage Amenities (`manage_amenities_menu()`)
+- **Promotions** — Admin Panel → Items & Services → Manage Promotions (`manage_promotions_menu()`)
+- **Discount codes** — Admin Panel → Discounts & Pricing → Manage Discount Codes (`manage_discount_codes()`)
 
 ---
 
@@ -205,7 +228,7 @@ Only needed if you skipped the migrations. All of it is editable afterwards.
 
 Cards are issued at check-in and expire at the reservation's check-out date; a card opens a
 door only while it is `Active` and unexpired. Issuing, revoking, reporting lost and testing
-a card at the reader are all in **Admin Panel → 32. Door Access Control**
+a card at the reader are all in **Admin Panel → Security & Access → Door Access Control**
 (`door_access_menu()`). Nothing to set up first — a card is created for you when a guest
 checks in.
 
@@ -225,12 +248,12 @@ clock does not need to be rewound.
 ## 9. Smoke test
 
 1. **Bookings → book a stay**, two nights, in a room number of your choosing.
-2. **Admin Panel → 29. Rooms & Housekeeping → 1.** The room should appear and be `Available`.
+2. **Admin Panel → Rooms & Housekeeping → 1.** The room should appear and be `Available`.
 3. **Order something** through the guest menu — this exercises the item you added in step 3.
 4. **Check the guest out.** The folio must split into "Room Charges" and "F&B", with tax on
    each, which only works if `ChargeGroup` and the `Invoices` split columns exist.
-5. **Admin Panel → 30. Invoices & Printing** — print it and sanity-check the arithmetic.
-6. **Admin Panel → 28. Export Reports → occupancy and revenue** for today. Occupancy is
+5. **Admin Panel → Invoices & Reports → Invoices & Printing** — print it and sanity-check the arithmetic.
+6. **Admin Panel → Invoices & Reports → Export Reports → occupancy and revenue** for today. Occupancy is
    derived live from `Reservations`, not accumulated.
 
 If step 4 produces a single undifferentiated total, the split-folio columns are missing —

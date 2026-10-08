@@ -82,6 +82,7 @@ New interactive output goes through `ui.py`, never inline `rich`.
 | `tests/test_audit_diffs.py` | The OldValue/NewValue columns `log_audit()` writes (026) |
 | `tests/test_validate_room.py` | The guest identity check |
 | `tests/test_ui.py` | The menu renderer: the `show_menu` subtitle ("Signed in as …") and its markup escaping |
+| `tests/test_admin_menu.py` | The split Admin Panel: role-capability parity, submenu dispatch, the guest-account entries |
 | `tests/test_onboarding.py` | First-run wizard: the completion marker, the first-account guard, item/room seeding idempotency, room-layout bounds |
 | `tests/test_schema_sync.py` | The schema checker itself — a checker that parses nothing must fail |
 | `tests/test_checkin_window.py` | The half-open reservation-window predicate the check-in gate uses |
@@ -307,6 +308,14 @@ parse fine as text. That is the whole argument for §4's scratch database.
 - `HotelSettings` values are admin-editable free text: every numeric read goes through
   `_setting_float()` / `_setting_int()`, which fall back to a built-in default on a
   blank or non-numeric value. A typo there must never break check-out.
+- **The Admin Panel menu is data, not code.** `_admin_menu(role)` returns
+  `[(category, [(label, func, kwargs), ...] | None)]` (None = the "Exit Admin Panel" line)
+  and `_run_admin_submenu()` renders and dispatches from the same tuples, so an entry
+  cannot point at the wrong function — the flat per-role menus this replaced re-typed the
+  reservation block and the numbering by hand and drifted (the admin list had no 26).
+  Capability parity per role is pinned by `tests/test_admin_menu.py`: restructuring the
+  menu is not a permission change, so adding or removing a function from a role must be
+  deliberate and lands in the pinned sets.
 
 ### Git: commit at the end of every change
 

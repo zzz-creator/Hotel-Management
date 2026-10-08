@@ -2358,13 +2358,16 @@ def _book_reservation_in_conn(conn, room_number, last_name, first_name, check_in
     return True, "re-booked (previous stay archived)" if existing is not None else "reserved"
 
 
-def register_customer(email, last_name, first_name, password):
+def register_customer(email, last_name, first_name, password, phone=None):
     """Create a booking-desk account. Returns the new CustomerID, or None.
 
     The unique filtered index on Email (migration 019) is what actually prevents two
     accounts sharing an address; it is a real database guarantee, not a check-then-insert
     race. That matters because the login lookup is by email, so a duplicate would make
     the account ambiguous.
+
+    `phone` is optional contact detail; the booking desk never asks for it, the Admin
+    Panel's Create Guest Account does.
     """
     with get_connection() as conn:
         if conn is None:
@@ -2377,9 +2380,9 @@ def register_customer(email, last_name, first_name, password):
                 logging.info("An account already exists for that email. Please sign in instead.")
                 return None
             cursor.execute(
-                "INSERT INTO CustomerProfiles (LastName, FirstName, Email, Password) "
-                "OUTPUT INSERTED.CustomerID VALUES (?, ?, ?, ?)",
-                (last_name, first_name, email, password),
+                "INSERT INTO CustomerProfiles (LastName, FirstName, Email, Phone, Password) "
+                "OUTPUT INSERTED.CustomerID VALUES (?, ?, ?, ?, ?)",
+                (last_name, first_name, email, phone, password),
             )
             new_row = cursor.fetchone()
             conn.commit()
@@ -4102,6 +4105,149 @@ def handle_cli_args():
         return False
 
 
+def _admin_menu(role):
+    """The Admin Panel's category menu for `role`, as DATA.
+
+    Returns [(category_label, [(item_label, func, kwargs), ...] | None), ...],
+    where a `None` entry list marks the "Exit Admin Panel" line. One list drives
+    BOTH the rendering and the dispatch (see admin_panel), so an entry and the
+    function it runs cannot drift apart -- the flat per-role menus this replaced
+    could: the admin list had no 26, and each role re-typed the same reservation
+    block by hand.
+
+    It is rebuilt on every call because it closes over functions defined further
+    down this file. Parity with the old flat menus is pinned by
+    tests/test_admin_menu.py: a role must reach exactly the functions it reached
+    before, no more and no less -- restructuring a menu is not a permission
+    change.
+    """
+    def entry(label, func, **kwargs):
+        return (label, func, kwargs)
+
+    reservations = [
+        entry("Add Reservation", add_reservation),
+        entry("Edit Reservation", edit_reservation),
+        entry("Delete Reservation", delete_reservation),
+        entry("View Reservations", view_reservations),
+        entry("Search Reservations", search_reservations),
+        entry("Search Availability", show_availability_search),
+        entry("Arrivals / Departures Board", show_arrivals_departures_board),
+    ]
+    guest_services = [
+        entry("Guest Requests (Concierge & Feedback)", guest_requests_menu),
+        entry("Order Management", manage_orders_menu),
+        entry("Staff Alerts", view_staff_alerts),
+    ]
+    items_and_services = [
+        entry("Add Item", add_item),
+        entry("Delete Item", delete_item),
+        entry("Update Item", update_item),
+        entry("View Items", view_items),
+    ]
+    clearance_desk = entry("Clearance Card Desk", clearance_ui.open_clearance_window)
+
+    if role == 'staff':
+        return [
+            ("Reservations Management", reservations),
+            ("Guest Services", guest_services),
+            ("Rooms & Housekeeping", [entry("Rooms & Housekeeping", rooms_admin_menu, view_only=True)]),
+            ("Perks", [entry("Post Complimentary Charge (tier perk)", comp_item_to_room), clearance_desk]),
+            ("Exit Admin Panel", None),
+        ]
+    if role == 'manager':
+        return [
+            ("Reservations Management", reservations),
+            ("Guest Services", guest_services + [entry("Send Notification to Customer", send_notification_to_customer)]),
+            ("Items & Services", items_and_services),
+            ("Accounts", [
+                entry("View Users", view_users),
+                entry("Search & View Guest Accounts", search_customer_profiles),
+            ]),
+            ("Discounts & Pricing", [entry("View Discount Codes", view_discount_codes)]),
+            ("Rooms & Housekeeping", [entry("Rooms & Housekeeping", rooms_admin_menu, view_only=True)]),
+            ("Invoices & Reports", [entry("Invoices & Printing", invoices_menu)]),
+            ("Security & Access", [
+                entry("Door Access Control", door_access_menu, view_only=True),
+                clearance_desk,
+            ]),
+            ("Exit Admin Panel", None),
+        ]
+    if role == 'admin':
+        return [
+            ("Reservations Management", reservations),
+            ("Guest Services", guest_services + [
+                entry("Send Notification to Customer", send_notification_to_customer),
+                entry("Send Alert to Staff", send_alert_to_staff),
+            ]),
+            ("Items & Services", items_and_services + [
+                entry("Manage Amenities", manage_amenities_menu),
+                entry("Manage Promotions", manage_promotions_menu),
+            ]),
+            ("Rooms & Housekeeping", [entry("Rooms & Housekeeping", rooms_admin_menu)]),
+            ("Accounts", [
+                entry("Add User", add_user),
+                entry("Delete User", delete_user),
+                entry("Edit User", edit_user),
+                entry("View Users", view_users),
+                entry("Reset User Password", reset_user_password),
+                entry("Search & View Guest Accounts", search_customer_profiles),
+                entry("Create Guest Account", create_guest_account),
+                entry("Edit Guest Account", edit_guest_account),
+                entry("Reset Guest Password", reset_guest_password),
+                entry("Link Stay to Guest Account", link_stay_to_guest_account),
+                entry("Delete Guest Account", delete_guest_account),
+            ]),
+            ("Loyalty", [entry("Loyalty Management", loyalty_admin_menu)]),
+            ("Discounts & Pricing", [
+                entry("Manage Discount Codes", manage_discount_codes),
+                entry("Manage Pricing & Settings", manage_pricing_rules),
+            ]),
+            ("Invoices & Reports", [
+                entry("Invoices & Printing", invoices_menu),
+                entry("Export Reports", export_reports_menu),
+            ]),
+            ("Security & Access", [
+                entry("Door Access Control", door_access_menu),
+                clearance_desk,
+            ]),
+            ("Setup & Destructive", [
+                entry("Setup Checklist", onboarding_checklist, role=role),
+                entry("Delete All Reservations (master override)", delete_all_reservations),
+            ]),
+            ("Exit Admin Panel", None),
+        ]
+    return []
+
+
+def _run_admin_submenu(category, entries, session):
+    """Show one category's submenu and run the chosen entry, then return.
+
+    The label on screen and the function that runs come from the same tuple, so
+    there is no numbering to keep in sync. A pause follows every action or
+    rejected input so its message survives until the submenu redraws
+    (docs/DEVIATIONS.md §12); entering the submenu does not pause, because the
+    category choice that brought you here has already been read.
+    """
+    while True:
+        ui.show_menu(
+            category,
+            [f"{i}. {label}" for i, (label, _func, _kwargs) in enumerate(entries, 1)]
+            + [f"{len(entries) + 1}. Back to Admin Panel"],
+            subtitle=session,
+        )
+        raw = input("Enter your choice: ").strip()
+        if not raw.isdigit() or not 1 <= int(raw) <= len(entries) + 1:
+            logging.info("Invalid choice. Please try again.")
+            ui.pause()
+            continue
+        pick = int(raw)
+        if pick == len(entries) + 1:
+            return
+        _label, func, kwargs = entries[pick - 1]
+        func(**kwargs)
+        ui.pause()
+
+
 def admin_panel():
 
     login_successful, role, reauth = admin_login()
@@ -4110,304 +4256,52 @@ def admin_panel():
         logging.info("Unauthorized access. Returning to main menu.")
         return
     elif reauth:
+        # The recursive call runs its own complete login-and-menu session. The
+        # return is load-bearing: without it, when that inner session ends the
+        # outer frame fell through into a SECOND menu on the unlocked role with
+        # no password having been entered for it.
         logging.info("Reauthentication required. Please log in again.")
         admin_panel()
+        return
 
     role = str(role).lower()
     # Shown on this panel's menu and every submenu opened from it: a shared console
     # must always display which operator account is live.
     session = f"Signed in as {CURRENT_USER} ({role})"
+
+    if role == 'valet':
+        logging.info("Enter Valet Panel...")
+        ui.pause()
+        valet_vehicle_management()
+        return
+    if role == 'it':
+        logging.info("Enter IT Support Panel...")
+        ui.pause()
+        it_support_panel()
+        return
+    if role not in ('staff', 'manager', 'admin'):
+        logging.error("A role has not been assigned. Please contact the system administrator.")
+        ui.pause()
+        return
+
+    # The menu is data (_admin_menu): this loop renders it, and _run_admin_submenu
+    # dispatches from the same tuples, so an entry cannot point at the wrong function.
+    menu = _admin_menu(role)
     while True:
-        if role == 'staff':
-            ui.pause()
-            ui.show_menu("Admin Panel", [
-                "---- Reservations ----",
-                "1. Add Reservation",
-                "2. View Reservations",
-                "3. Edit Reservation",
-                "4. Delete Reservation",
-                "5. Search Reservations",
-                "6. Search Availability",
-                "7. Arrivals / Departures Board",
-                "---- Guest Services ----",
-                "8. Guest Requests (Concierge & Feedback)",
-                "9. Order Management",
-                "10. Staff Alerts",
-                "---- Rooms ----",
-                "11. Rooms & Housekeeping",
-                "---- Perks ----",
-                "12. Post Complimentary Charge (tier perk)",
-                "13. Clearance Card Desk",
-                "14. Exit Admin Panel",
-            ], subtitle=session)
-        elif role == 'manager':
-            ui.pause()
-            ui.show_menu("Admin Panel", [
-                "---- Reservations ----",
-                "1. Add Reservation",
-                "2. Delete Reservation",
-                "3. Edit Reservation",
-                "4. View Reservations",
-                "5. Search Reservations",
-                "6. Search Availability",
-                "7. Arrivals / Departures Board",
-                "---- Guest Services ----",
-                "8. Guest Requests (Concierge & Feedback)",
-                "9. Order Management",
-                "10. Staff Alerts",
-                "---- Notifications ----",
-                "11. Send Notification to Customer",
-                "---- Items & Services ----",
-                "12. Add Item",
-                "13. Delete Item",
-                "14. Update Item",
-                "15. View Items",
-                "---- Users ----",
-                "16. View Users",
-                "---- Discounts ----",
-                "17. View Discount Codes",
-                "---- Rooms ----",
-                "18. Rooms & Housekeeping",
-                "---- Invoices ----",
-                "19. Invoices & Printing",
-                "---- Customers ----",
-                "20. Customer Profiles",
-                "---- Security ----",
-                "21. Door Access Control",
-                "---- Other ----",
-                "22. Clearance Card Desk",
-                "23. Exit Admin Panel",
-            ], subtitle=session)
-        elif role == 'admin':
-            ui.pause()
-            ui.show_menu("Admin Panel", [
-                "---- Reservations ----",
-                "1. Add Reservation",
-                "2. Delete Reservation",
-                "3. Edit Reservation",
-                "4. View Reservations",
-                "5. Search Reservations",
-                "6. Search Availability",
-                "7. Arrivals / Departures Board",
-                "---- Guest Services ----",
-                "8. Guest Requests (Concierge & Feedback)",
-                "9. Order Management",
-                "10. Staff Alerts",
-                "---- Notifications ----",
-                "11. Send Notification to Customer",
-                "12. Send Alert to Staff",
-                "---- Items & Services ----",
-                "13. Add Item",
-                "14. Delete Item",
-                "15. Update Item",
-                "16. View Items",
-                "17. Manage Amenities",
-                "18. Manage Promotions",
-                "---- Users ----",
-                "19. Add User",
-                "20. Delete User",
-                "21. Edit User",
-                "22. View Users",
-                "23. Reset User Password",
-                "---- Discounts ----",
-                "24. Manage Discount Codes",
-                "---- Pricing & Settings ----",
-                "25. Manage Pricing & Settings",
-                "---- Loyalty ----",
-                "27. Loyalty Management",
-                "---- Reports ----",
-                "28. Export Reports",
-                "---- Rooms ----",
-                "29. Rooms & Housekeeping",
-                "---- Invoices ----",
-                "30. Invoices & Printing",
-                "---- Customers ----",
-                "31. Customer Profiles",
-                "---- Security ----",
-                "32. Door Access Control",
-                "---- Destructive ----",
-                "33. Delete All Reservations (master override)",
-                "---- Setup ----",
-                "34. Setup Checklist",
-                "---- Other ----",
-                "35. Clearance Card Desk",
-                "36. Exit Admin Panel",
-            ], subtitle=session)
-        elif role == 'valet':
-            logging.info("Enter Valet Panel...")
-            ui.pause()
-        elif role == 'it':
-            logging.info("Enter IT Support Panel...")
-            ui.pause()
-        else:
-            logging.error("A role has not been assigned. Please contact the system administrator.")
-            ui.pause()
-            break
-        if not role == 'it' and not role == 'valet':
-            choice = input("Enter your choice: ").strip()
-        if role == 'staff':
-            if choice == '1':
-                add_reservation()
-            elif choice == '2':
-                view_reservations()
-            elif choice == '3':
-                edit_reservation()
-            elif choice == '4':
-                delete_reservation()
-            elif choice == '5':
-                search_reservations()
-            elif choice == '6':
-                show_availability_search()
-            elif choice == '7':
-                show_arrivals_departures_board()
-            elif choice == '8':
-                guest_requests_menu()
-            elif choice == '9':
-                manage_orders_menu()
-            elif choice == '10':
-                view_staff_alerts()
-            elif choice == '11':
-                rooms_admin_menu(view_only=True)
-            elif choice == '12':
-                comp_item_to_room()
-            elif choice == '13':
-                clearance_ui.open_clearance_window()
-            elif choice == '14':
-                break
-            else:
-                logging.info("Invalid choice. Please try again.")
+        ui.pause()
+        ui.show_menu("Admin Panel",
+                     [f"{i}. {label}" for i, (label, _entries) in enumerate(menu, 1)],
+                     subtitle=session)
+        choice = input("Enter your choice: ").strip()
+        if not choice.isdigit() or not 1 <= int(choice) <= len(menu):
+            logging.info("Invalid choice. Please try again.")
+            continue
+        label, entries = menu[int(choice) - 1]
+        if entries is None:
+            break  # "Exit Admin Panel"
+        _run_admin_submenu(label, entries, session)
 
-        elif role == 'manager':
-            if choice == '1':
-                add_reservation()
-            elif choice == '2':
-                delete_reservation()
-            elif choice == '3':
-                edit_reservation()
-            elif choice == '4':
-                view_reservations()
-            elif choice == '5':
-                search_reservations()
-            elif choice == '6':
-                show_availability_search()
-            elif choice == '7':
-                show_arrivals_departures_board()
-            elif choice == '8':
-                guest_requests_menu()
-            elif choice == '9':
-                manage_orders_menu()
-            elif choice == '10':
-                view_staff_alerts()
-            elif choice == '11':
-                send_notification_to_customer()
-            elif choice == '12':
-                add_item()
-            elif choice == '13':
-                delete_item()
-            elif choice == '14':
-                update_item()
-            elif choice == '15':
-                view_items()
-            elif choice == '16':
-                view_users()
-            elif choice == '17':
-                view_discount_codes()
-            elif choice == '18':
-                rooms_admin_menu(view_only=True)
-            elif choice == '19':
-                invoices_menu()
-            elif choice == '20':
-                search_customer_profiles()
-            elif choice == '21':
-                door_access_menu(view_only=True)
-            elif choice == '22':
-                clearance_ui.open_clearance_window()
-            elif choice == '23':
-                break
-            else:
-                logging.info("Invalid choice. Please try again.")
 
-        elif role == 'admin':
-            if choice == '1':
-                add_reservation()
-            elif choice == '2':
-                delete_reservation()
-            elif choice == '3':
-                edit_reservation()
-            elif choice == '4':
-                view_reservations()
-            elif choice == '5':
-                search_reservations()
-            elif choice == '6':
-                show_availability_search()
-            elif choice == '7':
-                show_arrivals_departures_board()
-            elif choice == '8':
-                guest_requests_menu()
-            elif choice == '9':
-                manage_orders_menu()
-            elif choice == '10':
-                view_staff_alerts()
-            elif choice == '11':
-                send_notification_to_customer()
-            elif choice == '12':
-                send_alert_to_staff()
-            elif choice == '13':
-                add_item()
-            elif choice == '14':
-                delete_item()
-            elif choice == '15':
-                update_item()
-            elif choice == '16':
-                view_items()
-            elif choice == '17':
-                manage_amenities_menu()
-            elif choice == '18':
-                manage_promotions_menu()
-            elif choice == '19':
-                add_user()
-            elif choice == '20':
-                delete_user()
-            elif choice == '21':
-                edit_user()
-            elif choice == '22':
-                view_users()
-            elif choice == '23':
-                reset_user_password()
-            elif choice == '24':
-                manage_discount_codes()
-            elif choice == '25':
-                manage_pricing_rules()
-            elif choice == '27':
-                loyalty_admin_menu()
-            elif choice == '28':
-                export_reports_menu()
-            elif choice == '29':
-                rooms_admin_menu()
-            elif choice == '30':
-                invoices_menu()
-            elif choice == '31':
-                search_customer_profiles()
-            elif choice == '32':
-                door_access_menu()
-            elif choice == '33':
-                delete_all_reservations()
-            elif choice == '34':
-                onboarding_checklist(role)
-            elif choice == '35':
-                clearance_ui.open_clearance_window()
-            elif choice == '36':
-                break
-            else:
-                logging.info("Invalid choice. Please try again.")
-        elif role == 'valet':
-            valet_vehicle_management()
-            break
-        elif role == 'it':
-            it_support_panel()
-            break
-        else:
-            logging.error("404 Role Not Found. Please contact the system administrator.")
 ## =========================
 # Rooms & Housekeeping
 ## =========================
@@ -5626,7 +5520,17 @@ def link_reservation_customer(room_number, customer_id):
             if cursor.rowcount:
                 conn.commit()
                 logging.info(f"Stay in room {room_number} linked to customer profile {customer_id}.")
-            return True
+                return True
+            # rowcount 0 means the WHERE clause matched nothing: the room is gone, or
+            # the stay already belongs to a DIFFERENT customer. Read back what is true
+            # so the caller can tell "already mine" (fine) from "not linked" (report).
+            cursor.execute(
+                "SELECT CustomerID FROM Reservations WHERE RoomNumber = ?",
+                (room_number,),
+            )
+            row = cursor.fetchone()
+            owner = row.CustomerID if row else None
+            return owner is not None and int(owner) == int(customer_id)
     except Exception as e:
         # Before 019 there is no CustomerID column; the stay simply has no loyalty.
         logging.debug(f"Could not link reservation {room_number} to a customer: {e}")
@@ -8023,6 +7927,323 @@ def search_customer_profiles():
         history_title=f"Stay History - {selected.FirstName} {selected.LastName}",
         summary_title=f"Stay Summary - {selected.FirstName} {selected.LastName}",
     )
+
+
+def _pick_customer_account(prompt="Search guest account by full name or email: "):
+    """Admin: resolve a guest account to its profile row for an account action.
+
+    Returns a row with CustomerID, LastName, FirstName, Email, Phone -- or None.
+    Matching is EXACT (an email, or "Last First"), following _pick_loyalty_customer():
+    a surname alone must never be enough to choose the person an action applies to,
+    because these actions change or delete a real account. Multiple matches are
+    offered as a pick list, so a shared name cannot silently hit the first row.
+    """
+    query = input(prompt).strip()
+    if not query:
+        logging.info("No account specified.")
+        return None
+    try:
+        with get_connection() as conn:
+            if conn is None:
+                return None
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT TOP 10 CustomerID, LastName, FirstName, Email, Phone "
+                "FROM CustomerProfiles "
+                "WHERE Email = ? OR LastName + ' ' + FirstName = ? "
+                "OR (LastName = ? AND FirstName = ?) ORDER BY CustomerID DESC",
+                (query, query, query, query),
+            )
+            matches = cursor.fetchall()
+        if not matches:
+            logging.info(
+                f"No guest account found for '{query}'. If the guest has none, create "
+                "one first (Accounts -> Create Guest Account); if the stay predates "
+                "accounts, it may have no profile at all."
+            )
+            return None
+        if len(matches) == 1:
+            return matches[0]
+        ui.show_table("Matching guest accounts", ["#", "ID", "Guest", "Email", "Phone"],
+                      [(i + 1, r.CustomerID, f"{r.LastName}, {r.FirstName}",
+                        r.Email or "-", r.Phone or "-") for i, r in enumerate(matches)])
+        raw = input("Enter the row number of the right account (blank to cancel): ").strip()
+        if not raw.isdigit():
+            return None
+        idx = int(raw)
+        if not (1 <= idx <= len(matches)):
+            logging.info("Invalid selection.")
+            return None
+        return matches[idx - 1]
+    except Exception as e:
+        logging.error(f"Error finding guest account: {e}")
+        return None
+
+
+def create_guest_account():
+    """Admin/front desk: create a booking account for a guest who has none.
+
+    This is the counterpart to the Customer menu's gate: that menu refuses unknown
+    emails and tells the guest to ask the front desk, and this is where the desk
+    says yes. Lengths are checked against the column widths because an over-long
+    value is a pyodbc truncation error, and a mistyped prompt must produce a
+    message, not a traceback.
+    """
+    last_name = input("Last name: ").strip()
+    first_name = input("First name: ").strip()
+    email = input("Email address (the guest signs in with this): ").strip()
+    phone = input("Phone number (optional): ").strip()
+    password = input("Password: ").strip()
+    if not last_name or not first_name:
+        logging.info("Both a last name and a first name are required.")
+        return
+    if not email:
+        logging.info("An email address is required -- it is what the guest signs in with.")
+        return
+    if not password:
+        logging.info("A password is required.")
+        return
+    for label, value, limit in (("last name", last_name, 50), ("first name", first_name, 50),
+                                ("email", email, 100), ("phone", phone, 20),
+                                ("password", password, 100)):
+        if len(value) > limit:
+            logging.info(f"That {label} is too long (maximum {limit} characters). Please shorten it.")
+            return
+    customer_id = register_customer(email, last_name, first_name, password, phone=phone or None)
+    if customer_id:
+        logging.info(
+            f"Account created for {first_name} {last_name}. They can now sign in at "
+            "the Customer menu with that email and password."
+        )
+
+
+def _update_account_field(account, field, limit):
+    """Write one editable contact field, refusing duplicates and over-long values.
+
+    `field` is one of the literals "Email", "Phone", "Preferences" from
+    edit_guest_account's menu, never user input, so it is safe to interpolate.
+    """
+    value = input(f"New {field.lower()} (blank to cancel): ").strip()
+    if not value:
+        logging.info("No change made.")
+        return
+    if len(value) > limit:
+        logging.info(f"That is too long for {field} (maximum {limit} characters).")
+        return
+    customer_id = int(account.CustomerID)
+    try:
+        with get_connection() as conn:
+            if conn is None:
+                return
+            cursor = conn.cursor()
+            if field == "Email":
+                cursor.execute(
+                    "SELECT 1 FROM CustomerProfiles WHERE Email = ? AND CustomerID <> ?",
+                    (value, customer_id),
+                )
+                if cursor.fetchone():
+                    # The filtered unique index would reject it anyway; say so in a
+                    # sentence rather than handing the operator a constraint error.
+                    logging.info("Another account already uses that email address.")
+                    return
+            old_value = getattr(account, field, None)
+            cursor.execute(
+                f"UPDATE CustomerProfiles SET {field} = ? WHERE CustomerID = ?",
+                (value, customer_id),
+            )
+            conn.commit()
+        # Email is the login handle; everything else is contact detail. The audit
+        # row carries the values so a front-desk mistake is recoverable.
+        log_audit("UPDATE", "CustomerProfile", str(customer_id), f"{field} changed",
+                  old_value=old_value, new_value=value)
+        logging.info(f"{field} updated.")
+    except Exception as e:
+        logging.error(f"Could not update {field.lower()}: {e}")
+
+
+def edit_guest_account():
+    """Admin: change the contact details on a guest account.
+
+    Names are deliberately NOT editable here: stay history and the admin lookup
+    are keyed on LastName + FirstName (load_customer_history()), so a rename would
+    orphan every past stay. Correct a typed name at the reservation instead.
+    """
+    account = _pick_customer_account()
+    if not account:
+        return
+    while True:
+        ui.pause()
+        ui.show_menu(f"Edit Account #{account.CustomerID} - {account.FirstName} {account.LastName}", [
+            "1. Change email",
+            "2. Change phone",
+            "3. Change preferences",
+            "4. Back",
+        ])
+        choice = input("Enter your choice: ").strip()
+        if choice == '1':
+            _update_account_field(account, "Email", 100)
+        elif choice == '2':
+            _update_account_field(account, "Phone", 20)
+        elif choice == '3':
+            _update_account_field(account, "Preferences", 255)
+        elif choice == '4':
+            return
+        else:
+            logging.info("Invalid choice. Please try again.")
+
+
+def reset_guest_password():
+    """Admin: set a new sign-in password on a guest account."""
+    account = _pick_customer_account()
+    if not account:
+        return
+    password = input(f"New password for {account.FirstName} {account.LastName}: ").strip()
+    if not password:
+        logging.info("A password is required.")
+        return
+    if len(password) > 100:
+        logging.info("That password is too long (maximum 100 characters).")
+        return
+    customer_id = int(account.CustomerID)
+    try:
+        with get_connection() as conn:
+            if conn is None:
+                return
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE CustomerProfiles SET Password = ? WHERE CustomerID = ?",
+                (password, customer_id),
+            )
+            conn.commit()
+        # The new value stays out of the audit row: plaintext storage is a
+        # documented design choice, but the audit trail is still a report.
+        log_audit("UPDATE", "CustomerProfile", str(customer_id), "Password reset")
+        logging.info("Password reset. The guest can sign in with the new password immediately.")
+    except Exception as e:
+        logging.error(f"Could not reset the password: {e}")
+
+
+def delete_guest_account():
+    """Admin: delete a guest account -- only when it holds no history.
+
+    Stays, loyalty accounts and loyalty transactions all reference CustomerProfiles
+    with plain NO ACTION foreign keys, so a profile with any history cannot be
+    deleted anyway; the pre-check turns that database error into a sentence, and
+    refuses before asking for the master override when there is nothing it could
+    delete. The override requirement is the same one every destructive admin
+    action carries (AGENTS.md §3).
+    """
+    account = _pick_customer_account()
+    if not account:
+        return
+    customer_id = int(account.CustomerID)
+    try:
+        with get_connection() as conn:
+            if conn is None:
+                return
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT "
+                " (SELECT COUNT(*) FROM Reservations WHERE CustomerID = ?), "
+                " (SELECT COUNT(*) FROM LoyaltyAccounts WHERE CustomerID = ?), "
+                " (SELECT COUNT(*) FROM LoyaltyTransactions WHERE CustomerID = ?)",
+                (customer_id, customer_id, customer_id),
+            )
+            stays, loyalty_accounts, ledger = cursor.fetchone()
+    except Exception as e:
+        # Without the counts the delete is a guess: a missing loyalty table (001 not
+        # applied) must refuse rather than proceed blind.
+        logging.info(
+            f"Could not verify this account's history, so nothing was deleted ({e})."
+        )
+        return
+    if stays or loyalty_accounts or ledger:
+        logging.info(
+            f"Refusing: this account holds history -- {stays} stay(s), "
+            f"{loyalty_accounts} loyalty account(s), {ledger} loyalty transaction(s). "
+            "Deleting it would destroy booking and points history that reports read."
+        )
+        return
+    if not require_master_override(prompt="Master override required to delete a guest account: "):
+        return
+    confirm = account.Email or f"{account.LastName}, {account.FirstName}"
+    typed = input(f"Type '{confirm}' to confirm deletion: ").strip()
+    if typed != confirm:
+        logging.info("Confirmation did not match. Nothing was deleted.")
+        return
+    try:
+        with get_connection() as conn:
+            if conn is None:
+                return
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM CustomerProfiles WHERE CustomerID = ?", (customer_id,))
+            conn.commit()
+        log_audit("DELETE", "CustomerProfile", str(customer_id),
+                  f"Deleted empty account '{account.LastName}, {account.FirstName}'")
+        logging.info("Account deleted.")
+    except Exception as e:
+        # A stay can be created between the check and the delete; the foreign key
+        # then does its job and the operator gets a sentence, not a traceback.
+        logging.error(f"Could not delete the account: {e}")
+
+
+def link_stay_to_guest_account():
+    """Front desk: attach a desk-made stay to a guest account.
+
+    A reservation taken at the desk has no online account at the time, so
+    Reservations.CustomerID is NULL: the stay's loyalty has nobody to credit and
+    the Customer menu gate has nothing to recognise. Linking here closes that
+    loop. Only UNLINKED live stays are offered -- link_reservation_customer()
+    will not re-point a stay that already belongs to someone.
+    """
+    account = _pick_customer_account()
+    if not account:
+        return
+    try:
+        with get_connection() as conn:
+            if conn is None:
+                return
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT RoomNumber, LastName, FirstName, CheckInDate, CheckOutDate "
+                "FROM Reservations WHERE CustomerID IS NULL "
+                "ORDER BY CheckInDate DESC, RoomNumber",
+            )
+            unlinked = cursor.fetchall()
+    except Exception as e:
+        logging.error(f"Could not list unlinked stays: {e}")
+        return
+    if not unlinked:
+        logging.info("Every live stay is already linked to a guest account.")
+        return
+    ui.show_table(
+        "Stays not yet linked to an account",
+        ["#", "Room", "Guest", "Check In", "Check Out"],
+        [(i + 1, r.RoomNumber, f"{r.LastName or ''}, {r.FirstName or ''}".strip(", "),
+          r.CheckInDate, r.CheckOutDate) for i, r in enumerate(unlinked)],
+    )
+    raw = input("Enter the row number to link (blank to cancel): ").strip()
+    if not raw.isdigit():
+        return
+    idx = int(raw)
+    if not (1 <= idx <= len(unlinked)):
+        logging.info("Invalid selection.")
+        return
+    stay = unlinked[idx - 1]
+    guest_on_stay = f"{stay.LastName or ''}, {stay.FirstName or ''}".strip(", ")
+    if input(
+            f"Link room {stay.RoomNumber} ({guest_on_stay}) to "
+            f"{account.FirstName} {account.LastName}? (y/n): "
+    ).strip().lower() != 'y':
+        logging.info("Not linked.")
+        return
+    if link_reservation_customer(stay.RoomNumber, int(account.CustomerID)):
+        logging.info(f"Room {stay.RoomNumber} is now {account.FirstName} {account.LastName}'s stay.")
+    else:
+        logging.info(
+            "The stay could not be linked -- it may have just been linked by someone "
+            "else, or it already belongs to another guest. Check the reservation first."
+        )
 
 
 def customer_panel():

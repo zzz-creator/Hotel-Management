@@ -32,6 +32,15 @@ does **not** query `Reservations` for a booking: `Reservations.CustomerID` is NU
 exactly the front-desk stays, so a reservation check would lock out the guests whose link
 the desk is about to make.
 
+**Front-desk stays get linked.** A stay booked at the desk has no account until one is
+made: `link_stay_to_guest_account()` (Admin Panel → Accounts) lists the unlinked live
+stays and attaches the guest's profile, and this is what credits that stay's loyalty to
+the person and what lets the Customer menu recognise them on a later visit.
+`link_reservation_customer()` is idempotent and never re-points a stay that already
+belongs to someone else — its return value says whether the stay *is* linked to the given
+customer afterwards, which is how the desk screen reports a refused link honestly, and the
+check-in caller ignores it on purpose.
+
 - An unknown email **registers on first use** rather than being turned away: a guest with
   no account cannot book, and therefore has no way to be recognised on a return visit.
 - Blank email or blank password is refused — both are the only handle the account has, and

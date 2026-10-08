@@ -700,6 +700,201 @@ class LinkReservationCustomerTests(unittest.TestCase):
             self.assertFalse(app.link_reservation_customer("9012", 7))
 
 
+class _ZeroRowcountCursor(_FakeCursor):
+    """A cursor whose UPDATE touches nothing: rowcount 0, the read-back path."""
+
+    def __init__(self, log, result_sets=None):
+        super().__init__(log, result_sets)
+        self.rowcount = 0
+
+
+class _ZeroRowcountConn(_FakeConn):
+    def cursor(self):
+        return _ZeroRowcountCursor(self.log, self.result_sets)
+
+
+class LinkReservationReadBackTests(unittest.TestCase):
+    """The return value reports what is TRUE afterwards, not just that the UPDATE ran.
+
+    A rowcount of 0 means the WHERE guard matched nothing -- the room is gone, or
+    the stay already belongs to someone else. The old code returned True anyway, so
+    an admin "link" that silently failed would have reported success.
+    """
+
+    def test_link_returns_false_when_the_stay_belongs_to_another_customer(self):
+        log = []
+        conn = _ZeroRowcountConn(log, [[_row(CustomerID=8)]])  # the stay's owner is customer 8
+        with mock.patch.object(app, "get_connection", return_value=conn):
+            self.assertFalse(app.link_reservation_customer("9012", 7))
+        # The answer came from a real read-back, not from assuming rowcount 0 fails.
+        self.assertTrue(_statements_starting_with(log, "SELECT CustomerID FROM Reservations"))
+
+    def test_link_returns_true_for_a_stay_already_linked_to_this_customer(self):
+        log = []
+        conn = _ZeroRowcountConn(log, [[_row(CustomerID=7)]])
+        with mock.patch.object(app, "get_connection", return_value=conn):
+            self.assertTrue(app.link_reservation_customer("9012", 7))
+        # No-op link: the guarded UPDATE ran (and touched nothing), and the truth
+        # came from reading the ownership back.
+        self.assertEqual(len(_statements_starting_with(log, "UPDATE Reservations")), 1)
+        self.assertTrue(_statements_starting_with(log, "SELECT CustomerID FROM Reservations"))
+
+
+class GuestAccountAdminTests(unittest.TestCase):
+    """Admin CRUD on guest accounts and linking desk-made stays."""
+
+    def test_create_guest_account_passes_the_phone_through(self):
+        prompts = iter(["Smith", "Ada", "ada@example.com", "555-0100", "hunter2"])
+        with mock.patch("builtins.input", lambda _="": next(prompts)), \
+             mock.patch.object(app, "register_customer") as register:
+            app.create_guest_account()
+        register.assert_called_once_with("ada@example.com", "Smith", "Ada", "hunter2",
+                                         phone="555-0100")
+
+    def test_create_guest_account_refuses_blanks_before_the_database(self):
+        with mock.patch("builtins.input", return_value=""), \
+             mock.patch.object(app, "get_connection") as conn, \
+             mock.patch.object(app, "register_customer") as register:
+            app.create_guest_account()
+        conn.assert_not_called()
+        register.assert_not_called()
+
+    def test_create_guest_account_refuses_an_overlong_first_name(self):
+        prompts = iter(["Smith", "A" * 60, "x@example.com", "", "pw"])
+        with mock.patch("builtins.input", lambda _="": next(prompts)), \
+             mock.patch.object(app, "register_customer") as register:
+            app.create_guest_account()
+        register.assert_not_called()
+
+    def test_edit_email_to_a_taken_address_refuses_without_a_traceback(self):
+        log = []
+        pick = _FakeConn(log, [[_row(CustomerID=7, LastName="Smith", FirstName="Ada",
+                                     Email="ada@example.com", Phone=None)]])
+        taken = _FakeConn(log, [[(1,)]])  # SELECT 1 ... WHERE Email = ? AND CustomerID <> ?
+        prompts = iter(["ada@example.com", "1", "taken@example.com", "4"])
+        with mock.patch("builtins.input", lambda _="": next(prompts)), \
+             mock.patch.object(app, "get_connection", side_effect=[pick, taken]), \
+             mock.patch.object(app.ui, "pause"), \
+             mock.patch.object(app.ui, "show_menu"), \
+             mock.patch.object(app, "log_audit") as audit:
+            app.edit_guest_account()
+        self.assertFalse(_statements_starting_with(log, "UPDATE CustomerProfiles"))
+        audit.assert_not_called()
+
+    def test_reset_guest_password_writes_and_audits_without_the_value(self):
+        log = []
+        pick = _FakeConn(log, [[_row(CustomerID=7, LastName="Smith", FirstName="Ada",
+                                     Email="ada@example.com", Phone=None)]])
+        update = _FakeConn(log, [[]])
+        prompts = iter(["ada@example.com", "hunter2"])
+        with mock.patch("builtins.input", lambda _="": next(prompts)), \
+             mock.patch.object(app, "get_connection", side_effect=[pick, update]), \
+             mock.patch.object(app, "log_audit") as audit:
+            app.reset_guest_password()
+        updates = _statements_starting_with(log, "UPDATE CustomerProfiles")
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0][1], ("hunter2", 7))
+        # The value itself must not land in the audit trail.
+        audit.assert_called_once_with("UPDATE", "CustomerProfile", "7", "Password reset")
+
+    def test_delete_refuses_an_account_that_holds_history(self):
+        log = []
+        pick = _FakeConn(log, [[_row(CustomerID=5, LastName="Smith", FirstName="Ada",
+                                     Email="ada@example.com", Phone=None)]])
+        counts = _FakeConn(log, [[(3, 1, 5)]])
+        with mock.patch("builtins.input", return_value="ada@example.com"), \
+             mock.patch.object(app, "get_connection", side_effect=[pick, counts]), \
+             mock.patch.object(app, "require_master_override") as override, \
+             mock.patch.object(app, "log_audit") as audit:
+            app.delete_guest_account()
+        override.assert_not_called()
+        audit.assert_not_called()
+        self.assertFalse(_statements_starting_with(log, "DELETE FROM CustomerProfiles"))
+
+    def test_delete_of_an_empty_account_requires_override_and_confirmation(self):
+        log = []
+        pick = _FakeConn(log, [[_row(CustomerID=5, LastName="Smith", FirstName="Ada",
+                                     Email="ada@example.com", Phone=None)]])
+        counts = _FakeConn(log, [[(0, 0, 0)]])
+        removal = _FakeConn(log, [[]])
+        prompts = iter(["ada@example.com", "ada@example.com"])
+        with mock.patch("builtins.input", lambda _="": next(prompts)), \
+             mock.patch.object(app, "get_connection", side_effect=[pick, counts, removal]), \
+             mock.patch.object(app, "require_master_override", return_value=True) as override, \
+             mock.patch.object(app, "log_audit") as audit:
+            app.delete_guest_account()
+        deletes = _statements_starting_with(log, "DELETE FROM CustomerProfiles")
+        self.assertEqual(len(deletes), 1)
+        self.assertEqual(deletes[0][1], (5,))
+        # The override is what licenses the delete: the happy path must have asked
+        # for it (and the confirmation) before touching the row.
+        override.assert_called_once()
+        self.assertEqual(audit.call_args[0][0], "DELETE")
+
+    def test_delete_aborts_when_the_master_override_is_denied(self):
+        log = []
+        pick = _FakeConn(log, [[_row(CustomerID=5, LastName="Smith", FirstName="Ada",
+                                     Email="ada@example.com", Phone=None)]])
+        counts = _FakeConn(log, [[(0, 0, 0)]])
+        # The removal connection exists so that, if the override guard were ever
+        # removed, the DELETE would actually RUN here (and be detected) instead of
+        # tripping over an exhausted side_effect and being swallowed as an error.
+        removal = _FakeConn(log, [[]])
+        with mock.patch("builtins.input", return_value="ada@example.com"), \
+             mock.patch.object(app, "get_connection",
+                               side_effect=[pick, counts, removal]), \
+             mock.patch.object(app, "require_master_override", return_value=False), \
+             mock.patch.object(app, "log_audit") as audit:
+            app.delete_guest_account()
+        self.assertFalse(_statements_starting_with(log, "DELETE FROM CustomerProfiles"))
+        audit.assert_not_called()
+
+    def test_delete_refuses_when_the_confirmation_does_not_match(self):
+        log = []
+        pick = _FakeConn(log, [[_row(CustomerID=5, LastName="Smith", FirstName="Ada",
+                                     Email="ada@example.com", Phone=None)]])
+        counts = _FakeConn(log, [[(0, 0, 0)]])
+        prompts = iter(["ada@example.com", "wrong-name"])
+        with mock.patch("builtins.input", lambda _="": next(prompts)), \
+             mock.patch.object(app, "get_connection", side_effect=[pick, counts]), \
+             mock.patch.object(app, "require_master_override", return_value=True), \
+             mock.patch.object(app, "log_audit") as audit:
+            app.delete_guest_account()
+        self.assertFalse(_statements_starting_with(log, "DELETE FROM CustomerProfiles"))
+        audit.assert_not_called()
+
+    def test_linking_a_desk_stay_writes_the_link(self):
+        log = []
+        pick = _FakeConn(log, [[_row(CustomerID=5, LastName="Smith", FirstName="Ada",
+                                     Email="ada@example.com", Phone=None)]])
+        listing = _FakeConn(log, [[_row(RoomNumber="1205", LastName="Blake", FirstName="Jo",
+                                        CheckInDate=date(2026, 10, 1),
+                                        CheckOutDate=date(2026, 10, 3))]])
+        linking = _FakeConn(log, [[]])
+        prompts = iter(["ada@example.com", "1", "y"])
+        with mock.patch("builtins.input", lambda _="": next(prompts)), \
+             mock.patch.object(app, "get_connection", side_effect=[pick, listing, linking]), \
+             mock.patch.object(app.ui, "show_table"), \
+             mock.patch.object(app, "log_audit"):
+            app.link_stay_to_guest_account()
+        links = _statements_starting_with(log, "UPDATE Reservations SET CustomerID")
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0][1][0], 5)
+
+    def test_linking_offers_only_stays_not_yet_linked(self):
+        log = []
+        pick = _FakeConn(log, [[_row(CustomerID=5, LastName="Smith", FirstName="Ada",
+                                     Email="ada@example.com", Phone=None)]])
+        listing = _FakeConn(log, [[]])  # every live stay is already linked
+        prompts = iter(["ada@example.com"])
+        with mock.patch("builtins.input", lambda _="": next(prompts)), \
+             mock.patch.object(app, "get_connection", side_effect=[pick, listing]), \
+             mock.patch.object(app.ui, "show_table"), \
+             mock.patch.object(app, "log_audit"):
+            app.link_stay_to_guest_account()
+        self.assertFalse(_statements_starting_with(log, "UPDATE Reservations"))
+
+
 class RebookClearsTheOutgoingGuestTests(unittest.TestCase):
     """The core inheritance bug: a re-let room must not keep the last guest's link."""
 
