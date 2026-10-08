@@ -592,6 +592,68 @@ class CustomerPanelGateTests(unittest.TestCase):
             self.assertIsNone(app.CURRENT_CUSTOMER)
 
 
+class SessionLabelTests(unittest.TestCase):
+    """The "Signed in as" subtitle: what a shared console shows about the live session.
+
+    Display must never raise and never gate -- the gates are customer_login() and
+    validate_room() -- so every failure here degrades to a plainer label.
+    """
+
+    def test_signed_out_says_so_without_touching_the_database(self):
+        with mock.patch.object(app, "CURRENT_CUSTOMER", None), \
+             mock.patch.object(app, "get_connection") as conn:
+            self.assertEqual(app.customer_session_label(), "Not signed in")
+        conn.assert_not_called()
+
+    def test_label_carries_the_name_and_email(self):
+        with mock.patch.object(app, "CURRENT_CUSTOMER", 7), \
+             mock.patch.object(app, "_customer_profile",
+                               return_value=("Smith", "Ada", "ada@example.com")):
+            self.assertEqual(app.customer_session_label(),
+                             "Signed in as Ada Smith (ada@example.com)")
+
+    def test_a_deleted_profile_degrades_to_the_id(self):
+        # The account can be removed by staff while a session is live; the menu
+        # still has to render.
+        with mock.patch.object(app, "CURRENT_CUSTOMER", 7), \
+             mock.patch.object(app, "_customer_profile", return_value=None):
+            self.assertEqual(app.customer_session_label(), "Signed in as guest #7")
+
+    def test_a_name_only_profile_omits_the_email(self):
+        # check_in() upserts name-only profiles, so Email is legitimately NULL.
+        with mock.patch.object(app, "CURRENT_CUSTOMER", 9), \
+             mock.patch.object(app, "_customer_profile",
+                               return_value=("Lovelace", "Ada", None)):
+            self.assertEqual(app.customer_session_label(), "Signed in as Ada Lovelace")
+
+    def test_customer_menu_passes_the_session_to_the_renderer(self):
+        with mock.patch.object(app, "customer_login", return_value=7), \
+             mock.patch.object(app, "customer_session_label",
+                               return_value="Signed in as Ada (ada@example.com)") as label, \
+             mock.patch.object(app, "CURRENT_CUSTOMER", 7), \
+             mock.patch.object(app.ui, "pause"), \
+             mock.patch.object(app.ui, "show_menu") as menu, \
+             mock.patch("builtins.input", return_value="16"):
+            app.customer_panel()
+        label.assert_called_once()
+        self.assertEqual(menu.call_args.kwargs.get("subtitle"),
+                         "Signed in as Ada (ada@example.com)")
+
+    def test_bookings_menu_passes_the_session_to_the_renderer(self):
+        # Evaluated per redraw here (unlike the Customer menu): booking_room() can
+        # register the guest mid-session, and the label must catch up.
+        with mock.patch.object(app, "customer_session_label",
+                               return_value="Not signed in") as label, \
+             mock.patch.object(app, "CURRENT_CUSTOMER", None), \
+             mock.patch.object(app.ui, "pause"), \
+             mock.patch.object(app.ui, "show_menu") as menu, \
+             mock.patch("builtins.input", return_value="4"):
+            app.booking_panel()
+        self.assertGreaterEqual(label.call_count, 1)
+        self.assertEqual(menu.call_args.kwargs.get("subtitle"), "Not signed in")
+        self.assertIsNone(app.CURRENT_CUSTOMER)
+
+
 class RegistrationTests(unittest.TestCase):
     def test_duplicate_email_is_refused(self):
         # The unique filtered index is the real guarantee; this is the friendly guard.

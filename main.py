@@ -2493,6 +2493,29 @@ def _customer_profile(customer_id):
         return None
 
 
+def customer_session_label():
+    """A "Signed in as ..." line for the menu subtitle, or "Not signed in".
+
+    Read through _customer_profile() so every panel shows the identity a shared
+    console is actually holding. A profile that has since been deleted (or an
+    unreachable database) degrades to the bare id rather than raising: this is
+    display for a menu, not a gate -- the gates are customer_login() and
+    validate_room().
+    """
+    if CURRENT_CUSTOMER is None:
+        return "Not signed in"
+    profile = _customer_profile(CURRENT_CUSTOMER)
+    if not profile:
+        return f"Signed in as guest #{CURRENT_CUSTOMER}"
+    last_name, first_name, email = profile
+    name = " ".join(p for p in (first_name, last_name) if p)
+    if email:
+        return f"Signed in as {name} ({email})"
+    if name:
+        return f"Signed in as {name}"
+    return f"Signed in as guest #{CURRENT_CUSTOMER}"
+
+
 def book_room():
     """Public booking wizard: sign in, choose a room TYPE, dates, and pay up front.
 
@@ -2901,7 +2924,7 @@ def booking_panel():
             "2. View My Booking",
             "3. Cancel My Booking",
             "4. Sign Out",
-        ])
+        ], subtitle=customer_session_label())
         choice = input("Enter your choice: ").strip()
         if choice == '1':
             book_room()
@@ -4091,6 +4114,9 @@ def admin_panel():
         admin_panel()
 
     role = str(role).lower()
+    # Shown on this panel's menu and every submenu opened from it: a shared console
+    # must always display which operator account is live.
+    session = f"Signed in as {CURRENT_USER} ({role})"
     while True:
         if role == 'staff':
             ui.pause()
@@ -4113,7 +4139,7 @@ def admin_panel():
                 "12. Post Complimentary Charge (tier perk)",
                 "13. Clearance Card Desk",
                 "14. Exit Admin Panel",
-            ])
+            ], subtitle=session)
         elif role == 'manager':
             ui.pause()
             ui.show_menu("Admin Panel", [
@@ -4151,7 +4177,7 @@ def admin_panel():
                 "---- Other ----",
                 "22. Clearance Card Desk",
                 "23. Exit Admin Panel",
-            ])
+            ], subtitle=session)
         elif role == 'admin':
             ui.pause()
             ui.show_menu("Admin Panel", [
@@ -4206,7 +4232,7 @@ def admin_panel():
                 "---- Other ----",
                 "35. Clearance Card Desk",
                 "36. Exit Admin Panel",
-            ])
+            ], subtitle=session)
         elif role == 'valet':
             logging.info("Enter Valet Panel...")
             ui.pause()
@@ -8013,6 +8039,9 @@ def customer_panel():
             "main menu -- book a room first, or ask the front desk to create your account."
         )
         return
+    # Resolved once here: nothing inside this panel changes the account, and Sign Out
+    # exits the menu, so the label cannot go stale while it is shown.
+    session = customer_session_label()
     while True:
         ui.pause()
         ui.show_menu("Customer Menu", [
@@ -8032,7 +8061,7 @@ def customer_panel():
             "14. My Key Card",
             "15. My Notifications",
             "16. Sign Out",
-        ])
+        ], subtitle=session)
         cust_choice = input("Enter your choice: ").strip()
 
         if cust_choice == '1':
@@ -9556,7 +9585,7 @@ def main():
             "2. Admin",
             "3. Bookings",
             "4. Exit",
-        ])
+        ], subtitle=customer_session_label())
         choice = input("Enter your choice: ").strip()
         if choice == '1':
             customer_panel()

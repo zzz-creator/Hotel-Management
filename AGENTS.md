@@ -81,6 +81,7 @@ New interactive output goes through `ui.py`, never inline `rich`.
 | `tests/test_customer_loyalty.py` | Customer-keyed loyalty (019) and booking-desk login |
 | `tests/test_audit_diffs.py` | The OldValue/NewValue columns `log_audit()` writes (026) |
 | `tests/test_validate_room.py` | The guest identity check |
+| `tests/test_ui.py` | The menu renderer: the `show_menu` subtitle ("Signed in as …") and its markup escaping |
 | `tests/test_onboarding.py` | First-run wizard: the completion marker, the first-account guard, item/room seeding idempotency, room-layout bounds |
 | `tests/test_schema_sync.py` | The schema checker itself — a checker that parses nothing must fail |
 | `tests/test_checkin_window.py` | The half-open reservation-window predicate the check-in gate uses |

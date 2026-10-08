@@ -9,6 +9,7 @@ import os
 from datetime import datetime
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -54,13 +55,21 @@ def box(title, content, border_style="green"):
     console.print(Panel(content, title=title, border_style=border_style))
 
 
-def show_menu(title, lines):
+def show_menu(title, lines, subtitle=None):
     """Render a numbered menu inside a titled panel.
 
     `lines` is a list of strings. Strings of the form ``---- Section ----`` are
     rendered as section headers; ``N. Label`` lines are styled with a bold key.
+
+    `subtitle` is an optional dim line rendered above the entries. Every panel
+    passes "Signed in as ..." through it, so on a shared console whose session
+    is live is visible before anyone picks an option. It is escaped, because a
+    username or email containing ``[`` would otherwise be read as markup.
     """
     rendered = []
+    if subtitle:
+        rendered.append(f"[dim]{escape(subtitle)}[/dim]")
+        rendered.append("")
     for line in lines:
         stripped = line.strip()
         if stripped.startswith("----") and stripped.endswith("----"):
