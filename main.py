@@ -2391,12 +2391,19 @@ def register_customer(email, last_name, first_name, password):
             return None
 
 
-def customer_login():
+def customer_login(allow_register=True):
     """Sign a guest in at the booking desk, registering them on first use.
 
     Returns the CustomerID on success, or None if the guest gave up. A blank email or
     password is never accepted, because both are the only handle the account has: there
     is no "guest" row without them, and a booking always has an owner.
+
+    `allow_register=False` is the Customer menu's gate: an unknown email is REFUSED with
+    "book a room first" rather than registered, and returns None immediately so the panel
+    can bounce the visitor to the main menu. The in-house panel must not sign anyone up --
+    a front-desk guest's account is created by staff, not typed into a public menu by the
+    guest. The default stays True because first-use registration is load-bearing at the
+    Bookings desk: a guest with no account cannot book (docs/BOOKING.md §1).
     """
     global CURRENT_CUSTOMER
     if CURRENT_CUSTOMER is not None:
@@ -2422,6 +2429,13 @@ def customer_login():
             return None
 
         if row is None:
+            if not allow_register:
+                logging.info(
+                    f"No booking account was found for {email}. Book a room first "
+                    "(main menu -> 3. Bookings), or ask the front desk to create your "
+                    "account -- accounts are not created from this menu."
+                )
+                return None
             # First visit. Create the account rather than sending the guest away: a guest
             # with no account cannot book, and a guest who cannot book has no way to be
             # remembered for their next stay.
@@ -7986,7 +8000,19 @@ def search_customer_profiles():
 
 
 def customer_panel():
+    """In-house guest menu. Entry requires a signed-in booking account.
+
+    The gate is what makes "Sign Out" meaningful: nothing inside this menu sets
+    CURRENT_CUSTOMER (every action identifies the guest through validate_room()), so
+    without a login at entry there is no session for Sign Out to end.
+    """
     global CURRENT_CUSTOMER
+    if not customer_login(allow_register=False):
+        logging.info(
+            "A booking account is required to use the Customer menu. Returning to the "
+            "main menu -- book a room first, or ask the front desk to create your account."
+        )
+        return
     while True:
         ui.pause()
         ui.show_menu("Customer Menu", [

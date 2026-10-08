@@ -306,3 +306,28 @@ The exit entries are now labelled **Sign Out** and clear `CURRENT_CUSTOMER`; wit
 one signed-in session `customer_login()` still caches it and never re-prompts.
 `CURRENT_USER` (staff/admin) is unchanged: it remains "last-logged-in user" and is
 never cleared.
+
+## 14. The Customer menu requires a booking account, and never registers one
+
+**Where:** `customer_panel()`'s entry gate, `customer_login(allow_register=False)`.
+**Severity:** an access restriction, deliberate, effective 7 October 2026.
+
+§13 fixed the label but not the state: the Customer menu's Sign Out cleared a
+`CURRENT_CUSTOMER` that **nothing inside that panel had ever set** — every action there
+identifies the guest through `validate_room()`, re-prompting last name + first name + room.
+Signing out cleared a `None`, so on a shared console the entry was decorative and no session
+existed to protect. The panel now prompts `customer_login()` before drawing its menu and
+returns to the main menu when the guest cannot sign in; Sign Out then ends a real session,
+and re-entering re-prompts.
+
+Two decisions inside that gate:
+
+- **An unknown email is refused, not registered.** The message tells the guest to book a
+  room first, or to ask the front desk. First-use registration stays where it is load-
+  bearing — the Bookings desk, where a guest with no account cannot book (BOOKING.md §1) —
+  and an in-house panel must not sign anybody up. Accounts for front-desk guests are
+  created by staff through the Admin Panel.
+- **The gate does not query `Reservations` for a booking.** `Reservations.CustomerID` is
+  NULL for exactly the front-desk and pre-019 stays, so requiring an owned reservation
+  would lock out the guests whose link the desk has not made yet. A message is the whole
+  enforcement; the reservation check was considered and rejected here, not overlooked.

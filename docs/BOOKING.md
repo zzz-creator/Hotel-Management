@@ -20,6 +20,18 @@ out) and is **cached until Sign Out**. The Bookings and Customer menus offer Sig
 clears it; within one signed-in session it is never re-prompted. `book_room()`,
 `view_my_booking()` and `cancel_booking()` all call it first.
 
+**The Customer menu gates on it at entry**: `customer_panel()` calls
+`customer_login(allow_register=False)` before showing anything, and returns the visitor to
+the main menu when it fails. That gate is the whole reason Sign Out there has something to
+end — nothing inside the panel sets `CURRENT_CUSTOMER`, so without the gate the sign-out
+entry cleared a `None` (see DEVIATIONS §14). With `allow_register=False` an unknown email is
+**refused**, not registered: first-use registration belongs to the Bookings desk alone,
+because a guest who cannot book has no account, while an in-house panel must not sign
+anybody up. Front-desk guests get their account from staff instead. The gate deliberately
+does **not** query `Reservations` for a booking: `Reservations.CustomerID` is NULL for
+exactly the front-desk stays, so a reservation check would lock out the guests whose link
+the desk is about to make.
+
 - An unknown email **registers on first use** rather than being turned away: a guest with
   no account cannot book, and therefore has no way to be recognised on a return visit.
 - Blank email or blank password is refused — both are the only handle the account has, and

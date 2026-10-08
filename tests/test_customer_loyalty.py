@@ -531,6 +531,67 @@ mock.patch.object(app, "CURRENT_CUSTOMER", None), \
             self.assertEqual(app.customer_login(), 7)
 
 
+class CustomerPanelGateTests(unittest.TestCase):
+    """The Customer menu's entry gate: a real session, and no account creation.
+
+    The bug behind this: the panel offered Sign Out that cleared a CURRENT_CUSTOMER
+    nothing in the panel had ever set, so sign-out was a no-op. The gate at entry is
+    what gives Sign Out something to end -- and it must refuse, not register.
+    """
+
+    def test_unknown_email_is_refused_not_registered(self):
+        # The in-house panel must not sign anyone up; the front desk creates the
+        # account for a walk-in, and the guest then signs in here.
+        with mock.patch("builtins.input", return_value="nobody@example.com") as prompt, \
+             mock.patch.object(app, "get_connection", return_value=_FakeConn([], [[]])), \
+             mock.patch.object(app, "register_customer") as register, \
+             mock.patch.object(app, "get_customer_login_max_attempts", return_value=3), \
+             mock.patch.object(app, "CURRENT_CUSTOMER", None), \
+             mock.patch.object(app, "log_audit") as audit:
+            self.assertIsNone(app.customer_login(allow_register=False))
+            self.assertIsNone(app.CURRENT_CUSTOMER)
+            # Exactly one prompt: the email. No name/password prompts follow, so no
+            # half-made registration can start.
+            self.assertEqual(prompt.call_count, 1)
+            register.assert_not_called()
+            audit.assert_not_called()
+
+    def test_panel_bounces_to_the_main_menu_when_the_login_fails(self):
+        with mock.patch.object(app, "customer_login", return_value=None) as login, \
+             mock.patch.object(app.ui, "pause") as pause, \
+             mock.patch.object(app.ui, "show_menu") as menu:
+            app.customer_panel()
+        # Vacuity guards: the gate must actually have run, and asked the no-registration
+        # way. A panel that skipped the login entirely would also show no menu here.
+        login.assert_called_once_with(allow_register=False)
+        menu.assert_not_called()
+        pause.assert_not_called()
+
+    def test_sign_out_clears_the_session(self):
+        with mock.patch.object(app, "customer_login", return_value=7), \
+             mock.patch.object(app, "CURRENT_CUSTOMER", 7), \
+             mock.patch.object(app.ui, "pause"), \
+             mock.patch.object(app.ui, "show_menu") as menu, \
+             mock.patch("builtins.input", return_value="16"), \
+             mock.patch.object(app, "log_audit"):
+            app.customer_panel()
+            # Asserted inside the patch: mock.patch.object restores the module global on
+            # exit, so reading it afterwards would only show the value it reset to.
+            self.assertIsNone(app.CURRENT_CUSTOMER)
+        # The menu was rendered before Sign Out, so the gate passed rather than bounced.
+        self.assertGreaterEqual(menu.call_count, 1)
+
+    def test_a_failed_gate_leaves_no_session_behind(self):
+        # Signing in is all-or-nothing: a bounce must not leave CURRENT_CUSTOMER set for
+        # the next visitor at the shared console.
+        with mock.patch.object(app, "customer_login", return_value=None), \
+             mock.patch.object(app, "CURRENT_CUSTOMER", None), \
+             mock.patch.object(app.ui, "pause"), \
+             mock.patch.object(app.ui, "show_menu"):
+            app.customer_panel()
+            self.assertIsNone(app.CURRENT_CUSTOMER)
+
+
 class RegistrationTests(unittest.TestCase):
     def test_duplicate_email_is_refused(self):
         # The unique filtered index is the real guarantee; this is the friendly guard.
