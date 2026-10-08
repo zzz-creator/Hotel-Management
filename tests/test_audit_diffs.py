@@ -17,6 +17,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import main as app
+from patch_main import patch_main
 
 
 class _FakeCursor:
@@ -51,8 +52,8 @@ class _FakeConn:
 class LogAuditDiffTests(unittest.TestCase):
     def _audit(self, **kwargs):
         log = []
-        with mock.patch.object(app, "get_connection", return_value=_FakeConn(log)), \
-             mock.patch.object(app, "CURRENT_USER", "tester"):
+        with patch_main("get_connection", return_value=_FakeConn(log)), \
+             patch_main("CURRENT_USER", "tester"):
             app.log_audit("UPDATE", "Setting", "tax_rate", "tax_rate -> 0.15", **kwargs)
         return log
 

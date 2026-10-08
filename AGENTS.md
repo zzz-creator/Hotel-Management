@@ -45,7 +45,7 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 
 | File | Role |
 |---|---|
-| `main.py` | Entry point and almost everything: menus, reservations, booking desk, billing, loyalty, IT/valet panels, first-run onboarding |
+| `main.py` | Entry point **and compatibility facade**: `handle_cli_args()`, `main()`, the `get_connection = db.get_connection` alias, and the `from <module> import *` re-exports so `import main as app` still reaches every moved name. The application body lives in the domain modules below |
 | `ui.py` | `rich`-based console helpers (menus, tables, prompts, `clear_screen`/`pause`) |
 | `reports.py` | CSV report exports, also a standalone CLI |
 | `db.py` | Connection string + `get_connection()` context manager |
@@ -60,6 +60,33 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 | `LICENSE` | AGPLv3, verbatim from gnu.org. §13 is why this is AGPL and not GPL — a modified copy served over a network must offer its source |
 
 New interactive output goes through `ui.py`, never inline `rich`.
+
+**The `main.py` split** (see [PLAN-split-main-py.md](PLAN-split-main-py.md)). `main.py` was
+one ~9,000-line file; it is now a facade over these modules. Cross-module calls are
+**module-qualified** (`billing.post_room_charge(...)`, `session.CURRENT_USER`) so a test that
+patches the owner module affects every caller, and mutable process state lives in
+`session.py`. `tools/split_main.py` performs the split from the old monolith and is
+re-runnable; it is not part of the runtime.
+
+| Module | Owns |
+|---|---|
+| `core.py` | Config bootstrap (`_ensure_database_config`), `HotelSettings` access (`get_setting`/`_setting_float`), `log_audit`, tax/pricing, and the shared helpers (`validate_room`, `stay_nights`, `upsert_customer_profile`, …) |
+| `session.py` | Process-wide mutable state: `CURRENT_USER`, `CURRENT_CUSTOMER`, `LAST_CARD_DIGITS` and the three cached capability probes. `main.__getattr__` forwards reads here; writers use `session.X = ...` |
+| `rooms.py` | Rooms, room types and rates, housekeeping status, availability |
+| `items.py` | The orderable item catalogue |
+| `loyalty.py` | Loyalty points, tiers, accrual and redemption |
+| `payments.py` | Credit-card entry and validation (`process_credit_card`, `luhn_check`) |
+| `keycards.py` | Key cards and door access |
+| `reservations.py` | Reservations, check-in, the arrivals/departures board |
+| `booking_ledger.py` | Booking-desk money: deposits, prepayments, refunds, booking references |
+| `billing.py` | Check-out, invoices, the room charge, the folio |
+| `orders.py` | F&B and in-room orders |
+| `notifications.py` | In-app notifications and staff alerts |
+| `bookings.py` | The public booking desk |
+| `customer.py` | Guest accounts, sign-in, the guest panel |
+| `concierge.py` | Concierge requests |
+| `admin.py` | The Admin Panel, users, the IT/valet panels |
+| `onboarding.py` | The first-run wizard and setup checklist |
 
 ### Schema
 
@@ -87,6 +114,7 @@ New interactive output goes through `ui.py`, never inline `rich`.
 | `tests/test_schema_sync.py` | The schema checker itself — a checker that parses nothing must fail |
 | `tests/test_checkin_window.py` | The half-open reservation-window predicate the check-in gate uses |
 | `tests/test_clearance.py` | Clearance-card SVG name extraction, the tier×category matrix, role cards |
+| `tests/patch_main.py` | Test helper: `patch_main(name, ...)` resolves the module that owns `name` after the split, so a test patch still reaches every caller (the split's standing risk) |
 | `tests/check_schema_sync.py` | `database.sql` vs migrations (a **script**, not a test) |
 | `tests/check_migration_sql.py` | Static T-SQL lint (a **script**, not a test) |
 | `tests/check_applied_migrations.py` | The **live** database vs `database.sql` (a **script**, not a test) |
@@ -99,7 +127,8 @@ New interactive output goes through `ui.py`, never inline `rich`.
 `PLAN-room-rates-and-folios.md` (room rates, split folio, availability, guest features,
 reports), `PLAN-booking-system.md` (public booking desk), `PLAN-loyalty-per-night.md`,
 `PLAN-wire-up-rooms.md`, `PLAN-test-plan.md`, `PLAN-clearance-cards.md`,
-`PLAN-split-main-py.md` (planned split of `main.py` into domain modules — not yet started).
+`PLAN-split-main-py.md` (the completed split of `main.py` into domain modules — layout,
+rules and risks).
 Approved designs — read the relevant one before reworking a feature it covers.
 
 ---
@@ -291,10 +320,10 @@ parse fine as text. That is the whole argument for §4's scratch database.
 
 ## 5. Conventions
 
-- Top of `main.py` has `# type: ignore`; functions are module-level, no classes.
+- Top of every module has `# type: ignore`; functions are module-level, no classes.
 - Match the existing style: string `f`-format logging, `with get_connection() as conn`
   blocks, and the `conn is None` early-return guard after each DB open.
-- **Do not add an `except` around the `yield` in either `get_connection()`.** Catching there and
+- **Do not add an `except` around the `yield` in `get_connection()`.** Catching there and
   yielding a second time is illegal in a generator: Python replaces the real error with
   `RuntimeError: generator didn't stop after throw()`, hiding the actual message. A
   *connection* failure is already handled by `create_connection()` returning `None` (hence
@@ -302,10 +331,11 @@ parse fine as text. That is the whole argument for §4's scratch database.
   so a missing migration reads as pyodbc's "Invalid column/object name 'X'". Functions that
   must tolerate an unapplied migration (e.g. the `ReservationArchive` read in
   `search_availability()`) wrap **their own body** in `try/except`.
-  There are **two** of these context managers — `db.get_connection()` and an independent copy
-  at `main.py:141`. Only `db`'s is correct. `main`'s catches, logs, and re-yields, so every
-  caller in `main.py` loses the real exception type; see §7 for what that costs. **The rule is
-  about both.**
+  There is exactly **one** such context manager: `db.get_connection()`. `main.py` used to
+  carry a second, broken copy; it is gone, and `main.get_connection` is an alias for `db`'s
+  (see §7). Do not reintroduce a wrapper — every module calls `db.get_connection()`, so a
+  second definition is both unreachable and, as the old one showed, a way to lose the
+  server's own message.
 - `HotelSettings` values are admin-editable free text: every numeric read goes through
   `_setting_float()` / `_setting_int()`, which fall back to a built-in default on a
   blank or non-numeric value. A typo there must never break check-out.
@@ -356,7 +386,10 @@ quietly committing a failure.
 ## 6. Verification
 
 ```powershell
-python -m py_compile main.py db.py reports.py ui.py   # syntax
+python -m py_compile main.py core.py session.py rooms.py items.py loyalty.py `
+    payments.py keycards.py reservations.py booking_ledger.py billing.py orders.py `
+    notifications.py bookings.py customer.py concierge.py admin.py onboarding.py `
+    db.py reports.py ui.py                                    # syntax
 python -m unittest discover -s tests                          # unit tests
 python tests/check_schema_sync.py                             # schema drift
 python tests/check_migration_sql.py                           # T-SQL lint
@@ -505,12 +538,12 @@ mismatch took four of the five scenarios red, reporting `room charges=2` and
 raised inside a `with get_connection()` block reached the caller as
 `RuntimeError: generator didn't stop after throw()` instead of pyodbc's message.
 `db.get_connection()` had the correct shape all along. `main.get_connection` is now a
-plain alias for it (`main.py:141`), so there is one definition, and it is the right one.
+plain alias for it, so there is one definition, and it is the right one.
 
 **What this never was: a broken booking desk.** An earlier version of this section claimed
 `BookingRefTaken` "never fires" because the unique-index violation was swallowed. It did
 fire. Both callers of `record_booking_payment()` pass `conn=` — `_write_booking_charge()`
-(main.py:1736) and `cancel_booking()` (main.py:2757) — so they take the branch that opens
+(in `booking_ledger.py`) and `cancel_booking()` (in `bookings.py`) — so they take the branch that opens
 no connection of its own and never reached the broken copy. The claim came from a
 `verify_e2e.py` assertion that called `record_booking_payment()` *without* `conn`, a path no
 code in `main.py` takes, and read the resulting `None` as a broken production path. The
@@ -557,7 +590,7 @@ more than one `with get_connection()` block:
 |---|---|
 | commit sites | 78, across 61 functions |
 | functions committing in **2+ separate blocks** | **5** |
-| existing explicit rollbacks | **5** (in the booking refund retry loop, `main.py:2555-2583`, `2804`) — not zero, as previously stated |
+| existing explicit rollbacks | **5** (in the booking refund retry loop inside `cancel_booking()`) — not zero, as previously stated |
 | functions where a block commits mid-sequence | **0** |
 
 All five multi-block functions are correct **by design**, and the distinction matters:

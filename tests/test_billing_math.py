@@ -18,6 +18,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import main as app
+from patch_main import patch_main
 import reports
 
 
@@ -95,9 +96,9 @@ class RoomChargeTests(unittest.TestCase):
             def commit(self):
                 pass
 
-        with mock.patch.object(app, "get_connection", return_value=FakeConn()), \
-             mock.patch.object(app, "get_room_type", return_value="Deluxe"), \
-             mock.patch.object(app, "get_nightly_rate", return_value=rate):
+        with patch_main("get_connection", return_value=FakeConn()), \
+             patch_main("get_room_type", return_value="Deluxe"), \
+             patch_main("get_nightly_rate", return_value=rate):
             tx_id = app.post_room_charge("9012", check_in, check_out)
         return tx_id, calls
 
@@ -140,9 +141,9 @@ class RoomChargeTests(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_missing_rate_skips_the_charge(self):
-        with mock.patch.object(app, "get_connection"), \
-             mock.patch.object(app, "get_room_type", return_value="Standard"), \
-             mock.patch.object(app, "get_nightly_rate", return_value=0.0):
+        with patch_main("get_connection"), \
+             patch_main("get_room_type", return_value="Standard"), \
+             patch_main("get_nightly_rate", return_value=0.0):
             self.assertIsNone(app.post_room_charge("9012", datetime(2026, 3, 1, 15, 0),
                                                    datetime(2026, 3, 4, 11, 0)))
 
@@ -214,7 +215,7 @@ class BusinessDateTests(unittest.TestCase):
 
     def test_business_date_ignores_the_stored_setting(self):
         # A stale HotelSettings row must not move the clock.
-        with mock.patch.object(app, "get_setting", return_value="1999-01-01"):
+        with patch_main("get_setting", return_value="1999-01-01"):
             self.assertEqual(app.business_date(), datetime.now().date())
 
 
@@ -400,29 +401,29 @@ class SettingsTests(unittest.TestCase):
     """HotelSettings rows are admin-editable free text, so reads must never raise."""
 
     def test_tax_rate_is_read_as_a_fraction(self):
-        with mock.patch.object(app, "get_setting", return_value="0.0825"):
+        with patch_main("get_setting", return_value="0.0825"):
             self.assertAlmostEqual(app.get_tax_rate(), 0.0825)
 
     def test_tax_rate_falls_back_to_the_default(self):
-        with mock.patch.object(app, "get_setting", return_value=None):
+        with patch_main("get_setting", return_value=None):
             self.assertAlmostEqual(app.get_tax_rate(), 0.13)
 
     def test_garbage_tax_rate_falls_back_instead_of_raising(self):
         # A typo in the settings table must not be able to break check-out.
-        with mock.patch.object(app, "get_setting", return_value="not-a-number"):
+        with patch_main("get_setting", return_value="not-a-number"):
             self.assertAlmostEqual(app.get_tax_rate(), 0.13)
 
     def test_blank_tax_rate_falls_back(self):
-        with mock.patch.object(app, "get_setting", return_value="   "):
+        with patch_main("get_setting", return_value="   "):
             self.assertAlmostEqual(app.get_tax_rate(), 0.13)
 
     def test_garbage_price_factor_falls_back(self):
-        with mock.patch.object(app, "get_setting", return_value="high"):
+        with patch_main("get_setting", return_value="high"):
             self.assertAlmostEqual(app.get_peak_factor(), 1.20)
             self.assertAlmostEqual(app.get_offpeak_factor(), 0.90)
 
     def test_garbage_loyalty_settings_fall_back(self):
-        with mock.patch.object(app, "get_setting", return_value="lots"):
+        with patch_main("get_setting", return_value="lots"):
             self.assertEqual(app.get_loyalty_points_per_night(), 100)
             self.assertEqual(app.get_loyalty_accrual_points_per_unit(),
                              0.5)
@@ -443,18 +444,18 @@ class SettingsTests(unittest.TestCase):
 
     def test_numeric_strings_are_accepted(self):
         # Admins type whole numbers where a float is expected.
-        with mock.patch.object(app, "get_setting", return_value="250"):
+        with patch_main("get_setting", return_value="250"):
             self.assertEqual(app.get_loyalty_points_per_night(), 250)
 
     def test_accrual_rate_keeps_its_fraction(self):
         # The regression: the order rate is a float, and reading it through an int
         # helper turned 0.5 into 0, which would have paid nothing for every order.
-        with mock.patch.object(app, "get_setting", return_value="0.5"):
+        with patch_main("get_setting", return_value="0.5"):
             self.assertEqual(app.get_loyalty_accrual_points_per_unit(), 0.5)
 
     def test_order_rate_is_read_as_a_float(self):
         # "0.5" must not come back as 0.5 -> int(0.5) == 0. The type is load-bearing.
-        with mock.patch.object(app, "get_setting", return_value="0.75"):
+        with patch_main("get_setting", return_value="0.75"):
             value = app.get_loyalty_accrual_points_per_unit()
             self.assertIsInstance(value, float)
             self.assertEqual(value, 0.75)
@@ -462,7 +463,7 @@ class SettingsTests(unittest.TestCase):
     def test_blank_accrual_rate_falls_back_instead_of_paying_nothing(self):
         # A blank setting must fall back to the seeded 0.5. Falling back to 0 would mean
         # a typo in HotelSettings silently switched the whole order programme off.
-        with mock.patch.object(app, "get_setting", return_value="   "):
+        with patch_main("get_setting", return_value="   "):
             self.assertEqual(app.get_loyalty_accrual_points_per_unit(),
                              0.5)
         self.assertGreater(0.5, 0)

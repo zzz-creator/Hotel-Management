@@ -44,7 +44,17 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-CODE_FILES = ('main.py', 'reports.py', 'ui.py', 'db.py')
+CODE_FILES = (
+    'main.py',
+    # The split of main.py into domain modules (see PLAN-split-main-py.md). All of them are
+    # project code, so a function named in the docs may now be defined in any of these.
+    'core.py', 'session.py', 'rooms.py', 'items.py', 'loyalty.py', 'payments.py',
+    'keycards.py', 'reservations.py', 'booking_ledger.py', 'billing.py', 'orders.py',
+    'notifications.py', 'bookings.py', 'customer.py', 'concierge.py', 'admin.py',
+    'onboarding.py',
+    'tests/patch_main.py',
+    'reports.py', 'ui.py', 'db.py',
+)
 DOC_FILES = ('AGENTS.md', 'docs/SCHEMA.md', 'docs/BOOKING.md', 'docs/DEVIATIONS.md',
              'docs/ONBOARDING.md')
 SCHEMA_DOC = 'docs/SCHEMA.md'

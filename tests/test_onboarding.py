@@ -23,6 +23,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import main as app
+from patch_main import patch_main
 
 
 class FakeCursor:
@@ -83,7 +84,7 @@ class FakeConn:
 
 def run_with(log, answers=(), raises=None):
     """Patch get_connection with a recording fake cursor."""
-    return mock.patch.object(app, "get_connection",
+    return patch_main("get_connection",
                              return_value=FakeConn(FakeCursor(log, answers, raises)))
 
 
@@ -99,31 +100,31 @@ class OnboardingMarkerTests(unittest.TestCase):
     """onboarding_completed() gates the wizard, so its failures must resolve to 'run it'."""
 
     def test_absent_marker_means_not_onboarded(self):
-        with mock.patch.object(app, "get_setting", return_value=None):
+        with patch_main("get_setting", return_value=None):
             self.assertFalse(app.onboarding_completed())
 
     def test_blank_marker_means_not_onboarded(self):
-        with mock.patch.object(app, "get_setting", return_value="   "):
+        with patch_main("get_setting", return_value="   "):
             self.assertFalse(app.onboarding_completed())
 
     def test_set_marker_means_onboarded(self):
         for raw in ("1", "true", "Y", "yes"):
-            with mock.patch.object(app, "get_setting", return_value=raw):
+            with patch_main("get_setting", return_value=raw):
                 self.assertTrue(app.onboarding_completed(), raw)
 
     def test_explicit_zero_means_not_onboarded(self):
-        with mock.patch.object(app, "get_setting", return_value="0"):
+        with patch_main("get_setting", return_value="0"):
             self.assertFalse(app.onboarding_completed())
 
     def test_unreadable_settings_does_not_raise(self):
         # migration 023 absent, or HotelSettings locked: refusing to run setup here would
         # strand a fresh install nobody can log into.
-        with mock.patch.object(app, "get_setting", side_effect=RuntimeError("no such table")):
+        with patch_main("get_setting", side_effect=RuntimeError("no such table")):
             self.assertFalse(app.onboarding_completed())
 
     def test_marking_writes_the_one_setting(self):
         log = []
-        with mock.patch.object(app, "set_setting", return_value=True) as setter:
+        with patch_main("set_setting", return_value=True) as setter:
             self.assertTrue(app.mark_onboarding_complete())
         setter.assert_called_once_with(app.ONBOARDING_SETTING, "1")
 
@@ -145,9 +146,9 @@ class EnsureDatabaseConfigTests(unittest.TestCase):
         cfg, path = self._blank_config(tmp)
         answers = iter(["db.example.com", "myhotel", "sa"])
         import io
-        with mock.patch.object(app, "config", cfg), \
-             mock.patch.object(app, "config_path", path), \
-             mock.patch.object(app, "db") as fake_db, \
+        with patch_main("config", cfg), \
+             patch_main("config_path", path), \
+             patch_main("db") as fake_db, \
              mock.patch("builtins.input", lambda prompt="": next(answers)), \
              mock.patch("getpass.getpass", return_value="s3cret"), \
              mock.patch("sys.stdin") as fake_stdin:
@@ -170,8 +171,8 @@ class EnsureDatabaseConfigTests(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         cfg, path = self._blank_config(tmp)
         Path(path).write_text("[database]\nserver =\n", encoding="utf-8")
-        with mock.patch.object(app, "config", cfg), \
-             mock.patch.object(app, "config_path", path), \
+        with patch_main("config", cfg), \
+             patch_main("config_path", path), \
              mock.patch("sys.stdin") as fake_stdin, \
              mock.patch("builtins.input", side_effect=AssertionError("must not prompt")):
             fake_stdin.isatty.return_value = False
@@ -182,9 +183,9 @@ class EnsureDatabaseConfigTests(unittest.TestCase):
         import configparser
         cfg = configparser.ConfigParser()
         cfg.read_dict({"database": {"server": "h", "database": "d", "username": "u", "password": "p"}})
-        with mock.patch.object(app, "config", cfg), \
+        with patch_main("config", cfg), \
              mock.patch("builtins.input", side_effect=AssertionError("must not prompt")), \
-             mock.patch.object(app, "db") as fake_db:
+             patch_main("db") as fake_db:
             app._ensure_database_config()
         fake_db.init.assert_not_called()
 
@@ -193,7 +194,7 @@ class CreateFirstUserTests(unittest.TestCase):
     """The one step the wizard exists for, and the guard that keeps it that way."""
 
     def _create(self, log, answers=(), raises=None, **kwargs):
-        with run_with(log, answers, raises), mock.patch.object(app, "log_audit"):
+        with run_with(log, answers, raises), patch_main("log_audit"):
             return app.create_first_user(**kwargs)
 
     def test_inserts_the_three_columns_add_user_does(self):
@@ -248,10 +249,10 @@ class CreateFirstUserTests(unittest.TestCase):
         # Both onboarding paths make this account. Neither may use role 'master':
         # admin_panel() has no 'master' branch and add_user() offers only a/s/m, so such
         # a row is an account that exists but can never be signed in to.
-        with mock.patch.object(app, "add_user_with_password") as add_user, \
-             mock.patch.object(app, "user_exists", return_value=False), \
-             mock.patch.object(app, "_prompt_new_password", return_value="pw"), \
-             mock.patch.object(app, "setup_status", return_value=ChecklistGatingTests.READY), \
+        with patch_main("add_user_with_password") as add_user, \
+             patch_main("user_exists", return_value=False), \
+             patch_main("_prompt_new_password", return_value="pw"), \
+             patch_main("setup_status", return_value=ChecklistGatingTests.READY), \
              mock.patch.object(app.ui, "pause"):
             with mock.patch("builtins.input",
                             ChecklistGatingTests()._scripted_input(["2", "6"])[0]):
@@ -264,7 +265,7 @@ class CreateFirstUserTests(unittest.TestCase):
                                       username="admin", password="admin"))
 
     def test_no_connection_returns_false(self):
-        with mock.patch.object(app, "get_connection", return_value=None):
+        with patch_main("get_connection", return_value=None):
             self.assertFalse(app.create_first_user("admin", "admin"))
 
 
@@ -274,7 +275,7 @@ class SeedItemsTests(unittest.TestCase):
     def _seed(self, log, names=(), max_id=0, raises=None):
         answers = [("SELECT Name FROM Items", [(n,) for n in names]),
                    ("ISNULL(MAX(ItemID)", (max_id,))]
-        with run_with(log, answers, raises), mock.patch.object(app, "log_audit"):
+        with run_with(log, answers, raises), patch_main("log_audit"):
             return app.seed_default_items()
 
     def test_starts_past_the_highest_existing_id(self):
@@ -389,7 +390,7 @@ class CustomItemEntryTests(unittest.TestCase):
               ("ISNULL(MAX(ItemID)", (max_id,))]
         queue = list(answers)
         with run_with(log, db, raises), \
-             mock.patch.object(app, "log_audit"), \
+             patch_main("log_audit"), \
              mock.patch("builtins.input", lambda prompt="": queue.pop(0) if queue else ""), \
              mock.patch.object(app.ui, "ask_confirmation",
                                side_effect=list(confirmations)):
@@ -476,7 +477,7 @@ class CustomItemEntryTests(unittest.TestCase):
         self.assertEqual(params_for(log, "INSERT INTO Items")[0][1], "Espresso Large")
 
     def test_no_connection_returns_false(self):
-        with mock.patch.object(app, "get_connection", return_value=None):
+        with patch_main("get_connection", return_value=None):
             self.assertFalse(app.add_custom_item())
 
     def test_database_error_returns_false_instead_of_raising(self):
@@ -497,10 +498,10 @@ class OfferItemCatalogueTests(unittest.TestCase):
                 raise value()
             return value
 
-        with mock.patch.object(app, "ui", create=True), \
-             mock.patch.object(app, "seed_default_items",
+        with patch_main("ui", create=True), \
+             patch_main("seed_default_items",
                                return_value=0 if seeds is None else seeds) as seed, \
-             mock.patch.object(app, "add_custom_item", side_effect=list(customs)) as custom, \
+             patch_main("add_custom_item", side_effect=list(customs)) as custom, \
              mock.patch("builtins.input", fake_input):
             total = app._offer_item_catalogue(wizard=wizard)
         return total, seed, custom
@@ -541,7 +542,7 @@ class OfferItemCatalogueTests(unittest.TestCase):
         for wizard, expected in ((True, "Skip for now"), (False, "Cancel -- done adding items")):
             with self.subTest(wizard=wizard):
                 fake_ui = mock.MagicMock()
-                with mock.patch.object(app, "ui", fake_ui), \
+                with patch_main("ui", fake_ui), \
                      mock.patch("builtins.input", lambda prompt="": "3"):
                     app._offer_item_catalogue(wizard=wizard)
                 lines = fake_ui.show_menu.call_args[0][1]
@@ -684,8 +685,8 @@ class SetupStatusTests(unittest.TestCase):
         # the live config.ini is per-machine, so a developer's own values would
         # otherwise decide these assertions.
         with run_with(log, answers, raises), \
-             mock.patch.object(app, "get_loyalty_enabled", return_value=True), \
-             mock.patch.object(app, "get_setting",
+             patch_main("get_loyalty_enabled", return_value=True), \
+             patch_main("get_setting",
                                side_effect=lambda k, d=None: (settings or {}).get(k, d)):
             return dict((label, (done, detail)) for label, done, detail in app.setup_status())
 
@@ -746,16 +747,16 @@ class SetupStatusTests(unittest.TestCase):
         self.assertTrue(checks["Item catalogue"][0])
 
     def test_unreachable_database_marks_everything_not_ready(self):
-        with mock.patch.object(app, "get_connection", return_value=None), \
-             mock.patch.object(app, "get_setting", return_value=None):
+        with patch_main("get_connection", return_value=None), \
+             patch_main("get_setting", return_value=None):
             checks = dict((l, (d, x)) for l, d, x in app.setup_status())
         self.assertFalse(any(done for done, _ in checks.values()))
         self.assertTrue(any("migration" in detail for _done, detail in checks.values()))
 
     def test_loyalty_row_only_appears_when_loyalty_is_on(self):
         answers = self._answers(users=1, master=1, items=1, rooms=1, rated=1)
-        with mock.patch.object(app, "get_loyalty_enabled", return_value=False), \
-             mock.patch.object(app, "get_setting", return_value="2026-10-02"):
+        with patch_main("get_loyalty_enabled", return_value=False), \
+             patch_main("get_setting", return_value="2026-10-02"):
             log = []
             with run_with(log, answers):
                 labels = [l for l, _d, _x in app.setup_status()]
@@ -788,10 +789,10 @@ class ChecklistGatingTests(unittest.TestCase):
 
     def test_manager_gets_the_read_only_view_and_no_action_menu(self):
         fake_input, prompts = self._scripted_input(["1"])
-        with mock.patch.object(app, "setup_status", return_value=self.READY), \
+        with patch_main("setup_status", return_value=self.READY), \
              mock.patch("builtins.input", fake_input), \
-             mock.patch.object(app, "add_user_with_password") as add_user, \
-             mock.patch.object(app, "_offer_item_catalogue") as offer_items:
+             patch_main("add_user_with_password") as add_user, \
+             patch_main("_offer_item_catalogue") as offer_items:
             app.onboarding_checklist("manager")
         add_user.assert_not_called()
         offer_items.assert_not_called()
@@ -799,7 +800,7 @@ class ChecklistGatingTests(unittest.TestCase):
         self.assertEqual(prompts, [])
 
     def test_admin_is_offered_the_actions(self):
-        with mock.patch.object(app, "setup_status", return_value=self.READY), \
+        with patch_main("setup_status", return_value=self.READY), \
              mock.patch("builtins.input", self._scripted_input(["6"])[0]), \
              mock.patch.object(app.ui, "show_menu") as show_menu:
             app.onboarding_checklist("admin")
@@ -808,10 +809,10 @@ class ChecklistGatingTests(unittest.TestCase):
     def test_the_item_action_opens_the_catalogue_menu_not_just_the_seeder(self):
         # An admin with a partially-filled catalogue needs to add their own item, which the
         # bare seed_default_items() call could not do.
-        with mock.patch.object(app, "setup_status", return_value=self.READY), \
+        with patch_main("setup_status", return_value=self.READY), \
              mock.patch("builtins.input", self._scripted_input(["3", "6"])[0]), \
-             mock.patch.object(app, "_offer_item_catalogue", return_value=2) as offer_items, \
-             mock.patch.object(app, "seed_default_items") as seed, \
+             patch_main("_offer_item_catalogue", return_value=2) as offer_items, \
+             patch_main("seed_default_items") as seed, \
              mock.patch.object(app.ui, "pause"):
             app.onboarding_checklist("admin")
         offer_items.assert_called_once_with()
@@ -820,9 +821,9 @@ class ChecklistGatingTests(unittest.TestCase):
     def test_the_catalogue_menu_is_not_opened_as_the_wizard(self):
         # wizard=True would label the exit "Skip for now", which reads wrong from a screen
         # an admin deliberately navigated to.
-        with mock.patch.object(app, "setup_status", return_value=self.READY), \
+        with patch_main("setup_status", return_value=self.READY), \
              mock.patch("builtins.input", self._scripted_input(["3", "6"])[0]), \
-             mock.patch.object(app, "_offer_item_catalogue", return_value=0) as offer_items, \
+             patch_main("_offer_item_catalogue", return_value=0) as offer_items, \
              mock.patch.object(app.ui, "pause"):
             app.onboarding_checklist("admin")
         self.assertNotIn("wizard", offer_items.call_args.kwargs)
@@ -830,11 +831,11 @@ class ChecklistGatingTests(unittest.TestCase):
     def test_admin_adding_an_account_goes_through_the_logged_in_path(self):
         # Not create_first_user(): that one refuses once any account exists, which is
         # right for an unauthenticated wizard and wrong for a logged-in admin.
-        with mock.patch.object(app, "setup_status", return_value=self.READY), \
+        with patch_main("setup_status", return_value=self.READY), \
              mock.patch("builtins.input", self._scripted_input(["1", "bob", "s", "6"])[0]), \
-             mock.patch.object(app, "user_exists", return_value=False), \
-             mock.patch.object(app, "_prompt_new_password", return_value="pw"), \
-             mock.patch.object(app, "add_user_with_password") as add_user, \
+             patch_main("user_exists", return_value=False), \
+             patch_main("_prompt_new_password", return_value="pw"), \
+             patch_main("add_user_with_password") as add_user, \
              mock.patch.object(app.ui, "pause"):
             app.onboarding_checklist("admin")
         add_user.assert_called_once_with("bob", "pw", "staff")
@@ -844,12 +845,12 @@ class ChecklistGatingTests(unittest.TestCase):
         # 'admin' was asking a question it then ignored.
         for letter, expected in (("a", "admin"), ("s", "staff"), ("m", "manager")):
             with self.subTest(role=expected):
-                with mock.patch.object(app, "setup_status", return_value=self.READY), \
+                with patch_main("setup_status", return_value=self.READY), \
                      mock.patch("builtins.input",
                                 self._scripted_input(["1", "bob", letter, "6"])[0]), \
-                     mock.patch.object(app, "user_exists", return_value=False), \
-                     mock.patch.object(app, "_prompt_new_password", return_value="pw"), \
-                     mock.patch.object(app, "add_user_with_password") as add_user, \
+                     patch_main("user_exists", return_value=False), \
+                     patch_main("_prompt_new_password", return_value="pw"), \
+                     patch_main("add_user_with_password") as add_user, \
                      mock.patch.object(app.ui, "pause"):
                     app.onboarding_checklist("admin")
                 add_user.assert_called_once_with("bob", "pw", expected)
@@ -857,28 +858,28 @@ class ChecklistGatingTests(unittest.TestCase):
     def test_only_roles_the_admin_panel_can_render_are_offered(self):
         # admin_panel() branches on staff/manager/admin/valet/it, so offering a role with
         # no branch would create an account nobody can sign in to.
-        with mock.patch.object(app, "setup_status", return_value=self.READY), \
-             mock.patch.object(app, "_prompt_role", return_value="manager") as prompt_role, \
+        with patch_main("setup_status", return_value=self.READY), \
+             patch_main("_prompt_role", return_value="manager") as prompt_role, \
              mock.patch("builtins.input", self._scripted_input(["1", "bob", "m", "6"])[0]), \
-             mock.patch.object(app, "user_exists", return_value=False), \
-             mock.patch.object(app, "_prompt_new_password", return_value="pw"), \
-             mock.patch.object(app, "add_user_with_password"), \
+             patch_main("user_exists", return_value=False), \
+             patch_main("_prompt_new_password", return_value="pw"), \
+             patch_main("add_user_with_password"), \
              mock.patch.object(app.ui, "pause"):
             app.onboarding_checklist("admin")
         prompt_role.assert_called_once()
 
     def test_existing_username_is_not_re_inserted(self):
-        with mock.patch.object(app, "setup_status", return_value=self.READY), \
+        with patch_main("setup_status", return_value=self.READY), \
              mock.patch("builtins.input", self._scripted_input(["1", "bob", "a", "6"])[0]), \
-             mock.patch.object(app, "user_exists", return_value=True), \
-             mock.patch.object(app, "_prompt_new_password", return_value="pw"), \
-             mock.patch.object(app, "add_user_with_password") as add_user, \
+             patch_main("user_exists", return_value=True), \
+             patch_main("_prompt_new_password", return_value="pw"), \
+             patch_main("add_user_with_password") as add_user, \
              mock.patch.object(app.ui, "pause"):
             app.onboarding_checklist("admin")
         add_user.assert_not_called()
 
     def test_role_check_is_case_insensitive(self):
-        with mock.patch.object(app, "setup_status", return_value=self.READY), \
+        with patch_main("setup_status", return_value=self.READY), \
              mock.patch("builtins.input", self._scripted_input(["6"])[0]), \
              mock.patch.object(app.ui, "show_menu") as show_menu:
             app.onboarding_checklist("ADMIN")
@@ -886,7 +887,7 @@ class ChecklistGatingTests(unittest.TestCase):
 
     def test_seven_returns_rather_than_looping_forever(self):
         # The menu must have a way out that does not depend on the database.
-        with mock.patch.object(app, "setup_status", return_value=self.READY), \
+        with patch_main("setup_status", return_value=self.READY), \
              mock.patch("builtins.input", self._scripted_input(["6"])[0]), \
              mock.patch.object(app.ui, "show_menu") as show_menu:
             app.onboarding_checklist("admin")
@@ -899,25 +900,25 @@ class FirstRunGuardsTests(unittest.TestCase):
     def test_marker_absence_drives_the_wizard_not_the_users_table(self):
         # main() asks onboarding_completed(), not "is Users empty". That is what stops the
         # wizard reappearing on a fully-configured database.
-        with mock.patch.object(app, "onboarding_completed", return_value=True), \
-             mock.patch.object(app, "run_first_run_onboarding") as wizard:
-            with mock.patch.object(app, "handle_cli_args", return_value=True):
+        with patch_main("onboarding_completed", return_value=True), \
+             patch_main("run_first_run_onboarding") as wizard:
+            with patch_main("handle_cli_args", return_value=True):
                 app.main()
         wizard.assert_not_called()
 
     def test_a_cli_report_never_runs_the_wizard(self):
         # `python main.py --report revenue` has to stay non-interactive.
-        with mock.patch.object(app, "onboarding_completed", return_value=False), \
-             mock.patch.object(app, "handle_cli_args", return_value=True), \
-             mock.patch.object(app, "run_first_run_onboarding") as wizard:
+        with patch_main("onboarding_completed", return_value=False), \
+             patch_main("handle_cli_args", return_value=True), \
+             patch_main("run_first_run_onboarding") as wizard:
             app.main()
         wizard.assert_not_called()
 
     def test_an_incomplete_setup_runs_the_wizard_before_the_menu(self):
-        with mock.patch.object(app, "onboarding_completed", return_value=False), \
-             mock.patch.object(app, "handle_cli_args", return_value=False), \
-             mock.patch.object(app, "run_first_run_onboarding") as wizard, \
-             mock.patch.object(app, "ui", create=True), \
+        with patch_main("onboarding_completed", return_value=False), \
+             patch_main("handle_cli_args", return_value=False), \
+             patch_main("run_first_run_onboarding") as wizard, \
+             patch_main("ui", create=True), \
              mock.patch("builtins.input", side_effect=KeyboardInterrupt):
             with self.assertRaises(KeyboardInterrupt):
                 app.main()
@@ -968,14 +969,14 @@ class WizardStepGuardsTests(unittest.TestCase):
             self.settings_written.append((key, value))
             return True
 
-        with mock.patch.object(app, "ui", fake_ui), \
-             mock.patch.object(app, "set_setting", record_setting), \
-             mock.patch.object(app, "log_audit"), \
-             mock.patch.object(app, "_offer_item_catalogue", self.catalogue), \
-             mock.patch.object(app, "_offer_room_layout", self.rooms), \
-             mock.patch.object(app, "_offer_hotel_settings", self.settings), \
+        with patch_main("ui", fake_ui), \
+             patch_main("set_setting", record_setting), \
+             patch_main("log_audit"), \
+             patch_main("_offer_item_catalogue", self.catalogue), \
+             patch_main("_offer_room_layout", self.rooms), \
+             patch_main("_offer_hotel_settings", self.settings), \
              mock.patch("builtins.input", lambda prompt="": answer), \
-             mock.patch.object(app, "_prompt_new_password", return_value="pw"), \
+             patch_main("_prompt_new_password", return_value="pw"), \
              run_with([], answers):
             app.run_first_run_onboarding()
         return fake_ui
@@ -1004,7 +1005,7 @@ class WizardStepGuardsTests(unittest.TestCase):
     def test_existing_accounts_skip_login_creation_entirely(self):
         # create_first_user() refuses once any account exists. Retrying it in a loop would
         # spin forever, so the wizard must check first and say why it is skipping.
-        with mock.patch.object(app, "create_first_user") as create:
+        with patch_main("create_first_user") as create:
             self._run(self._answers(users=6, items=15, rooms=138180))
         create.assert_not_called()
 
@@ -1012,7 +1013,7 @@ class WizardStepGuardsTests(unittest.TestCase):
         # The first account must be an admin: an admin is the only role that reaches every
         # Admin Panel section, so a staff or valet bootstrap would lock the hotel out of
         # its own configuration.
-        with mock.patch.object(app, "create_first_user", return_value=True) as create:
+        with patch_main("create_first_user", return_value=True) as create:
             self._run(self._answers(users=0, items=0, rooms=0))
         create.assert_called_once()
         self.assertEqual(create.call_args.args[2], "admin")
@@ -1026,8 +1027,8 @@ class WizardStepGuardsTests(unittest.TestCase):
         # any account exists, so on precisely this database -- accounts present, marker
         # absent, no master -- it would refuse, and the wizard would report a failure for a
         # step the operator had said yes to. Assert the insert that actually works.
-        with mock.patch.object(app, "create_first_user") as create, \
-                mock.patch.object(app, "add_user_with_password", return_value=True) as add:
+        with patch_main("create_first_user") as create, \
+                patch_main("add_user_with_password", return_value=True) as add:
             self._run(self._answers(users=6, items=15, rooms=138180, master=0))
         create.assert_not_called()
         add.assert_called_once_with("master", "pw", "admin")
@@ -1038,8 +1039,8 @@ class WizardStepGuardsTests(unittest.TestCase):
         # insert for the database it is looking at: both orderings, both accounted for.
         for users, expect_first_user in ((0, True), (6, False)):
             with self.subTest(users=users), \
-                    mock.patch.object(app, "create_first_user", return_value=True) as create, \
-                    mock.patch.object(app, "add_user_with_password", return_value=True) as add:
+                    patch_main("create_first_user", return_value=True) as create, \
+                    patch_main("add_user_with_password", return_value=True) as add:
                 self._run(self._answers(users=users, items=0, rooms=0, master=0))
             master_calls = [c for c in create.call_args_list if c.args[0] == "master"]
             self.assertEqual(bool(master_calls), expect_first_user)
@@ -1050,7 +1051,7 @@ class WizardStepGuardsTests(unittest.TestCase):
         # admin_panel() has branches for staff/manager/admin/valet/it and add_user() only
         # offers a/s/m. A 'master'-role row is an account nobody can ever sign in to, and
         # require_master_override() matches on the username alone, so it gains nothing.
-        with mock.patch.object(app, "create_first_user", return_value=True) as create:
+        with patch_main("create_first_user", return_value=True) as create:
             self._run(self._answers(users=0, items=0, rooms=0, master=0))
         for call in create.call_args_list:
             self.assertEqual(call.args[2], "admin")

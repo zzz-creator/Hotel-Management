@@ -203,7 +203,7 @@ hotel-settings step and is editable from Admin → Pricing & Settings. `config.i
 no hotel values at all -- only the database connection.
 
 - `business_date` (023) is an ISO `YYYY-MM-DD` **date string, not a number**.
-  As of 5 October 2026 nothing reads it: `business_date()` in `main.py` and
+  As of 5 October 2026 nothing reads it: `business_date()` in `core.py` and
   `reports.py` return the wall clock, the admin **Business Date** menu and
   `close_day` are gone, and a report for another day takes an explicit date
   or window (`on_date`, `start_date`/`end_date`). Migration 029 (7 October

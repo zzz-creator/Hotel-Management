@@ -604,17 +604,19 @@ def phase_exercise(server, scratch, user, password):
     check_in, check_out = _as_date(check_in), _as_date(check_out)
     info('using stay %s / %s -> %s, customer %s' % (room, check_in, check_out, customer_id))
 
+    import core as coremod
     import db as dbmod
     import main as app
+    import session
 
     scratch_cs = conn_str(server, scratch, user, password)
-    app.CONNECTION_STRING = scratch_cs
-    app.database = scratch
+    coremod.CONNECTION_STRING = scratch_cs
+    coremod.database = scratch
     dbmod.init(scratch_cs)
     # Cached module state that would otherwise answer for a previous database, and the
     # config default, which is allowed to be off. This phase is about the code running at
     # all, so both are set to the permissive value.
-    app._RESERVATIONS_CAPTURED_RATE_SUPPORT = None
+    session._RESERVATIONS_CAPTURED_RATE_SUPPORT = None
 
     # --- how the app reaches the database at all -----------------------------------
     # Two probes, both regression guards for the deletion of main.py's second copy of
@@ -917,7 +919,9 @@ def phase_exercise(server, scratch, user, password):
     phase_rollback_safety(app)
     phase_outstanding_signal(app, biz)
 
-    app._RESERVATIONS_CAPTURED_RATE_SUPPORT = None
+    # Phase 5's cached probe answered for the disposable database; clear it so anything
+    # after this phase re-detects against whatever database it is pointed at.
+    session._RESERVATIONS_CAPTURED_RATE_SUPPORT = None
 
 
 # ------------------------------------------------------- settlement fault injection
@@ -1046,7 +1050,13 @@ def get_connection_mod():
 
 
 def arm_step(app, name):
-    """Replace `app.<name>` with a version that raises once, and return a restore handle.
+    """Replace the module that OWNS `name` with a version that raises once, and return a
+    restore handle.
+
+    `name` is a settlement step (post_room_charge, bill_room_transactions, ...). check_out()
+    calls each through its own module after the split, so patching `app.<name>` -- the value
+    bound once by the star import -- would inject nothing. tests/patch_main.py maps a name to
+    its owner module; resolve it the same way so the wrapper sits on the call site's module.
 
     The wrapper sits OUTSIDE the original function, which matters: five of the six
     settlement helpers have their own `except Exception`, so a failure raised from inside
@@ -1057,7 +1067,9 @@ def arm_step(app, name):
     artefact. Its handler logs one line and returns to the menu, exactly as it would for a
     real database error, which is why a clerk would see check-out simply not finish.
     """
-    original = getattr(app, name)
+    from patch_main import owner_of
+    owner = owner_of(name)
+    original = getattr(owner, name)
     probe = {'fired': False}
 
     def wrapper(*args, **kwargs):
@@ -1066,10 +1078,10 @@ def arm_step(app, name):
             raise InjectedFailure(name)
         return original(*args, **kwargs)
 
-    setattr(app, name, wrapper)
+    setattr(owner, name, wrapper)
 
     def restore():
-        setattr(app, name, original)
+        setattr(owner, name, original)
 
     probe['restore'] = restore
     return probe
@@ -1139,19 +1151,17 @@ def _run_check_out(app, room, last, first, capture=None, **script):
         handler.setFormatter(logging.Formatter('%(message)s'))
         root.addHandler(handler)
         root.setLevel(logging.INFO)
-    had_input = hasattr(app, 'input')
-    saved_input = getattr(app, 'input', None)
-    app.input = answer
+    # Every module calls the builtin input(); main.py used to be the one namespace, so this
+    # harness set `app.input`. After the split that attribute is never read, so patch the
+    # builtin itself and the router reaches every prompt again.
+    import builtins
+    saved_input = builtins.input
+    builtins.input = answer
     try:
         with contextlib.redirect_stdout(sink):
             app.check_out()
     finally:
-        if had_input:
-            app.input = saved_input
-        else:
-            # Back to the builtin: leaving a function in the module namespace would
-            # outlive this scenario and silently answer every later prompt.
-            del app.input
+        builtins.input = saved_input
         if handler is not None:
             root.removeHandler(handler)
         root.setLevel(previous)

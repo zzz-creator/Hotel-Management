@@ -1,12 +1,42 @@
 # PLAN — Split `main.py` into modules
 
-Status: **planned, not started.** Approved 8 October 2026.
+Status: **DONE** (8 October 2026). Approved 8 October 2026.
 Decisions confirmed by the user: Strategy B (clean modules, tests adapted), ~15-file split.
 
-`main.py` is 8,998 lines with 257 functions. This plan moves them into domain modules
-without changing behaviour. Nothing below has been executed yet — start at step 0.
+`main.py` was 8,998 lines with 257 functions. This plan moved them into domain modules
+without changing behaviour. **See the "What actually happened" section at the end for the
+handful of places the build diverged from the design below.**
 
 ---
+
+## What actually happened (deviations from this plan)
+
+- **16 domain modules, not 15.** A `notifications.py` was added: `_concierge_inbox` /
+  `_feedback_inbox` (tier-4 `concierge`) are reached from `admin.py` (tier 5) and the
+  notification helpers are reached from several tiers, so notifications sits on tier 1 and
+  breaks what would otherwise be an `admin ↔ customer` cycle.
+- **`patch_main` resolves ownership from each module's `__all__`**, not from
+  `getattr(app, name).__module__` as sketched in §3.1. After the split `app.<name>` is the
+  star-imported copy, whose `__module__` is the owner — that works for functions, but the
+  `__all__` scan also covers constants and data, and it is what the splitter already had to
+  hand-maintain. `get_connection` → `db`, `config`/`config_path` → `core`, `ui`/`db`
+  (wholesale module patches) → every consuming module, and the session names → `session` are
+  special-cased.
+- **Shadowed module names are aliased.** A local variable can share a module's name (e.g.
+  `_admin_menu` keeps a local list `reservations`; `customer_panel` keeps a string
+  `session`). `tools/split_main.py` detects this and imports the module as
+  `_mod_<name>` for the whole file, so the qualified call cannot read the local.
+- **`_RESERVATIONS_CAPTURED_RATE_SUPPORT` stayed in class-3 `reservations.py`**, not
+  `session.py` as §3.1 implied; `_RESERVATION_PAYMENTS_PARTIAL_SUPPORT` and
+  `_INVOICES_PREPAID_SUPPORT` live in `session.py` with the rest of the mutable state.
+- **The splitter is `tools/split_main.py`**, AST-driven, and regenerates every module from
+  the old monolith. The split is done, so `main.py` is now the facade and the tool reads its
+  input from `--source` (default `main.py`); re-running means `git show
+  pre-main-split:main.py > main.py` first, then restoring the facade. It refuses to run
+  against a file with fewer than 200 top-level defs, so a forgotten restore fails loudly.
+
+---
+
 
 ## 0. Revert point (before any code moves)
 

@@ -17,6 +17,8 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import main as app
+from patch_main import patch_main
+import session
 
 
 class BookingQuoteTests(unittest.TestCase):
@@ -361,8 +363,8 @@ class _FakeCursor:
 class BookingPaymentRowTests(unittest.TestCase):
     def test_payment_is_written_with_the_card_last_four_only(self):
         log = []
-        with mock.patch.object(app, "get_connection", return_value=_FakeConn(log)), \
-             mock.patch.object(app, "LAST_CARD_DIGITS", "4242"):
+        with patch_main("get_connection", return_value=_FakeConn(log)), \
+             patch_main("LAST_CARD_DIGITS", "4242"):
             pid = app.record_booking_payment("9012", "BK-ABC123", date(2026, 3, 1),
                                              app.PAYMENT_KIND_DEPOSIT, 226.0, nights_covered=1)
         self.assertEqual(pid, 77)
@@ -374,16 +376,16 @@ class BookingPaymentRowTests(unittest.TestCase):
 
     def test_no_card_leaves_cardlast4_null(self):
         log = []
-        with mock.patch.object(app, "get_connection", return_value=_FakeConn(log)), \
-             mock.patch.object(app, "LAST_CARD_DIGITS", None):
+        with patch_main("get_connection", return_value=_FakeConn(log)), \
+             patch_main("LAST_CARD_DIGITS", None):
             app.record_booking_payment("9012", "BK-ABC123", date(2026, 3, 1),
                                        app.PAYMENT_KIND_PREPAYMENT, 678.0)
         self.assertIsNone(log[0][1][6])
 
     def test_refund_is_stored_negative(self):
         log = []
-        with mock.patch.object(app, "get_connection", return_value=_FakeConn(log)), \
-             mock.patch.object(app, "LAST_CARD_DIGITS", None):
+        with patch_main("get_connection", return_value=_FakeConn(log)), \
+             patch_main("LAST_CARD_DIGITS", None):
             app.record_booking_payment("9012", "BK-ABC123", date(2026, 3, 1),
                                        app.PAYMENT_KIND_REFUND, -226.0)
         # A refund first looks up the original charge's card, so the INSERT is not log[0].
@@ -394,7 +396,7 @@ class BookingPaymentRowTests(unittest.TestCase):
     def test_caller_transaction_is_used_and_not_committed_here(self):
         log = []
         conn = _FakeConn(log)
-        with mock.patch.object(app, "LAST_CARD_DIGITS", None):
+        with patch_main("LAST_CARD_DIGITS", None):
             app.record_booking_payment("9012", "BK-ABC123", date(2026, 3, 1),
                                        app.PAYMENT_KIND_DEPOSIT, 10.0, conn=conn)
         self.assertEqual(len(log), 1)
@@ -402,7 +404,7 @@ class BookingPaymentRowTests(unittest.TestCase):
 
     def test_non_numeric_amount_is_refused_without_touching_the_database(self):
         log = []
-        with mock.patch.object(app, "get_connection", return_value=_FakeConn(log)):
+        with patch_main("get_connection", return_value=_FakeConn(log)):
             self.assertIsNone(app.record_booking_payment("9012", "BK-ABC123", date(2026, 3, 1),
                                                          app.PAYMENT_KIND_DEPOSIT, "free"))
         self.assertEqual(log, [], "a bad amount must not insert a row")
@@ -411,13 +413,13 @@ class BookingPaymentRowTests(unittest.TestCase):
         # A room is re-let after every check-out, so the credit must be tied to the
         # exact stay that paid it, never to the room alone.
         log = []
-        saved = app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT
-        app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = None
+        saved = session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT
+        session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = None
         try:
-            with mock.patch.object(app, "get_connection", return_value=_FakeConn(log)):
+            with patch_main("get_connection", return_value=_FakeConn(log)):
                 app.get_outstanding_booking_credit("9012", date(2026, 3, 1))
         finally:
-            app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = saved
+            session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = saved
         sql, params = log[0]
         self.assertIn("StayCheckIn = ?", sql)
         # Credit is a per-row REMAINDER, not "rows not yet used", so a partly-consumed
@@ -463,7 +465,7 @@ class BookingRefUniquenessTests(unittest.TestCase):
         # The caller has to be able to tell "mint another" from "the payment failed".
         log = []
         conn = _FakeConn(log)
-        with mock.patch.object(app, "record_booking_payment",
+        with patch_main("record_booking_payment",
                                side_effect=app.BookingRefTaken("BK-AAAAAA")):
             self.assertIsNone(app._write_booking_charge(conn, "9012", "BK-AAAAAA",
                                                         date(2026, 3, 1), "Deposit", 100.0, 1))
@@ -477,30 +479,30 @@ class BookingRefUniquenessTests(unittest.TestCase):
                 raise app.BookingRefTaken(args[1])
             return 5
 
-        with mock.patch.object(app, "record_booking_payment", side_effect=_fake), \
-             mock.patch.object(app, "new_booking_ref", return_value="BK-BBBBBB"):
+        with patch_main("record_booking_payment", side_effect=_fake), \
+             patch_main("new_booking_ref", return_value="BK-BBBBBB"):
             used = app._write_booking_charge(_FakeConn([]), "9012", "BK-AAAAAA",
                                               date(2026, 3, 1), "Deposit", 100.0, 1)
         self.assertEqual(calls, ["BK-AAAAAA", "BK-BBBBBB"])
         self.assertEqual(used, "BK-BBBBBB")
 
     def test_it_gives_up_rather_than_spinning_forever(self):
-        with mock.patch.object(app, "record_booking_payment",
+        with patch_main("record_booking_payment",
                                side_effect=app.BookingRefTaken("BK-AAAAAA")), \
-             mock.patch.object(app, "new_booking_ref", return_value="BK-BBBBBB"):
+             patch_main("new_booking_ref", return_value="BK-BBBBBB"):
             self.assertIsNone(app._write_booking_charge(
                 _FakeConn([]), "9012", "BK-AAAAAA", date(2026, 3, 1), "Deposit", 100.0, 1))
 
     def test_the_first_attempt_reuses_the_reference_already_shown_to_the_guest(self):
         # book_room() mints the reference before the transaction, so the retry must not
         # silently swap in a different one on the first pass.
-        with mock.patch.object(app, "record_booking_payment", return_value=5):
+        with patch_main("record_booking_payment", return_value=5):
             used = app._write_booking_charge(_FakeConn([]), "9012", "BK-AAAAAA",
                                               date(2026, 3, 1), "Deposit", 100.0, 1)
         self.assertEqual(used, "BK-AAAAAA")
 
     def test_a_failed_write_is_not_retried_as_if_the_reference_were_taken(self):
-        with mock.patch.object(app, "record_booking_payment", return_value=None):
+        with patch_main("record_booking_payment", return_value=None):
             self.assertIsNone(app._write_booking_charge(
                 _FakeConn([]), "9012", "BK-AAAAAA", date(2026, 3, 1), "Deposit", 100.0, 1))
 
@@ -509,9 +511,9 @@ class BookingRefCardAttributionTests(unittest.TestCase):
     """A reversal must name the card the booking was charged to, not the last one used."""
 
     def setUp(self):
-        self._saved = app.LAST_CARD_DIGITS
-        app.LAST_CARD_DIGITS = "9999"
-        self.addCleanup(lambda: setattr(app, "LAST_CARD_DIGITS", self._saved))
+        self._saved = session.LAST_CARD_DIGITS
+        session.LAST_CARD_DIGITS = "9999"
+        self.addCleanup(lambda: setattr(session, "LAST_CARD_DIGITS", self._saved))
 
     def _recorded_card(self, kind):
         log = []
@@ -648,11 +650,11 @@ class BookingCreditApplyTests(unittest.TestCase):
     def setUp(self):
         # These tests exercise the post-020 path; the negative control below re-latches
         # the pre-020 fallback explicitly.
-        self._saved = app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT
-        app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = None
+        self._saved = session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT
+        session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = None
 
     def tearDown(self):
-        app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = self._saved
+        session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = self._saved
 
     def test_nothing_is_touched_when_there_is_no_credit(self):
         log = []
@@ -688,7 +690,7 @@ class BookingCreditApplyTests(unittest.TestCase):
     def test_legacy_shape_marks_rows_whole(self):
         # Pre-020 there is no AppliedAmount, so check-out must still settle the credit
         # rather than leave it claimable forever.
-        app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = False
+        session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = False
         log = []
         touched = app.apply_booking_credit("9012", date(2026, 3, 1), 226.0, 12, _FakeConn(log))
         self.assertEqual(touched, 2)
@@ -708,14 +710,14 @@ class BookingCreditApplyTests(unittest.TestCase):
 
 class OutstandingCreditFallbackTests(unittest.TestCase):
     def setUp(self):
-        self._saved = app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT
-        app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = None
+        self._saved = session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT
+        session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = None
 
     def tearDown(self):
-        app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = self._saved
+        session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = self._saved
 
     def test_missing_applied_amount_falls_back_to_the_whole_row_sum(self):
-        app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = False
+        session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = False
         log = []
         app.get_outstanding_booking_credit("9012", date(2026, 3, 1), _FakeConn(log, sums=[300.0]))
         sql, _params = log[0]
@@ -724,29 +726,29 @@ class OutstandingCreditFallbackTests(unittest.TestCase):
     def test_a_missing_column_error_latches_the_legacy_path(self):
         conn = _FakeConn([], sums=[0.0], raise_missing_column=True)
         app.get_outstanding_booking_credit("9012", date(2026, 3, 1), conn)
-        self.assertIs(app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT, False)
+        self.assertIs(session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT, False)
 
     def test_an_unrelated_error_is_not_latched_as_a_missing_column(self):
         # A deadlock must not pin the process to the legacy path for the rest of the run.
-        app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = None
+        session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = None
         conn = _FakeConn([], sums=[0.0], raise_missing_column="The connection is busy.")
         self.assertEqual(app.get_outstanding_booking_credit("9012", date(2026, 3, 1), conn), 0.0)
-        self.assertIsNone(app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT)
+        self.assertIsNone(session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT)
 
     def test_only_a_column_error_latches(self):
-        app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = None
+        session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = None
         for message, should_latch in (
             ("Invalid column name 'AppliedAmount'.", True),
             ("Invalid object name 'ReservationPayments'.", True),
             ("The connection is busy.", False),
             ("Timeout expired.", False),
         ):
-            app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = None
+            session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT = None
             app._set_partial_credit_unsupported(RuntimeError(message))
             if should_latch:
-                self.assertIs(app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT, False, message)
+                self.assertIs(session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT, False, message)
             else:
-                self.assertIsNone(app._RESERVATION_PAYMENTS_PARTIAL_SUPPORT, message)
+                self.assertIsNone(session._RESERVATION_PAYMENTS_PARTIAL_SUPPORT, message)
 
 
 class CardInputHardeningTests(unittest.TestCase):
@@ -762,16 +764,16 @@ class CardInputHardeningTests(unittest.TestCase):
     def test_bad_card_cancels_payment_and_records_no_digits(self):
         with mock.patch("builtins.input",
                         mock.Mock(side_effect=["nope", "12/2030", "123"])):
-            with mock.patch.object(app, "LAST_CARD_DIGITS", "9999"):
+            with patch_main("LAST_CARD_DIGITS", "9999"):
                 self.assertFalse(app.process_credit_card(10.0))
-        self.assertIsNone(app.LAST_CARD_DIGITS,
+        self.assertIsNone(session.LAST_CARD_DIGITS,
                           "a declined card must not leave stale digits behind")
 
     def test_good_card_records_only_last_four(self):
         with mock.patch("builtins.input",
                         mock.Mock(side_effect=["4111111111111111", "12/2030", "123"])):
             self.assertTrue(app.process_credit_card(10.0))
-        self.assertEqual(app.LAST_CARD_DIGITS, "1111")
+        self.assertEqual(session.LAST_CARD_DIGITS, "1111")
 
     def test_expiry_must_be_a_real_month(self):
         self.assertTrue(app.validate_expiration_date("12/2030"))

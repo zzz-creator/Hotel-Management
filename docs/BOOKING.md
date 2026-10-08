@@ -4,7 +4,7 @@ The public booking desk (`booking_panel()` on the main menu, "3. Bookings", **no
 login**) and the customer-keyed loyalty program.
 
 **Read this before** touching `book_room()`, `view_my_booking()`, `cancel_booking()`,
-`customer_login()`, anything under the loyalty section of `main.py`, or
+`customer_login()`, anything in `loyalty.py`, or
 `reports.py`'s loyalty export. The rules here exist because each one has a real defect
 behind it; "fixing" one typically reintroduces that defect.
 
@@ -120,7 +120,7 @@ because there is nothing to decline.
 
 ## 3. The money rules (pure, unit-tested)
 
-All four live in `main.py` with no database access, and are covered by
+All four live in `booking_ledger.py` with no database access, and are covered by
 `tests/test_booking.py`. **Keep them pure** — that is what makes the money testable.
 
 **`booking_quote(nights, nightly_rate, tax_rate)`** → `{nights, nightly_rate, tax_rate,
@@ -423,8 +423,8 @@ had to be arranged rather than read off the fixtures.
 
 `check_out()` is five steps in sequence, each committing on its own connection. The obvious
 remedy is to wrap them in one transaction, and that is the wrong remedy here for a reason
-recorded in the code: `bill_room_transactions()` prompts for point redemption at
-`main.py:5713`, and the comment at `main.py:6139-6142` says the room charge posts **first**
+recorded in the code: `bill_room_transactions()` prompts for point redemption, and the
+comment on `check_out()` (both in `billing.py`) says the room charge posts **first**
 precisely so that a declined card can be retried without re-posting it. A transaction
 spanning a console prompt would hold locks across human think-time and destroy that retry. So
 the property worth having is not atomicity, it is **resumability**: an interrupted settlement
@@ -497,7 +497,7 @@ again, and `verify_e2e.py` asserts it.
 
 **Fixed 3 October 2026: `main.get_connection()` was a duplicate that swallowed every database error.** It caught, logs, and re-yielded — the exact shape AGENTS.md §5 forbids, in a copy at `main.py` rather than the correct one in `db.py`. Because a generator cannot yield after a `throw`, every error raised inside a `with get_connection()` block reached the caller as `RuntimeError: generator didn't stop after throw()`. `main.get_connection` is now a plain alias for `db.get_connection`, so there is one definition and it is the correct one. A failing statement now escapes as `pyodbc.ProgrammingError` carrying the server's own message; a failed *connect* still yields `None`, which is what the `conn is None` guards exist for.
 
-**This never affected the booking desk, and an earlier version of this section said it did.** Both callers pass `conn=` — `_write_booking_charge()` and `cancel_booking()` — which takes the branch that opens no connection of its own and never reached the broken copy. The retry loop described in §2 has always worked, and `verify_e2e.py` asserts it against a real server. The earlier claim came from an assertion that called `record_booking_payment()` *without* `conn`, a path no code in `main.py` takes; that file contradicted itself on the point, and §2 was right.
+**This never affected the booking desk, and an earlier version of this section said it did.** Both callers pass `conn=` — `_write_booking_charge()` and `cancel_booking()` — which takes the branch that opens no connection of its own and never reached the broken copy. The retry loop described in §2 has always worked, and `verify_e2e.py` asserts it against a real server. The earlier claim came from an assertion that called `record_booking_payment()` *without* `conn`, a path no production caller takes (the two callers above pass one); `main.py`'s docstring contradicted §2 on the point, and §2 was right.
 
 Two things did **not** get fixed by this, and both were mispriced while it was open:
 

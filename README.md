@@ -86,7 +86,7 @@ python tests/check_applied_migrations.py    # the live server vs database.sql
 
 | File | Role |
 |---|---|
-| `main.py` | Entry point and most of the app: menus, reservations, billing, loyalty, booking desk, onboarding |
+| `main.py` | Entry point and compatibility facade; the app body is split by domain across `core.py`, `session.py`, `rooms.py`, `items.py`, `loyalty.py`, `payments.py`, `keycards.py`, `reservations.py`, `booking_ledger.py`, `billing.py`, `orders.py`, `notifications.py`, `bookings.py`, `customer.py`, `concierge.py`, `admin.py`, `onboarding.py` |
 | `ui.py` | `rich` console helpers — menus, tables, prompts |
 | `reports.py` | CSV exports, also a standalone CLI |
 | `db.py` | Connection string and the `get_connection()` context manager |

@@ -19,6 +19,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import main as app
+from patch_main import patch_main
 
 _STAFF = {
     "add_reservation", "view_reservations", "edit_reservation", "delete_reservation",
@@ -172,8 +173,8 @@ class AdminPanelTests(unittest.TestCase):
     """admin_panel() drives the data menu; role stubs are unchanged."""
 
     def test_staff_sees_the_category_menu_and_exits(self):
-        with mock.patch.object(app, "admin_login", return_value=(True, "staff", False)), \
-             mock.patch.object(app, "CURRENT_USER", "desk01"), \
+        with patch_main("admin_login", return_value=(True, "staff", False)), \
+             patch_main("CURRENT_USER", "desk01"), \
              mock.patch.object(app.ui, "pause"), \
              mock.patch.object(app.ui, "show_menu") as menu, \
              mock.patch("builtins.input", return_value="5"):
@@ -183,11 +184,11 @@ class AdminPanelTests(unittest.TestCase):
         self.assertEqual(menu.call_args.kwargs.get("subtitle"), "Signed in as desk01 (staff)")
 
     def test_choosing_a_category_opens_its_submenu(self):
-        with mock.patch.object(app, "admin_login", return_value=(True, "staff", False)), \
-             mock.patch.object(app, "CURRENT_USER", "desk01"), \
+        with patch_main("admin_login", return_value=(True, "staff", False)), \
+             patch_main("CURRENT_USER", "desk01"), \
              mock.patch.object(app.ui, "pause"), \
              mock.patch.object(app.ui, "show_menu"), \
-             mock.patch.object(app, "_run_admin_submenu") as submenu, \
+             patch_main("_run_admin_submenu") as submenu, \
              mock.patch("builtins.input", side_effect=["1", "5"]):
             app.admin_panel()
         submenu.assert_called_once()
@@ -195,16 +196,16 @@ class AdminPanelTests(unittest.TestCase):
         self.assertEqual(submenu.call_args[0][2], "Signed in as desk01 (staff)")
 
     def test_valet_runs_its_panel_without_a_menu(self):
-        with mock.patch.object(app, "admin_login", return_value=(True, "valet", False)), \
+        with patch_main("admin_login", return_value=(True, "valet", False)), \
              mock.patch.object(app.ui, "pause"), \
              mock.patch.object(app.ui, "show_menu") as menu, \
-             mock.patch.object(app, "valet_vehicle_management") as flow:
+             patch_main("valet_vehicle_management") as flow:
             app.admin_panel()
         flow.assert_called_once()
         menu.assert_not_called()
 
     def test_an_unknown_role_gets_a_message_not_a_menu(self):
-        with mock.patch.object(app, "admin_login", return_value=(True, "janitor", False)), \
+        with patch_main("admin_login", return_value=(True, "janitor", False)), \
              mock.patch.object(app.ui, "pause"), \
              mock.patch.object(app.ui, "show_menu") as menu:
             app.admin_panel()
@@ -217,9 +218,9 @@ class AdminPanelTests(unittest.TestCase):
         # inner session draws exactly one, and a fallen-through outer frame draws a
         # second. A third admin_login would also be a fall-through, but "11" exits
         # the admin menu before one is needed, so the menu count is the real pin.
-        with mock.patch.object(app, "admin_login",
+        with patch_main("admin_login",
                                side_effect=[(False, "admin", True), (True, "admin", False)]) as login, \
-             mock.patch.object(app, "CURRENT_USER", "desk01"), \
+             patch_main("CURRENT_USER", "desk01"), \
              mock.patch.object(app.ui, "pause"), \
              mock.patch.object(app.ui, "show_menu") as menu, \
              mock.patch("builtins.input", return_value="11"):

@@ -159,8 +159,8 @@ sit in a file.
 
 ## 9. A declined card after a point redemption — fixed 4 October 2026
 
-**Where:** `bill_room_transactions()` — redemption now at `main.py:5786`, deduction inside
-the invoice transaction at `main.py:5874`. `redeem_points_for_invoice()` is the new helper.
+**Where:** `bill_room_transactions()` — the redemption deduction now runs inside the invoice
+transaction (in `billing.py`). `redeem_points_for_invoice()` is the new helper.
 **Severity:** was a real money defect. Fixed.
 
 Two facts combined badly. `redeem_points_by_customer()` committed immediately and was the
@@ -181,7 +181,7 @@ the real `check_out()` with a redemption of 500 points and a card that fails the
 
 **Fixed by deferring the deduction.** The prompt still happens where it did, but it now only
 records the *intent*; the points come off in the same transaction that inserts the invoice,
-which is exactly what `apply_booking_credit()` (`main.py:5810`) already did for the same
+which is exactly what `apply_booking_credit()` (in `booking_ledger.py`) already did for the same
 reason. The deduction carries `SourceID = 'redeem:{invoice_id}'`, so it is self-checking in
 the same way as `award_stay_points()`'s guard, and a repeat is detectable rather than
 silent.
@@ -206,8 +206,8 @@ posts before payment on purpose.
 
 ## 10. A failed check-out leaves residue — now reported, not prevented
 
-**Where:** `check_out()` steps at `main.py:6308-6319`; `settlement_outstanding()` at
-`main.py:6177`, `announce_settlement_outstanding()` at `main.py:6238`.
+**Where:** `check_out()`, `settlement_outstanding()` and `announce_settlement_outstanding()`
+all in `billing.py`.
 **Severity:** the residue was real and silent. Now reported. The *prevention* is still a
 deliberate non-goal — see below.
 
@@ -244,7 +244,7 @@ sharpest entry in the table above.
 
 The reorder was **not** applied, because it trades this residue for a worse one rather than
 removing it. `post_room_charge()` runs first *specifically* so a declined card can be
-retried (`main.py:6304-6307`); the same reasoning applies with more force to key revocation.
+retried (see `docs/BOOKING.md` §6); the same reasoning applies with more force to key revocation.
 Revoke first and a declined card leaves a guest who has not paid, is still in the room, and
 now cannot open their own door — with the bill still unsettled. There is no ordering of five
 non-atomic steps that leaves nothing behind; the only question is which residue you would
@@ -280,7 +280,8 @@ console has no out-of-band channel, a wrong *error* must not strand a paying gue
 
 ## 12. Every menu pauses before redraw — convention, effective 5 October 2026
 
-**Where:** each menu loop in `main.py`, plus `ui.pause()`.
+**Where:** each menu loop in the domain modules (`admin.py`, `customer.py`,
+`bookings.py`, …), plus `ui.pause()`.
 **Severity:** cosmetic, but load-bearing for the harness.
 
 A handled option used to print its result and then the loop immediately cleared or

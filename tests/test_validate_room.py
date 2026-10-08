@@ -19,6 +19,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import main as app
+from patch_main import patch_main
 
 
 class FakeRow:
@@ -99,7 +100,7 @@ def run_validate(answers, db=None, prompt_limit=30):
             raise TooManyPrompts(f"too many prompts (last was {prompt!r})")
         return next(it, "")
 
-    with mock.patch.object(app, "get_connection", side_effect=db.connection), \
+    with patch_main("get_connection", side_effect=db.connection), \
          mock.patch.object(builtins, "input", fake_input), \
          mock.patch.object(app.time, "sleep", lambda _s: None):
         result = app.validate_room()
@@ -182,7 +183,7 @@ class ValidateRoomTests(unittest.TestCase):
     def test_cap_constant_is_consulted_at_call_time(self):
         # Proves the cap is genuinely read per call rather than hard-coded to 3, so
         # changing VALIDATE_ROOM_MAX_ATTEMPTS really changes the guest experience.
-        with mock.patch.object(app, "VALIDATE_ROOM_MAX_ATTEMPTS", 5):
+        with patch_main("VALIDATE_ROOM_MAX_ATTEMPTS", 5):
             result, prompts = run_validate(["Smith", "Wrong", "9012"] * 5)
         self.assertEqual(result, (None, None))
         self.assertEqual(len(prompts), 15)
