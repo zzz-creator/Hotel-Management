@@ -1,6 +1,6 @@
 # PLAN: Web/API edition alongside the console
 
-**Status:** approved 9 October 2026. Phases 1-3 shipped; phase 4 (pilot endpoints) is next.
+**Status:** approved 9 October 2026. Phases 1-4 shipped; phase 5 (expand) is next.
 
 ## Goal
 
@@ -147,7 +147,14 @@ Each phase is one coherent, signed commit with the checks green.
       de-globalisation piece is `payments.validate_card()`, returning `(ok, reason, last4)`
       and never writing `session.LAST_CARD_DIGITS`; `create_booking` already takes the
       digits explicitly via `card_last4`.
-- [ ] Phase 4 — pilot endpoints + Pydantic models
+- [x] Phase 4 — pilot endpoints + Pydantic models
+      Shipped (commit 3): the six pilot endpoints (login/logout/me, availability,
+      bookings, check-in) in api.py with schemas.py. The booking quote is computed
+      server-side identically to the wizard, pay_kind is required (a booking must be
+      backed by a ReservationPayments row), the card gate is payments.validate_card,
+      and the audit actor comes from auth.audit_actor(principal). Endpoint tests live
+      in tests/test_api.py (TestClient, services patched) ahead of the phase-6 test
+      pass.
 - [ ] Phase 5 — expand to remaining domains + reports
 - [ ] Phase 6 — API tests + docs/file-map updates
 
