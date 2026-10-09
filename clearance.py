@@ -130,24 +130,61 @@ def _role_for_username(cursor, username):
 
 
 def _guest_for_room(cursor, room_number):
+    """The room's current occupant.
+
+    Returns `{card, room_type, tier, name}`, or None when the room is not in
+    `Rooms`. `name` is the guest on the live reservation (the person at the door),
+    so the desk can identify the *customer* rather than repeat the room number.
+
+    The tier is read for the stay's customer when the stay is linked
+    (`Reservations.CustomerID`), so the name and tier on the display describe the
+    same person. An unlinked front-desk stay with no `CustomerID` falls back to the
+    account's last-room pointer -- `LoyaltyAccounts.RoomNumber` -- which is how this
+    resolved before 019 re-keyed loyalty to the customer.
+    """
     cursor.execute("SELECT RoomType FROM Rooms WHERE RoomNumber = ?", (room_number,))
     r = cursor.fetchone()
     if not r:
         return None
     room_type = r[0]
     cursor.execute(
-        "SELECT TOP 1 Tier FROM LoyaltyAccounts WHERE RoomNumber = ?",
+        "SELECT LastName, FirstName, CustomerID FROM Reservations WHERE RoomNumber = ?",
         (room_number,),
     )
+    stay = cursor.fetchone()
+    last, first, customer_id = stay if stay else (None, None, None)
+    name = " ".join(part for part in ((first or "").strip(),
+                                      (last or "").strip()) if part) or None
+    if customer_id:
+        cursor.execute("SELECT Tier FROM LoyaltyAccounts WHERE CustomerID = ?", (customer_id,))
+    else:
+        cursor.execute(
+            "SELECT TOP 1 Tier FROM LoyaltyAccounts WHERE RoomNumber = ?", (room_number,)
+        )
     row = cursor.fetchone()
     tier = row[0] if row and row[0] else None
-    if tier is None:
-        return {"card": VISITOR, "room_type": room_type, "tier": None}
     return {
-        "card": guest_card_key(tier, room_type),
+        "card": VISITOR if tier is None else guest_card_key(tier, room_type),
         "room_type": room_type,
         "tier": tier,
+        "name": name,
     }
+
+
+def guest_subject(guest, room_number=None):
+    """The line the clearance desk shows for a resolved room.
+
+    It names the **customer** and their **loyalty status**; it deliberately does not
+    repeat the room number, which the operator already typed (and which identifies a
+    room, not a person). A room with no live guest reads as such -- there is no
+    customer to name.
+    """
+    name = (guest or {}).get("name")
+    if not name:
+        return "No guest checked in"
+    tier = (guest or {}).get("tier")
+    loyalty = f"{tier} tier" if tier else "no loyalty account"
+    return f"Customer: {name}    Loyalty: {loyalty}"
 
 
 def lookup(scanned):
@@ -168,12 +205,7 @@ def lookup(scanned):
                 return clearance_for_role(role), f"{scanned} ({role})"
             guest = _guest_for_room(cursor, scanned)
             if guest:
-                label = f"room {scanned}"
-                if guest["tier"]:
-                    label += f", {guest['tier']} tier, {guest['room_type']}"
-                else:
-                    label += ", no loyalty account"
-                return guest["card"], label
+                return guest["card"], guest_subject(guest, scanned)
             return None, f"no user or room matching '{scanned}'"
     except Exception as exc:
         logging.error(f"clearance lookup failed: {exc}")
