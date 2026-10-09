@@ -14,6 +14,7 @@ import rooms
 
 __all__ = [
     'book_room',
+    'create_booking',
     '_find_booking',
     '_own_booking',
     'view_my_booking',
@@ -22,6 +23,123 @@ __all__ = [
 ]
 
 
+
+
+def _console_card_capture(amount):
+    """The console's card step, shaped for create_booking(): process the card and hand
+    back (ok, last4). The digits come from the process global because process_credit_card
+    stores them there; the web path will pass a non-interactive validator instead
+    (PLAN-web-api.md phases 3-4)."""
+    logging.info(f"Total to charge now: ${amount:,.2f}")
+    if not payments.process_credit_card(amount):
+        return False, None
+    return True, session.LAST_CARD_DIGITS
+
+
+def create_booking(customer_id, last_name, first_name, room_type, check_in, check_out,
+                   pay_kind=None, pay_amount=0.0, card_processor=None, actor=None, limit=5):
+    """Non-interactive public-booking transaction: claim a room, take the payment, commit.
+
+    The twin the web path calls and the console wizard delegates to (PLAN-web-api.md
+    phase 2). One definition of the money-first/reservation-second rule:
+
+      - candidate rooms come from search_availability() on the same dates;
+      - each candidate is claimed with `_book_reservation_in_conn()` (same-transaction
+        room-type revalidation, captured rate, archive-and-re-let);
+      - the payment row is written only after a room is claimed, and the whole thing
+        commits as one transaction, so a declined card can never leave a held room and a
+        held room is never committed without its payment row;
+      - `pay_kind`/`pay_amount` are the caller's chosen booking_payment_options() entry,
+        so the web prices identically to the wizard. `pay_kind=None` records no charge.
+
+    `card_processor(pay_amount)` is the ONE interactive step, injected so the service
+    itself never prompts: the console passes `_console_card_capture`, the web path will
+    pass a validator that returns (ok, last4) from the request's card fields. It runs
+    between the claim and the payment write; a False answer rolls the claim back.
+    A positive `pay_amount` with no `card_processor` is a programming error.
+
+    Returns {status, ...}:
+      ok            booking_ref, room_number, room_type, nightly_rate (the captured rate
+                    check-out will bill), card_last4
+      no_type       no room OF THE TYPE is free for the window at all
+      no_room       candidates existed but none could be claimed (reasons: first 3)
+      declined      the card processor refused; everything rolled back
+      payment_error the payment row could not be written; everything rolled back
+      commit_failed commit raised (error)
+      unavailable   no database connection
+    """
+    if pay_kind and float(pay_amount or 0.0) > 0 and card_processor is None:
+        raise ValueError("create_booking: a positive pay_amount needs a card_processor")
+    nights = core.stay_nights(check_in, check_out)
+    if nights <= 0:
+        return {"status": "no_type", "reasons": ["the stay is not at least one night long"]}
+
+    candidates = reservations.search_availability(check_in, check_out,
+                                                  room_type=room_type, limit=limit)
+    if not candidates:
+        return {"status": "no_type",
+                "reasons": [f"no {room_type} rooms are available for {check_in} to {check_out}"]}
+
+    booking_ref = booking_ledger.new_booking_ref()
+    claimed = None
+    reasons = []
+    card_last4 = None
+    with db.get_connection() as conn:
+        if conn is None:
+            return {"status": "unavailable"}
+        for room_number, _rt, _status in candidates:
+            try:
+                ok, reason = reservations._book_reservation_in_conn(
+                    conn, room_number, last_name, first_name, check_in, check_out,
+                    customer_id=customer_id, room_type=room_type)
+            except Exception as e:
+                # Most likely the room was claimed by someone else first: Reservations
+                # is keyed on RoomNumber, so the insert collides. Try the next candidate.
+                reasons.append(f"room {room_number}: {e}")
+                continue
+            if ok:
+                claimed = room_number
+                break
+            reasons.append(reason)
+        if claimed is None:
+            conn.rollback()
+            return {"status": "no_room", "reasons": reasons[:3]}
+        # Money first, reservation second: a declined card must not leave a held room.
+        # The payment row is written even when the amount is $0 (a zero-rated room), so
+        # every confirmed booking is findable by its reference.
+        if pay_kind:
+            if float(pay_amount or 0.0) > 0:
+                capture = card_processor(pay_amount)
+                paid, card_last4 = capture if isinstance(capture, tuple) else (bool(capture), None)
+                if not paid:
+                    conn.rollback()
+                    return {"status": "declined"}
+            booking_ref = booking_ledger._write_booking_charge(
+                conn, claimed, booking_ref, check_in, pay_kind, pay_amount,
+                nights if pay_kind == booking_ledger.PAYMENT_KIND_PREPAYMENT
+                else min(booking_ledger.BOOKING_DEPOSIT_NIGHTS, nights),
+                card_last4=card_last4)
+            if booking_ref is None:
+                conn.rollback()
+                return {"status": "payment_error"}
+        try:
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            return {"status": "commit_failed", "error": str(e)}
+
+    core.log_audit("CREATE", "Reservation", claimed,
+                   f"Public booking {booking_ref}: {last_name} {first_name}, customer {customer_id}, "
+                   f"{room_type}, {check_in} to {check_out}, prepay={pay_kind or 'none'}",
+                   user=actor)
+    rooms.upsert_room_if_missing(claimed, room_type=room_type)
+    # Read the LOCKED rate back off the row rather than returning the quote's: the quote
+    # was priced before the transaction opened, and an admin could have re-priced the
+    # category in the gap. This is the number check-out will bill.
+    locked_rate = rooms.stay_nightly_rate(rooms.get_captured_nightly_rate(claimed),
+                                          rooms.get_nightly_rate(room_type))
+    return {"status": "ok", "booking_ref": booking_ref, "room_number": claimed,
+            "room_type": room_type, "nightly_rate": locked_rate, "card_last4": card_last4}
 
 
 def book_room():
@@ -122,70 +240,47 @@ def book_room():
         return
     _choice, _label, pay_kind, pay_amount = options[pay_choice - 1]
 
-    booking_ref = booking_ledger.new_booking_ref()
-    claimed = None
-    reasons = []
-    with db.get_connection() as conn:
-        if conn is None:
-            logging.info("Database connection failed. No booking was made.")
-            return
-        for room_number, _rt, _status in candidates:
-            try:
-                ok, reason = reservations._book_reservation_in_conn(
-                    conn, room_number, last_name, first_name, check_in, check_out,
-                    customer_id=customer_id, room_type=room_type)
-            except Exception as e:
-                # Most likely the room was claimed by someone else first: Reservations
-                # is keyed on RoomNumber, so the insert collides. Try the next candidate.
-                reasons.append(f"room {room_number}: {e}")
-                continue
-            if ok:
-                claimed = room_number
-                break
-            reasons.append(reason)
-        if claimed is None:
-            conn.rollback()
-            logging.info("We could not hold a room for those dates. Please try different dates.")
-            for r in reasons[:3]:
-                logging.info(f"  - {r}")
-            return
-        # Money first, reservation second: a declined card must not leave a held room.
-        # The payment row is written even when the amount is $0 (a zero-rated room), so
-        # every confirmed booking is findable by its reference.
-        if pay_kind:
-            if pay_amount > 0:
-                logging.info(f"Total to charge now: ${pay_amount:,.2f}")
-                if not payments.process_credit_card(pay_amount):
-                    conn.rollback()
-                    logging.info("Payment was declined, so the room has not been held. Nothing was charged.")
-                    return
-            else:
-                logging.info("The deposit comes to $0.00, so no card is needed.")
-            booking_ref = booking_ledger._write_booking_charge(
-                conn, claimed, booking_ref, check_in, pay_kind, pay_amount,
-                nights if pay_kind == booking_ledger.PAYMENT_KIND_PREPAYMENT
-                else min(booking_ledger.BOOKING_DEPOSIT_NIGHTS, nights))
-            if booking_ref is None:
-                conn.rollback()
-                logging.info("Could not record the payment, so the booking was cancelled. Nothing was charged.")
-                return
-        try:
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            logging.error(f"Could not save the booking: {e}")
-            return
-
-    core.log_audit("CREATE", "Reservation", claimed,
-              f"Public booking {booking_ref}: {last_name} {first_name}, customer {customer_id}, "
-              f"{room_type}, {check_in} to {check_out}, prepay={pay_kind or 'none'}")
-    rooms.upsert_room_if_missing(claimed, room_type=room_type)
+    # The claim-and-pay transaction lives in create_booking(), the non-interactive twin
+    # the web path calls (PLAN-web-api.md phase 2); this adapter supplies the inputs and
+    # renders the outcome. The one message that used to print mid-transaction for a $0
+    # option prints here, before the call: the service itself never prompts.
+    if pay_kind and float(pay_amount or 0.0) <= 0:
+        logging.info("The deposit comes to $0.00, so no card is needed.")
+    result = create_booking(
+        customer_id=customer_id, last_name=last_name, first_name=first_name,
+        room_type=room_type, check_in=check_in, check_out=check_out,
+        pay_kind=pay_kind, pay_amount=pay_amount,
+        card_processor=_console_card_capture if (pay_kind and float(pay_amount or 0.0) > 0) else None,
+        actor=session.CURRENT_USER)
+    if result["status"] == "unavailable":
+        logging.info("Database connection failed. No booking was made.")
+        return
+    if result["status"] == "no_type":
+        logging.info(f"No {room_type} rooms are available for {check_in} to {check_out}.")
+        return
+    if result["status"] == "no_room":
+        logging.info("We could not hold a room for those dates. Please try different dates.")
+        for r in result["reasons"]:
+            logging.info(f"  - {r}")
+        return
+    if result["status"] == "declined":
+        logging.info("Payment was declined, so the room has not been held. Nothing was charged.")
+        return
+    if result["status"] == "payment_error":
+        logging.info("Could not record the payment, so the booking was cancelled. Nothing was charged.")
+        return
+    if result["status"] == "commit_failed":
+        logging.error(f"Could not save the booking: {result.get('error')}")
+        return
 
     # Read the LOCKED rate back off the row rather than reusing the quote's: the quote
     # was priced before the transaction opened, and an admin could have re-priced the
     # category in the gap. This is the number check-out will bill, so the confirmation
     # shows the one that is actually going to be charged.
-    locked_rate = rooms.stay_nightly_rate(rooms.get_captured_nightly_rate(claimed), nightly_rate)
+    booking_ref = result["booking_ref"]
+    claimed = result["room_number"]
+    locked_rate = result["nightly_rate"]
+    card_last4 = result.get("card_last4")
     if locked_rate != round(float(nightly_rate), 2):
         logging.info(f"Note: the {room_type} rate is now ${locked_rate:,.2f} per night, "
                      f"which is the rate locked in for this booking.")
@@ -205,8 +300,8 @@ def book_room():
             lines.append(f"Estimated balance at check-out: ${remaining['balance_due']:,.2f}")
         elif remaining["credit_unused"] > 0:
             lines.append(f"Estimated credit to refund if unused: ${remaining['credit_unused']:,.2f}")
-        if session.LAST_CARD_DIGITS:
-            lines.append(f"Card ending {session.LAST_CARD_DIGITS}")
+        if card_last4:
+            lines.append(f"Card ending {card_last4}")
     else:
         lines.append(f"Payment: ${quote['total']:,.2f} due at check-out")
     lines.append(f"Your ${locked_rate:,.2f} per night is the rate you will be billed at check-out.")

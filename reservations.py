@@ -10,6 +10,7 @@ import ui
 import core
 import keycards
 import loyalty
+import session
 import rooms as _mod_rooms
 
 __all__ = [
@@ -30,6 +31,8 @@ __all__ = [
     'view_reservations',
     'search_reservations',
     'link_reservation_customer',
+    'check_in_eligibility',
+    'perform_check_in',
     'check_in',
 ]
 
@@ -801,6 +804,128 @@ def link_reservation_customer(room_number, customer_id):
         return False
 
 
+def check_in_eligibility(room_number, today=None):
+    """Non-interactive check-in pre-flight: is this stay inside its reservation window?
+
+    The console adapter runs this BEFORE prompting for contact details, so a guest
+    whose check-in will be refused is never asked for anything (that is how the old
+    flow read the gate). The web path skips it -- perform_check_in() re-checks the
+    window itself as its first step.
+
+    Returns {"ok": True}, or {"ok": False, "reason": "window", "check_in": ...,
+    "check_out": ..., "today": ...} when the stay exists but its window is not active.
+    A missing reservation row or an unreachable database returns {"ok": False,
+    "reason": "no_stay" | "unavailable"}; the console treats those two the way the
+    original flow did, i.e. it still attempts the check-in, because validate_room()
+    certified the stay a moment earlier.
+    """
+    today = today or core.business_date()
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return {"ok": False, "reason": "unavailable"}
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT CheckInDate, CheckOutDate FROM Reservations WHERE RoomNumber = ?",
+                (room_number,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return {"ok": False, "reason": "no_stay"}
+            if not core.reservation_window_active(row.CheckInDate, row.CheckOutDate, today):
+                return {"ok": False, "reason": "window",
+                        "check_in": row.CheckInDate, "check_out": row.CheckOutDate,
+                        "today": today}
+            return {"ok": True}
+    except Exception as e:
+        logging.error(f"Error checking check-in window: {e}")
+        return {"ok": False, "reason": "unavailable"}
+
+
+def perform_check_in(room_number, first_name, email=None, phone=None, actor=None):
+    """Non-interactive check-in state changes for a known stay.
+
+    The twin the web path calls and the console adapter delegates to (PLAN-web-api.md
+    phase 2). Mirrors check_in()'s STATE, not its screen: the window gate, the
+    room -> "Occupied" status, the customer-profile upsert and stay link, and the key
+    card, then ONE audit row naming `actor` instead of the process global. Every later
+    step is best-effort the same way the original was -- a key-card failure must not
+    fail the check-in.
+
+    Returns:
+      {"ok": True, "room_number": ..., "key_card": str|None, "customer_id": int|None}
+      {"ok": False, "reason": "window", "check_in": ..., "check_out": ..., "today": ...}
+
+    `email`/`phone` are the contact fields the console prompts for between the gate and
+    this call (hence the separate check_in_eligibility() pre-flight); the web path
+    passes them straight from the request. A stay is still linked to a name-only
+    profile when both are blank, exactly as the console flow did.
+    """
+    today = core.business_date()
+    try:
+        with db.get_connection() as conn:
+            if conn is not None:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT CheckInDate, CheckOutDate FROM Reservations WHERE RoomNumber = ?",
+                    (room_number,),
+                )
+                row = cursor.fetchone()
+                if row and not core.reservation_window_active(row.CheckInDate, row.CheckOutDate, today):
+                    return {"ok": False, "reason": "window",
+                            "check_in": row.CheckInDate, "check_out": row.CheckOutDate,
+                            "today": today}
+        # A valid stay: now it is real state, mark the room occupied on check-in.
+        _mod_rooms.set_room_status(room_number, "Occupied")
+    except Exception as e:
+        logging.error(f"Error syncing room status on check-in: {e}")
+    # Capture or refresh the guest's contact details in CustomerProfiles.
+    customer_id = None
+    try:
+        with db.get_connection() as conn:
+            if conn is not None:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT LastName, FirstName FROM Reservations WHERE RoomNumber = ?",
+                    (room_number,),
+                )
+                res = cursor.fetchone()
+                if res:
+                    last_name = res.LastName or ""
+                    guest_first = res.FirstName or first_name
+                    customer_id = core.upsert_customer_profile(last_name, guest_first, email, phone)
+                    if customer_id:
+                        # A front-desk or pre-019 stay has no customer link yet. Now
+                        # that the profile exists, attach it so the stay's points are
+                        # credited to this person instead of to the room.
+                        link_reservation_customer(room_number, customer_id)
+    except Exception as e:
+        logging.error(f"Error saving customer profile on check-in: {e}")
+    # Issue the guest's key card, expiring at the reservation's check-out.
+    key_card = None
+    try:
+        with db.get_connection() as conn:
+            guest_last = None
+            if conn is not None:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT LastName FROM Reservations WHERE RoomNumber = ?", (room_number,)
+                )
+                res = cursor.fetchone()
+                if res:
+                    guest_last = res[0]
+        key_card = keycards.issue_key_card(room_number, guest_last, first_name)
+    except Exception as e:
+        key_card = None
+        logging.error(f"Error issuing key card on check-in: {e}")
+    core.log_audit("UPDATE", "Reservation", room_number,
+              f"Check-in completed for {first_name}"
+              + (f" (key card {key_card})" if key_card else ""),
+              user=actor)
+    return {"ok": True, "room_number": room_number, "key_card": key_card,
+            "customer_id": customer_id}
+
+
 def check_in():
     """Handle customer check-in using validate_room and display amenities."""
     room_number, first_name = core.validate_room()  # Assume validate_room returns (room_number, first_name)
@@ -811,70 +936,35 @@ def check_in():
         time.sleep(2)
         logging.info("Finalizing check-in...")
         time.sleep(1)
-        try:
-            with db.get_connection() as conn:
-                if conn is not None:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT CheckInDate, CheckOutDate FROM Reservations WHERE RoomNumber = ?", (room_number,))
-                    row = cursor.fetchone()
-                    if row:
-                        today = core.business_date()
-                        if not core.reservation_window_active(row.CheckInDate, row.CheckOutDate, today):
-                            logging.info(
-                                f"Check-in refused: today ({today}) is outside the reservation's "
-                                f"date window ({row.CheckInDate} to {row.CheckOutDate}). "
-                                "Please verify the stay dates before checking in."
-                            )
-                            return
-            # A valid stay: now it is real state, mark the room occupied on check-in.
-            _mod_rooms.set_room_status(room_number, "Occupied")
-        except Exception as e:
-            logging.error(f"Error syncing room status on check-in: {e}")
-        # Capture or refresh the guest's contact details in CustomerProfiles.
-        try:
-            with db.get_connection() as conn:
-                if conn is not None:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT LastName, FirstName FROM Reservations WHERE RoomNumber = ?",
-                        (room_number,),
-                    )
-                    res = cursor.fetchone()
-                    if res:
-                        last_name = res.LastName or ""
-                        guest_first = res.FirstName or first_name
-                        email = input("Please enter your email (optional, press Enter to skip): ").strip() or None
-                        phone = input("Please enter your phone number (optional, press Enter to skip): ").strip() or None
-                        customer_id = core.upsert_customer_profile(last_name, guest_first, email, phone)
-                        if customer_id:
-                            # A front-desk or pre-019 stay has no customer link yet. Now
-                            # that the profile exists, attach it so the stay's points are
-                            # credited to this person instead of to the room.
-                            link_reservation_customer(room_number, customer_id)
-                            logging.info("Contact details saved to your customer profile.")
-                        else:
-                            logging.info("Could not save contact details at this time.")
-        except Exception as e:
-            logging.error(f"Error saving customer profile on check-in: {e}")
-        # Issue the guest's key card, expiring at the reservation's check-out.
-        try:
-            with db.get_connection() as conn:
-                guest_last = None
-                if conn is not None:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT LastName FROM Reservations WHERE RoomNumber = ?", (room_number,)
-                    )
-                    res = cursor.fetchone()
-                    if res:
-                        guest_last = res[0]
-            key_card = keycards.issue_key_card(room_number, guest_last, first_name)
-        except Exception as e:
-            key_card = None
-            logging.error(f"Error issuing key card on check-in: {e}")
-        core.log_audit("UPDATE", "Reservation", room_number,
-                  f"Check-in completed for {first_name}"
-                  + (f" (key card {key_card})" if key_card else ""))
+        # The window gate runs BEFORE the contact prompts -- a guest whose check-in
+        # will be refused is never asked for their details. The state changes happen
+        # in perform_check_in(), which re-checks the gate for the web path.
+        gate = check_in_eligibility(room_number)
+        if not gate["ok"] and gate["reason"] == "window":
+            logging.info(
+                f"Check-in refused: today ({gate['today']}) is outside the reservation's "
+                f"date window ({gate['check_in']} to {gate['check_out']}). "
+                "Please verify the stay dates before checking in."
+            )
+            return
+        email = input("Please enter your email (optional, press Enter to skip): ").strip() or None
+        phone = input("Please enter your phone number (optional, press Enter to skip): ").strip() or None
+        result = perform_check_in(room_number, first_name, email=email, phone=phone,
+                                  actor=session.CURRENT_USER)
+        if not result["ok"]:
+            # The gate moved against us between the pre-flight and the transaction;
+            # say so and stop, exactly as the original gate did.
+            logging.info(
+                f"Check-in refused: today ({result['today']}) is outside the reservation's "
+                f"date window ({result['check_in']} to {result['check_out']}). "
+                "Please verify the stay dates before checking in."
+            )
+            return
+        if result["customer_id"]:
+            logging.info("Contact details saved to your customer profile.")
+        else:
+            logging.info("Could not save contact details at this time.")
+        key_card = result["key_card"]
         logging.info("Room number and key card are being prepared...")
         time.sleep(2)
         logging.info(f"Your room number is {room_number}.")

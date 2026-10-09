@@ -116,6 +116,7 @@ re-runnable; it is not part of the runtime.
 | `tests/test_checkin_window.py` | The half-open reservation-window predicate the check-in gate uses |
 | `tests/test_clearance.py` | Clearance-card SVG name extraction, the tier×category matrix, role cards |
 | `tests/test_keycards.py` | The key-card panel shared by check-in and "My Key Card": the card number and stay details it shows |
+| `tests/test_web_services.py` | The Phase-2 web-facing services (PLAN-web-api.md): `verify_staff_login`, `authenticate_customer`, `create_booking`, `check_in_eligibility` / `perform_check_in`, the `card_last4` ledger parameter |
 | `tests/patch_main.py` | Test helper: `patch_main(name, ...)` resolves the module that owns `name` after the split, so a test patch still reaches every caller (the split's standing risk) |
 | `tests/check_schema_sync.py` | `database.sql` vs migrations (a **script**, not a test) |
 | `tests/check_migration_sql.py` | Static T-SQL lint (a **script**, not a test) |

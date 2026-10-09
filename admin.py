@@ -29,6 +29,7 @@ __all__ = [
     'clear_lockout',
     'edit_user',
     'admin_login',
+    'verify_staff_login',
     'add_user',
     'delete_user',
     'view_users',
@@ -115,6 +116,75 @@ def edit_user():
         logging.error(f"Error editing user: {e}")
 
 
+def verify_staff_login(username, password):
+    """Non-interactive staff credential check and lockout bookkeeping (the login service).
+
+    The twin the web path calls and the console adapter delegates to (PLAN-web-api.md
+    phase 2). One definition of the lockout rule: the counter writes, the lockout
+    timestamp and the audit rows all live here, with the actor named explicitly instead
+    of read from the process global.
+
+    Returns a status dict:
+      {"status": "ok", "role": role}                    -- password matched; counters
+                                                           reset; LOGIN audit written.
+      {"status": "not_found"}                            -- no such account.
+      {"status": "locked", "lockout_time": when}         -- account currently locked.
+      {"status": "bad_password", "attempts": n, "role": role}
+                                                        -- wrong password, still under
+                                                           the threshold.
+      {"status": "lockout", "attempts": n, "role": role, "lockout_time": when}
+                                                        -- wrong password and now locked
+                                                           out; LOCKOUT audit written.
+      {"status": "unavailable"}                          -- database unreachable.
+
+    The service does NOT set session.CURRENT_USER: the console adapter sets the process
+    global on success, the web path issues a cookie instead. The master-override branch
+    of the old flow is console-only (it reads Y/N and the master secret), so the adapter
+    keeps it and reuses clear_lockout() for the unlock write.
+    """
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return {"status": "unavailable"}
+            cursor = conn.cursor()
+            cursor.execute("SELECT Password, FailedAttempts, LockoutTime, Role FROM Users WHERE Username = ?", (username,))
+            user = cursor.fetchone()
+            if not user:
+                return {"status": "not_found"}
+
+            db_password, failed_attempts, lockout_time, role = user
+
+            # Check if the user is currently locked out
+            if lockout_time and lockout_time > datetime.now():
+                return {"status": "locked", "lockout_time": lockout_time}
+
+            # Validate the entered password
+            if password == db_password:
+                # Reset failed attempts and lockout time
+                cursor.execute("UPDATE Users SET FailedAttempts = 0, LockoutTime = NULL WHERE Username = ?", (username,))
+                conn.commit()
+                core.log_audit("LOGIN", "User", username, f"Role {role}", user=username)
+                return {"status": "ok", "role": role}
+            failed_attempts = (failed_attempts or 0) + 1
+            core.log_audit("LOGIN_FAILED", "User", username,
+                      f"Failed attempt {failed_attempts}/{core.get_lockout_threshold()}", user=username)
+            # Lock out the user after exceeding the threshold
+            if failed_attempts >= core.get_lockout_threshold():
+                lockout_time = datetime.now() + timedelta(minutes=core.get_lockout_duration())
+                cursor.execute("UPDATE Users SET FailedAttempts = ?, LockoutTime = ? WHERE Username = ?", (failed_attempts, lockout_time, username))
+                conn.commit()
+                core.log_audit("LOCKOUT", "User", username,
+                          f"Locked until {lockout_time} after {failed_attempts} failed attempts", user=username)
+                return {"status": "lockout", "attempts": failed_attempts,
+                        "role": role, "lockout_time": lockout_time}
+            cursor.execute("UPDATE Users SET FailedAttempts = ? WHERE Username = ?", (failed_attempts, username))
+            conn.commit()
+            return {"status": "bad_password", "attempts": failed_attempts, "role": role}
+    except Exception as e:
+        logging.error(f"Error during login: {e}")
+        return {"status": "unavailable"}
+
+
 def admin_login():
     """Handle admin login with a grace period for lockout, displaying a warning before the final lockout."""
     while True:
@@ -122,67 +192,44 @@ def admin_login():
             username = input("Enter admin username: ").strip()
             password = getpass.getpass("Enter admin password: ").strip()
 
-            with db.get_connection() as conn:
-                if conn is None:
-                    logging.error("Database connection failed during login.")
+            # The credential check and lockout bookkeeping live in verify_staff_login();
+            # this adapter keeps the prompts, messages and the master-override branch.
+            result = verify_staff_login(username, password)
+            status = result.get("status")
+            if status == "unavailable":
+                logging.error("Database connection failed during login.")
+                return False, None, False
+            if status == "not_found":
+                logging.info("Username not found.")
+                continue
+            if status == "locked":
+                logging.info(f"Account is locked until {result['lockout_time']}. Please try again later.")
+                continue
+            if status == "ok":
+                logging.info("Login successful!")
+                _mod_session.CURRENT_USER = username
+                return True, result["role"], False  # Return role and reauthentication status
+            # bad_password and lockout share the per-attempt message; the warning and the
+            # override branch belong to the lockout case only.
+            attempts = result["attempts"]
+            threshold = core.get_lockout_threshold()
+            logging.info(f"Invalid credentials. Attempt {attempts}/{threshold}.")
+            if attempts == threshold - 1:
+                logging.info("Warning: One more failed attempt will lock you out.")
+            if status == "bad_password":
+                continue
+            logging.info("Maximum login attempts exceeded. Account locked.")
+            unlockpassword = input("Would you like to attempt manager override to unlock this account? (Y/N) ")
+            if unlockpassword.upper() == "Y":
+                if core.require_master_override():
+                    if clear_lockout(username):
+                        logging.info("Account unlocked successfully!")
+                        return False, result["role"], True  # Return role and reauthentication status
                     return False, None, False
-                cursor = conn.cursor()
-                cursor.execute("SELECT Password, FailedAttempts, LockoutTime, Role FROM Users WHERE Username = ?", (username,))
-                user = cursor.fetchone()
-
-                if not user:
-                    logging.info("Username not found.")
-                    continue
-
-                db_password, failed_attempts, lockout_time, role = user
-
-                # Check if the user is currently locked out
-                if lockout_time and lockout_time > datetime.now():
-                    logging.info(f"Account is locked until {lockout_time}. Please try again later.")
-                    continue
-
-                # Validate the entered password
-                if password == db_password:
-                    logging.info("Login successful!")
-                    # Reset failed attempts and lockout time
-                    cursor.execute("UPDATE Users SET FailedAttempts = 0, LockoutTime = NULL WHERE Username = ?", (username,))
-                    conn.commit()
-                    _mod_session.CURRENT_USER = username
-                    core.log_audit("LOGIN", "User", username, f"Role {role}")
-                    return True, role, False  # Return role and reauthentication status
-                else:
-                    failed_attempts = (failed_attempts or 0) + 1
-                    logging.info(f"Invalid credentials. Attempt {failed_attempts}/{core.get_lockout_threshold()}.")
-                    core.log_audit("LOGIN_FAILED", "User", username,
-                              f"Failed attempt {failed_attempts}/{core.get_lockout_threshold()}")
-
-                    # Display a warning message after the second failed attempt
-                    if failed_attempts == core.get_lockout_threshold() - 1:
-                        logging.info("Warning: One more failed attempt will lock you out.")
-
-                    # Lock out the user after exceeding the threshold
-                    if failed_attempts >= core.get_lockout_threshold():
-                        lockout_time = datetime.now() + timedelta(minutes=core.get_lockout_duration())
-                        cursor.execute("UPDATE Users SET FailedAttempts = ?, LockoutTime = ? WHERE Username = ?", (failed_attempts, lockout_time, username))
-                        conn.commit()
-                        logging.info("Maximum login attempts exceeded. Account locked.")
-                        core.log_audit("LOCKOUT", "User", username,
-                                  f"Locked until {lockout_time} after {failed_attempts} failed attempts")
-                        unlockpassword = input("Would you like to attempt manager override to unlock this account? (Y/N) ")
-                        if unlockpassword.upper() == "Y":
-                            if core.require_master_override():
-                                cursor.execute("UPDATE Users SET FailedAttempts = 0, LockoutTime = NULL WHERE Username = ?", (username,))
-                                conn.commit()
-                                logging.info("Account unlocked successfully!")
-                                return False, role, True  # Return role and reauthentication status
-                            else:
-                                logging.info("Invalid master override secret.")
-                        else:
-                            logging.info("Manager override not attempted.")
-                            return False, None, False
-                    else:
-                        cursor.execute("UPDATE Users SET FailedAttempts = ? WHERE Username = ?", (failed_attempts, username))
-                        conn.commit()
+                logging.info("Invalid master override secret.")
+            else:
+                logging.info("Manager override not attempted.")
+                return False, None, False
 
         except Exception as e:
             logging.error(f"Error during login: {e}")

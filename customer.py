@@ -17,6 +17,7 @@ import rooms
 __all__ = [
     'register_customer',
     'customer_login',
+    'authenticate_customer',
     '_customer_profile',
     'customer_session_label',
     'print_my_invoice',
@@ -74,6 +75,63 @@ def register_customer(email, last_name, first_name, password, phone=None):
             return None
 
 
+def authenticate_customer(email, password=None):
+    """Non-interactive guest credential check (the login service).
+
+    The twin the web path calls and the console adapter delegates to (PLAN-web-api.md
+    phase 2). Returns a status dict:
+
+      {"status": "ok", "customer_id": int, "first_name": str}  -- password matched; the
+                                                                   LOGIN audit is written
+                                                                   naming `email` as the
+                                                                   actor (the guest is the
+                                                                   person logging in).
+      {"status": "wrong_password"}                             -- password did not match.
+      {"status": "unknown"}                                    -- no profile with that
+                                                                   email.
+      {"status": "no_password"}                                -- account exists but has
+                                                                   never had a password
+                                                                   set (front-desk
+                                                                   account).
+      {"status": "unavailable"}                                -- database unreachable;
+                                                                   a missing Password
+                                                                   column means 019 is not
+                                                                   applied yet.
+
+    With `password=None` (the console adapter's discovery call) the service returns the
+    same facts without comparing anything: a known account with a password is
+    {"status": "ready", "customer_id": ..., "first_name": ...}, so the adapter can decide
+    whether to prompt for a password, offer registration, or refuse before asking for
+    anything. The service never touches `session.CURRENT_CUSTOMER` -- the console adapter
+    sets the process global on success, the web path reads the customer out of its cookie.
+    """
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return {"status": "unavailable"}
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT CustomerID, FirstName, LastName, Password FROM CustomerProfiles "
+                "WHERE Email = ?", (email,))
+            row = cursor.fetchone()
+    except Exception as e:
+        # A missing Password column means 019 is not applied yet.
+        logging.error(f"Booking login is unavailable: {e}")
+        return {"status": "unavailable"}
+
+    if row is None:
+        return {"status": "unknown"}
+    customer_id, first_name, _last_name, stored = row.CustomerID, row.FirstName, row.LastName, row.Password
+    if not stored:
+        return {"status": "no_password"}
+    if password is None:
+        return {"status": "ready", "customer_id": int(customer_id), "first_name": first_name}
+    if password == stored:
+        core.log_audit("LOGIN", "CustomerProfile", email, "Booking desk sign-in", user=email)
+        return {"status": "ok", "customer_id": int(customer_id), "first_name": first_name}
+    return {"status": "wrong_password"}
+
+
 def customer_login(allow_register=True):
     """Sign a guest in at the booking desk, registering them on first use.
 
@@ -95,22 +153,16 @@ def customer_login(allow_register=True):
         if not email:
             logging.info("Your email address is required to book a room.")
             continue
-        try:
-            with db.get_connection() as conn:
-                if conn is None:
-                    return None
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT CustomerID, FirstName, LastName, Password FROM CustomerProfiles "
-                    "WHERE Email = ?", (email,))
-                row = cursor.fetchone()
-        except Exception as e:
-            # A missing Password column means 019 is not applied yet.
-            logging.error(f"Booking login is unavailable: {e}")
+        # The credential work lives in authenticate_customer(); this adapter first asks
+        # what KIND of account this email is (unknown / no password / ready) so it knows
+        # whether to prompt for a password, register the guest, or refuse -- without
+        # asking for a password it does not yet know it needs.
+        known = authenticate_customer(email)
+        status = known.get("status")
+        if status == "unavailable":
             ui.error("Booking accounts are not available right now. Please contact the front desk.")
             return None
-
-        if row is None:
+        if status == "unknown":
             if not allow_register:
                 logging.info(
                     f"No booking account was found for {email}. Book a room first "
@@ -133,20 +185,19 @@ def customer_login(allow_register=True):
             customer_id = register_customer(email, last_name, first_name, password)
             if customer_id:
                 _mod_session.CURRENT_CUSTOMER = customer_id
-                core.log_audit("LOGIN", "CustomerProfile", email, "Booking account created at sign-up")
+                core.log_audit("LOGIN", "CustomerProfile", email, "Booking account created at sign-up", user=email)
                 logging.info(f"Welcome, {first_name}. Your booking account is ready.")
                 return customer_id
             continue
-
-        customer_id, first_name, _last_name, stored = row.CustomerID, row.FirstName, row.LastName, row.Password
-        if not stored:
+        if status == "no_password":
             logging.info("That account has no password yet. Please contact the front desk to set one.")
             return None
+        # A known account with a password: prompt for it and verify.
         password = input("Password: ").strip()
-        if password == stored:
-            _mod_session.CURRENT_CUSTOMER = int(customer_id)
-            core.log_audit("LOGIN", "CustomerProfile", email, "Booking desk sign-in")
-            logging.info(f"Welcome back, {first_name}.")
+        check = authenticate_customer(email, password)
+        if check.get("status") == "ok":
+            _mod_session.CURRENT_CUSTOMER = check["customer_id"]
+            logging.info(f"Welcome back, {check['first_name']}.")
             return _mod_session.CURRENT_CUSTOMER
         remaining = core.get_customer_login_max_attempts() - attempt
         if remaining > 0:

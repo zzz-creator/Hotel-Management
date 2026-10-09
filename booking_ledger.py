@@ -197,7 +197,7 @@ BOOKING_REF_WRITE_ATTEMPTS = 5
 
 
 def _write_booking_charge(conn, room_number, booking_ref, stay_check_in, kind, amount,
-                          nights_covered):
+                          nights_covered, card_last4=None):
     """Write a booking's initial charge, retrying if the reference was taken. Returns the
     reference actually used, or None if the charge could not be recorded.
 
@@ -206,6 +206,9 @@ def _write_booking_charge(conn, room_number, booking_ref, stay_check_in, kind, a
     021's filtered unique index is what makes the collision detectable: before it, the
     pre-flight probe in new_booking_ref() was the only defence and two sessions could both
     pass it.
+
+    `card_last4` names the card the guest paid with; None keeps the console behaviour of
+    reading `session.LAST_CARD_DIGITS` inside record_booking_payment().
 
     Retrying the INSERT inside the same transaction relies on SQL Server not aborting the
     transaction on a constraint violation (the default, with XACT_ABORT off). If the driver
@@ -217,7 +220,7 @@ def _write_booking_charge(conn, room_number, booking_ref, stay_check_in, kind, a
         try:
             payment_id = record_booking_payment(room_number, ref, stay_check_in, kind,
                                                 amount, nights_covered=nights_covered,
-                                                conn=conn)
+                                                conn=conn, card_last4=card_last4)
         except BookingRefTaken:
             logging.debug(f"Booking reference {ref} was taken concurrently; minting another.")
             continue
@@ -287,7 +290,7 @@ def _original_charge_card(cursor, booking_ref):
 
 
 def record_booking_payment(room_number, booking_ref, stay_check_in, kind, amount,
-                           nights_covered=None, notes=None, conn=None):
+                           nights_covered=None, notes=None, conn=None, card_last4=None):
     """Append one signed row to ReservationPayments. Returns the new PaymentID or None.
 
     Pass `conn` to join a caller's transaction (a declined card must not leave a
@@ -321,16 +324,21 @@ def record_booking_payment(room_number, booking_ref, stay_check_in, kind, amount
         # A reversal is attributed to the card that took the original money; a charge is
         # attributed to the card just authorised.
         if kind in (PAYMENT_KIND_REFUND, PAYMENT_KIND_FORFEIT):
-            card_last4 = _original_charge_card(cursor, booking_ref)
+            digits = _original_charge_card(cursor, booking_ref)
+        elif card_last4 is not None:
+            # The web path passes the request's digits explicitly so a charge row never
+            # names a card some other request authorised (PLAN-web-api.md phase 3).
+            digits = card_last4
         else:
-            card_last4 = session.LAST_CARD_DIGITS or None
+            # Console callers rely on the process-global 'last card authorised'.
+            digits = session.LAST_CARD_DIGITS or None
         cursor.execute(
             "INSERT INTO ReservationPayments "
             "(RoomNumber, BookingRef, StayCheckIn, Kind, Amount, NightsCovered, CardLast4, Notes) "
             "OUTPUT INSERTED.PaymentID "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (room_number, booking_ref, stay_check_in, kind, amount,
-             nights_covered, card_last4, notes),
+             nights_covered, digits, notes),
         )
         row = cursor.fetchone()
         return int(row[0]) if row and row[0] is not None else None
