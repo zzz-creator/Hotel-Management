@@ -5,15 +5,18 @@ import random
 import string
 from datetime import datetime
 from datetime import timedelta
+import pyodbc
 import db
 import ui
 import session
 import core
+import rooms
 
 __all__ = [
     'KEY_CARD_PREFIX',
     '_new_card_number',
     'issue_key_card',
+    '_insert_card_with_unique_number',
     'revoke_active_key_cards',
     'move_key_cards',
     'get_active_key_card',
@@ -53,8 +56,15 @@ def _new_card_number():
             return None
 
 
-def issue_key_card(room_number, last_name=None, first_name=None, valid_nights=None):
-    """Issue an Active key card for a stay, expiring at the reservation's check-out.
+def issue_key_card(room_number, last_name=None, first_name=None):
+    """Issue an Active key card for a checked-in stay, expiring at check-out.
+
+    A card is only ever issued for a stay that is checked in **today**: the room's
+    reservation must be inside its half-open window (check-in <= today < check-out)
+    and, when the room is tracked in `Rooms`, housekeeping must have it `Occupied`.
+    That is what stops a card being handed out for a vacant or future room, and it
+    guarantees the card has a real expiry -- the stay's check-out day -- rather than
+    the open-ended card the old code issued for a room with no reservation.
 
     Any existing Active card for the room is revoked first, so a re-issued card never
     leaves a stale one live. Returns the card number, or None.
@@ -66,39 +76,74 @@ def issue_key_card(room_number, last_name=None, first_name=None, valid_nights=No
             if conn is None:
                 return None
             cursor = conn.cursor()
-            expires_at = None
             cursor.execute(
-                "SELECT CheckOutDate FROM Reservations WHERE RoomNumber = ?", (room_number,)
+                "SELECT CheckInDate, CheckOutDate FROM Reservations WHERE RoomNumber = ?",
+                (room_number,),
             )
-            res = cursor.fetchone()
-            if res and res[0]:
-                expires_at = datetime.combine(res[0], datetime.min.time()) + timedelta(days=1)
-            elif valid_nights:
-                expires_at = datetime.now() + timedelta(days=valid_nights)
+            stay = cursor.fetchone()
+            if not stay or not core.reservation_window_active(
+                    stay[0], stay[1], core.business_date()):
+                logging.info(
+                    f"No key card issued for room {room_number}: no guest is checked in "
+                    "there today."
+                )
+                return None
+            room_status = rooms._room_status_in_conn(cursor, room_number)
+            if room_status is not None and room_status != "Occupied":
+                logging.info(
+                    f"No key card issued for room {room_number}: the room is "
+                    f"'{room_status}', not Occupied."
+                )
+                return None
+            # Expiry is the stay's check-out day, so the card is valid through the last
+            # night even though check-out itself is the morning after.
+            expires_at = datetime.combine(stay[1], datetime.min.time()) + timedelta(days=1)
             cursor.execute(
                 "UPDATE KeyCards SET Status = 'Revoked', RevokedAt = ?, RevokeReason = ? "
                 "WHERE RoomNumber = ? AND Status = 'Active'",
                 (datetime.now(), "Superseded by a new card", room_number),
             )
-            card_number = _new_card_number()
+            card_number = _insert_card_with_unique_number(
+                cursor, room_number, last_name, first_name, expires_at, session.CURRENT_USER)
             if not card_number:
                 return None
-            cursor.execute(
-                "INSERT INTO KeyCards (CardNumber, RoomNumber, LastName, FirstName, Status, "
-                "IssuedAt, ExpiresAt, IssuedBy) VALUES (?, ?, ?, ?, 'Active', ?, ?, ?)",
-                (card_number, room_number, last_name, first_name, datetime.now(),
-                 expires_at, session.CURRENT_USER),
-            )
             conn.commit()
             core.log_audit("ISSUE", "KeyCard", card_number,
-                      f"Issued for room {room_number}"
-                      + (f", valid until {expires_at:%Y-%m-%d}" if expires_at else ""))
+                      f"Issued for room {room_number}, valid until {expires_at:%Y-%m-%d}")
             logging.info(f"Key card {card_number} issued for room {room_number}.")
             return card_number
     except Exception as e:
         # Migration 017 not applied: door access is an add-on, never block check-in.
         logging.debug(f"Key card issue skipped ({type(e).__name__}: {e})")
         return None
+
+
+def _insert_card_with_unique_number(cursor, room_number, last_name, first_name,
+                                    expires_at, issued_by, attempts=5):
+    """INSERT a new Active card, retrying a fresh number on a uniqueness collision.
+
+    `_new_card_number()` probes for a free number, but the probe and this INSERT are
+    not atomic, so a race can still hit `UQ_KeyCards_CardNumber`. Retry a new number a
+    few times instead of failing the whole issue; return the number written, or None.
+    """
+    for _ in range(attempts):
+        card_number = _new_card_number()
+        if not card_number:
+            return None
+        try:
+            cursor.execute(
+                "INSERT INTO KeyCards (CardNumber, RoomNumber, LastName, FirstName, Status, "
+                "IssuedAt, ExpiresAt, IssuedBy) VALUES (?, ?, ?, ?, 'Active', ?, ?, ?)",
+                (card_number, room_number, last_name, first_name, datetime.now(),
+                 expires_at, issued_by),
+            )
+            return card_number
+        except pyodbc.IntegrityError:
+            logging.debug(f"Card number {card_number} already taken; trying another.")
+    logging.warning(
+        f"Could not find a unique key card number after {attempts} attempts."
+    )
+    return None
 
 
 def revoke_active_key_cards(room_number, reason=""):
@@ -334,7 +379,13 @@ def door_access_menu(view_only=False):
             if card:
                 ui.success(f"Key card {card} issued for room {room_number}.")
             else:
-                logging.info("Could not issue a key card. Is migration 017 applied?")
+                # issue_key_card() logs the specific reason it refused (no checked-in
+                # guest, room not Occupied) at info; a missing migration 017 only logs
+                # at debug, so name it here rather than staying silent about it.
+                logging.info(
+                    "No key card was issued. A guest must be checked in to the room today, "
+                    "and migration 017 must be applied."
+                )
         elif choice == '2':
             card_number = input("Enter card number to revoke: ").strip()
             revoke_key_card(card_number, "Revoked at front desk")

@@ -280,7 +280,11 @@ probed for uniqueness), `RoomNumber`, `LastName`, `FirstName`, `Status`
 (`Active`/`Revoked`/`Lost`/`Expired`, enforced by `CK_KeyCards_Status` so a typo cannot
 invent a fifth state), `IssuedAt`, `ExpiresAt`, `IssuedBy`, `RevokedAt`,
 `RevokeReason`. A card grants access only while `Status = 'Active'` **and** today is
-within `[IssuedAt, ExpiresAt]`.
+within `[IssuedAt, ExpiresAt]`. Issue is gated on a stay that is checked in **today** —
+an active reservation window, and the room `Occupied` when it is tracked — so a vacant or
+future room cannot be handed a card, and every card gets a real `ExpiresAt` (the
+reservation's check-out day + 1). A `UQ_KeyCards_CardNumber` collision at insert retries a
+fresh number rather than failing the issue.
 
 **`DoorEvents`** — 017. `EventID` identity PK, `CardNumber`, `RoomNumber`, `Result`
 (`Granted`/`Denied`), `Detail`, `EventTime`. Append-only; every door read writes one,
