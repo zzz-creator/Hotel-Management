@@ -229,7 +229,7 @@ def require_master_override(prompt="Enter master override secret: "):
     return False
 
 
-def log_audit(action, entity_type, entity_id="", details="", old_value=None, new_value=None):
+def log_audit(action, entity_type, entity_id="", details="", old_value=None, new_value=None, user=None):
     """Record who changed what in dbo.AuditLog (migration 016).
 
     `old_value` / `new_value` (migration 026) record the before/after for value
@@ -237,6 +237,13 @@ def log_audit(action, entity_type, entity_id="", details="", old_value=None, new
     row inside log_audit would be wrong for a re-let, where the old row has
     already been archived or overwritten by the time the audit call happens.
     Both are optional and nullable, so every pre-026 call site keeps working.
+
+    `user` names the actor who made the change. The default (`None`) keeps the
+    console behaviour of auditing as `session.CURRENT_USER` -- the process global
+    `admin_login()` sets -- and "system" when nobody is signed in. The web path
+    passes the request principal explicitly, because under concurrent users the
+    global is "the last user who logged in on any console", not the one behind
+    this request (PLAN-web-api.md).
 
     Opens its own connection deliberately: the surrounding business transaction may be
     mid-flight, and an audit write must neither be rolled back with it nor be blamed for
@@ -252,7 +259,8 @@ def log_audit(action, entity_type, entity_id="", details="", old_value=None, new
             cursor.execute(
                 "INSERT INTO AuditLog (Username, Action, EntityType, EntityID, Details, OldValue, NewValue) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (str(session.CURRENT_USER or "system"), str(action or "UNKNOWN"),
+                (str((user if user is not None else session.CURRENT_USER) or "system"),
+                 str(action or "UNKNOWN"),
                  str(entity_type or "Unknown"), str(entity_id or ""), str(details or ""),
                  None if old_value is None else str(old_value),
                  None if new_value is None else str(new_value)),

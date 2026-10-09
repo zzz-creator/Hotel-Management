@@ -78,3 +78,16 @@ class LogAuditDiffTests(unittest.TestCase):
         _sql, params = log[0]
         self.assertIn(None, params)
         self.assertNotIn("None", params)
+
+    def test_explicit_user_overrides_current_user(self):
+        # The web path passes the request principal explicitly; the process global
+        # must not win when an actor is given (PLAN-web-api.md).
+        log = self._audit(user="api-alice")
+        _sql, params = log[0]
+        self.assertEqual(params[0], "api-alice")
+
+    def test_default_user_reads_current_user(self):
+        # No actor -> the console behaviour is unchanged: audit as session.CURRENT_USER.
+        log = self._audit()
+        _sql, params = log[0]
+        self.assertEqual(params[0], "tester")
