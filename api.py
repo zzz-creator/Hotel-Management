@@ -33,6 +33,7 @@ import booking_ledger
 import bookings
 import customer
 import payments
+import reports
 import reservations
 import rooms
 from schemas import CheckInRequest, CreateBookingRequest, LoginRequest
@@ -273,6 +274,44 @@ def check_in(room: str, body: CheckInRequest, principal: dict = Depends(require_
     if result.get("reason") == "window":
         raise HTTPException(409, _window_detail(result))
     raise HTTPException(500, "Check-in could not be completed.")
+
+
+@router.get("/reports/{report_name}")
+def report(report_name: str, customer: Optional[str] = None, room: Optional[str] = None,
+           start: Optional[str] = None, end: Optional[str] = None,
+           floor: Optional[str] = None, date: Optional[str] = None,
+           booking_ref: Optional[str] = None, limit: int = 5000,
+           principal: dict = Depends(require_staff)):
+    """Any report's rows without the CSV file; the same options the CLI takes.
+
+    Staff-only: these carry guest data (names, emails, card last four), which the
+    guest-facing surface must never reveal (docs/BOOKING.md privacy rules). The rows
+    come from reports.report_rows(), the data twin the CSV exports also run through, so
+    the console and the API cannot drift about what a report means.
+    """
+    if report_name not in reports.REPORT_ROWS:
+        raise HTTPException(404, f"Unknown report '{report_name}'.")
+    params = {}
+    if report_name == "loyalty":
+        params = {"customer": customer, "room_number": room}
+    elif report_name in ("revenue", "occupancy"):
+        params = {"start_date": start, "end_date": end}
+    elif report_name == "housekeeping":
+        params = {"floor": floor, "on_date": date}
+    elif report_name == "booking_ledger":
+        params = {"booking_ref": booking_ref}
+    elif report_name == "audit":
+        params = {"limit": limit}
+    params = {key: value for key, value in params.items() if value is not None}
+    try:
+        headers, rows = reports.report_rows(report_name, **params)
+    except ValueError as exc:
+        # A filter reference that resolves to nothing or to several guests, e.g. a
+        # loyalty statement for a name shared by two profiles.
+        raise HTTPException(400, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    return {"report": report_name, "headers": headers, "rows": rows}
 
 
 def create_app():

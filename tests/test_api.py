@@ -22,6 +22,7 @@ import bookings
 import core
 import customer
 import reservations
+import reports
 import rooms
 
 
@@ -335,6 +336,105 @@ class CheckInTests(unittest.TestCase):
         with mock.patch.object(reservations, "check_in_eligibility",
                                return_value={"ok": False, "reason": "unavailable"}):
             response = client.post("/api/reservations/9012/check-in", json={"first_name": "Gus"})
+        self.assertEqual(response.status_code, 503)
+
+
+class ReportTests(unittest.TestCase):
+    def _staff(self):
+        client = _client()
+        _login_staff(client, username="ada")
+        return client
+
+    def test_rows_come_back_without_a_csv_file(self):
+        client = self._staff()
+        with mock.patch.object(reports, "report_rows",
+                               return_value=(["PaymentID", "Amount"],
+                                             [{"PaymentID": "1", "Amount": "50.00"}])):
+            response = client.get("/api/reports/transactions")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            "report": "transactions",
+            "headers": ["PaymentID", "Amount"],
+            "rows": [{"PaymentID": "1", "Amount": "50.00"}],
+        })
+
+    def test_report_rows_dispatches_through_the_registry(self):
+        # The registry binds function objects at build time, so patch it directly: the
+        # dispatcher must forward the CLI-style params and drop the loyalty label.
+        with mock.patch.dict(reports.REPORT_ROWS, {
+            "loyalty": (lambda customer=None, room_number=None:
+                        (["CustomerID"], [{"CustomerID": "5"}], customer or "x@y.z")),
+        }):
+            headers, rows = reports.report_rows("loyalty", customer="g@example.com")
+        self.assertEqual(headers, ["CustomerID"])
+        self.assertEqual(rows, [{"CustomerID": "5"}])
+
+    def test_reports_require_a_staff_session(self):
+        self.assertEqual(_client().get("/api/reports/transactions").status_code, 401)
+        guest = _client()
+        _login_guest(guest)
+        self.assertEqual(guest.get("/api/reports/transactions").status_code, 403)
+
+    def test_loyalty_takes_the_cli_room_option(self):
+        client = self._staff()
+        with mock.patch.object(reports, "report_rows") as rows:
+            rows.return_value = (["CustomerID"], [{"CustomerID": "5"}])
+            response = client.get("/api/reports/loyalty", params={"room": "9012"})
+        self.assertEqual(response.status_code, 200)
+        rows.assert_called_once_with("loyalty", room_number="9012")
+
+    def test_revenue_passes_the_window(self):
+        client = self._staff()
+        with mock.patch.object(reports, "report_rows") as rows:
+            rows.return_value = ([], [])
+            response = client.get("/api/reports/revenue",
+                                  params={"start": "2026-10-01", "end": "2026-10-05"})
+        self.assertEqual(response.status_code, 200)
+        rows.assert_called_once_with("revenue", start_date="2026-10-01", end_date="2026-10-05")
+
+    def test_housekeeping_maps_the_date_option(self):
+        client = self._staff()
+        with mock.patch.object(reports, "report_rows") as rows:
+            rows.return_value = ([], [])
+            response = client.get("/api/reports/housekeeping", params={"floor": "9", "date": "2026-10-01"})
+        self.assertEqual(response.status_code, 200)
+        rows.assert_called_once_with("housekeeping", floor="9", on_date="2026-10-01")
+
+    def test_booking_ledger_passes_the_reference(self):
+        client = self._staff()
+        with mock.patch.object(reports, "report_rows") as rows:
+            rows.return_value = ([], [])
+            response = client.get("/api/reports/booking_ledger", params={"booking_ref": "BR-1"})
+        self.assertEqual(response.status_code, 200)
+        rows.assert_called_once_with("booking_ledger", booking_ref="BR-1")
+
+    def test_audit_passes_the_limit(self):
+        client = self._staff()
+        with mock.patch.object(reports, "report_rows") as rows:
+            rows.return_value = ([], [])
+            response = client.get("/api/reports/audit", params={"limit": 10})
+        self.assertEqual(response.status_code, 200)
+        rows.assert_called_once_with("audit", limit=10)
+
+    def test_an_unknown_report_is_404_without_querying(self):
+        client = self._staff()
+        with mock.patch.object(reports, "report_rows") as rows:
+            response = client.get("/api/reports/nope")
+        self.assertEqual(response.status_code, 404)
+        rows.assert_not_called()
+
+    def test_a_bad_filter_reference_is_400(self):
+        client = self._staff()
+        with mock.patch.object(reports, "report_rows",
+                               side_effect=ValueError("'guests' matches 2 customer profiles.")):
+            response = client.get("/api/reports/loyalty", params={"customer": "guests"})
+        self.assertEqual(response.status_code, 400)
+
+    def test_an_unreachable_database_is_503(self):
+        client = self._staff()
+        with mock.patch.object(reports, "report_rows",
+                               side_effect=RuntimeError("Database connection failed.")):
+            response = client.get("/api/reports/transactions")
         self.assertEqual(response.status_code, 503)
 
 

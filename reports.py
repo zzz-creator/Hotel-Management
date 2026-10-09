@@ -33,6 +33,7 @@ EXPORT_DIR = os.path.join(os.path.dirname(__file__), "exports")
 # the night it was vacated. There is no helper to import from main (it opens its
 # own connection and would be a circular import), so the rule is stated once here and the
 # pure definition lives in main.stays_overlap().
+
 def business_date():
     """The hotel's current business date -- as of 5 October 2026, just the wall clock.
 
@@ -94,41 +95,48 @@ def _write_csv(filename, headers, rows):
     return path
 
 
-def _export_query(report_name, query, title, params=()):
+def _run_query(query, params=()):
+    """Open one connection and return (headers, rows) for a report's SELECT.
+
+    The data twin every report shares: the CSV exporters and the API both run their
+    report through here, so one definition of the SQL serves both front-ends
+    (AGENTS.md section 5 -- the API must never re-typo a report's query). Raises
+    RuntimeError when the database cannot be reached, which the API maps to 503.
+    """
     with get_connection() as conn:
         if conn is None:
             raise RuntimeError("Database connection failed.")
         cursor = conn.cursor()
-        headers, rows = _query_to_rows(cursor, query, params)
+        return _query_to_rows(cursor, query, params)
 
-    timestamp = _timestamp()
-    csv_path = _write_csv(f"{report_name}_{timestamp}.csv", headers, rows)
-    return csv_path
+
+def rows_transactions():
+    """Every Transactions row, one per posted charge, credit, or payment line."""
+    return _run_query("SELECT * FROM Transactions")
 
 
 def export_transactions(export_format="csv"):
     if export_format != "csv":
         raise ValueError("Only csv export is supported.")
-    csv_path = _export_query(
-        "transactions",
-        "SELECT * FROM Transactions",
-        "Transactions Report"
-    )
+    headers, rows = rows_transactions()
+    csv_path = _write_csv(f"transactions_{_timestamp()}.csv", headers, rows)
     return [csv_path]
+
+
+def rows_reservations():
+    """The live Reservations table, one row per current (non-archived) stay."""
+    return _run_query("SELECT * FROM Reservations")
 
 
 def export_reservations(export_format="csv"):
     if export_format != "csv":
         raise ValueError("Only csv export is supported.")
-    csv_path = _export_query(
-        "reservations",
-        "SELECT * FROM Reservations",
-        "Reservations Report"
-    )
+    headers, rows = rows_reservations()
+    csv_path = _write_csv(f"reservations_{_timestamp()}.csv", headers, rows)
     return [csv_path]
 
 
-def export_loyalty_statements(export_format="csv", room_number=None, customer=None):
+def rows_loyalty_statements(room_number=None, customer=None):
     """Loyalty balances and ledger, keyed on the GUEST (migration 019).
 
     `customer` filters to one guest, by CustomerID, email, or full name. `room_number`
@@ -136,6 +144,10 @@ def export_loyalty_statements(export_format="csv", room_number=None, customer=No
     customer who occupied that room, and then reports that person's WHOLE history --
     every room they have stayed in. That is the point of 019; a room-scoped report would
     only ever show one fragment of a balance.
+
+    Returns (headers, rows, label): `label` is None for the all-guests report, otherwise
+    the reference that names the CSV file (the customer reference given, or the resolved
+    CustomerID when the report was narrowed by room number).
     """
     if customer or room_number:
         customer_id = None
@@ -169,8 +181,6 @@ def export_loyalty_statements(export_format="csv", room_number=None, customer=No
         )
         params = (customer_id,)
         label = customer or (room_number if not customer_id else customer_id)
-        report_name = f"loyalty_statement_{_slug(label)}"
-        title = f"Loyalty Statement: {label}"
     else:
         query = (
             "SELECT LA.CustomerID, cp.LastName, cp.FirstName, cp.Email, "
@@ -183,12 +193,19 @@ def export_loyalty_statements(export_format="csv", room_number=None, customer=No
             "ORDER BY LA.CustomerID, LT.CreatedAt DESC"
         )
         params = ()
-        report_name = "loyalty_statements"
-        title = "Loyalty Statements Report"
+        label = None
 
+    headers, rows = _run_query(query, params)
+    return headers, rows, label
+
+
+def export_loyalty_statements(export_format="csv", room_number=None, customer=None):
+    """Loyalty statements as a CSV file; see rows_loyalty_statements() for the data."""
     if export_format != "csv":
         raise ValueError("Only csv export is supported.")
-    csv_path = _export_query(report_name, query, title, params)
+    headers, rows, label = rows_loyalty_statements(room_number=room_number, customer=customer)
+    report_name = f"loyalty_statement_{_slug(label)}" if label else "loyalty_statements"
+    csv_path = _write_csv(f"{report_name}_{_timestamp()}.csv", headers, rows)
     return [csv_path]
 
 
@@ -244,10 +261,8 @@ def _customer_id_for_room(room_number):
         return int(row[0]) if row and row[0] is not None else None
 
 
-def export_invoices(export_format="csv"):
+def rows_invoices():
     """Settled check-out bills with the Room / F&B split (migrations 011-013)."""
-    if export_format != "csv":
-        raise ValueError("Only csv export is supported.")
     query = (
         "SELECT i.InvoiceID, i.RoomNumber, i.InvoiceDate, "
         "  i.RoomSubtotal, i.RoomTaxAmount, i.RoomTotal, "
@@ -258,13 +273,19 @@ def export_invoices(export_format="csv"):
         "(SELECT COUNT(*) FROM Transactions t WHERE t.InvoiceID = i.InvoiceID) AS LineItems "
         "FROM Invoices i ORDER BY i.InvoiceID DESC"
     )
-    return [_export_query("invoices", query, "Invoices Report")]
+    return _run_query(query)
 
 
-def export_revenue(export_format="csv", start_date=None, end_date=None):
-    """Revenue by day, split into room and F&B, from the invoice snapshot."""
+def export_invoices(export_format="csv"):
     if export_format != "csv":
         raise ValueError("Only csv export is supported.")
+    headers, rows = rows_invoices()
+    csv_path = _write_csv(f"invoices_{_timestamp()}.csv", headers, rows)
+    return [csv_path]
+
+
+def rows_revenue(start_date=None, end_date=None):
+    """Revenue by day, split into room and F&B, from the invoice snapshot."""
     query = (
         "SELECT CAST(i.InvoiceDate AS date) AS InvoiceDate, COUNT(*) AS Invoices, "
         "  SUM(i.RoomSubtotal) AS RoomSubtotal, SUM(i.RoomTaxAmount) AS RoomTax, "
@@ -286,10 +307,19 @@ def export_revenue(export_format="csv", start_date=None, end_date=None):
         query += " AND i.InvoiceDate < DATEADD(day, 1, ?)"
         params.append(end_date)
     query += " GROUP BY CAST(i.InvoiceDate AS date) ORDER BY InvoiceDate"
-    return [_export_query("revenue", query, "Revenue Report", tuple(params))]
+    return _run_query(query, tuple(params))
 
 
-def export_occupancy(export_format="csv", start_date=None, end_date=None):
+def export_revenue(export_format="csv", start_date=None, end_date=None):
+    """Revenue by day as a CSV file; see rows_revenue() for the data."""
+    if export_format != "csv":
+        raise ValueError("Only csv export is supported.")
+    headers, rows = rows_revenue(start_date=start_date, end_date=end_date)
+    csv_path = _write_csv(f"revenue_{_timestamp()}.csv", headers, rows)
+    return [csv_path]
+
+
+def rows_occupancy(start_date=None, end_date=None):
     """Nightly occupancy with ADR and RevPAR, over a re-runnable date window.
 
     ADR (Average Daily Rate) is room revenue divided by rooms sold that night; RevPAR is
@@ -308,8 +338,6 @@ def export_occupancy(export_format="csv", start_date=None, end_date=None):
     housekeeping board uses the same rule, which is what stops the two reports from
     disagreeing about the same rows.
     """
-    if export_format != "csv":
-        raise ValueError("Only csv export is supported.")
     first = _coerce_date(start_date)
     last = _coerce_date(end_date) or business_date()
     query = (
@@ -349,10 +377,19 @@ def export_occupancy(export_format="csv", start_date=None, end_date=None):
         "ORDER BY s.Night"
     )
     params = (first, first, last)
-    return [_export_query("occupancy", query, "Occupancy Report", params)]
+    return _run_query(query, params)
 
 
-def export_housekeeping(export_format="csv", floor=None, on_date=None):
+def export_occupancy(export_format="csv", start_date=None, end_date=None):
+    """Nightly occupancy as a CSV file; see rows_occupancy() for the data."""
+    if export_format != "csv":
+        raise ValueError("Only csv export is supported.")
+    headers, rows = rows_occupancy(start_date=start_date, end_date=end_date)
+    csv_path = _write_csv(f"occupancy_{_timestamp()}.csv", headers, rows)
+    return [csv_path]
+
+
+def rows_housekeeping(floor=None, on_date=None):
     """Room status board for a chosen day, optionally limited to one floor.
 
     `on_date` defaults to the business date, and takes an explicit date so the board for
@@ -367,8 +404,6 @@ def export_housekeeping(export_format="csv", floor=None, on_date=None):
     `Reservations.RoomNumber` is the primary key, so a re-let room's previous occupant
     has been moved to `ReservationArchive` -- see docs/DEVIATIONS.md.
     """
-    if export_format != "csv":
-        raise ValueError("Only csv export is supported.")
     for_date = _coerce_date(on_date) or business_date()
     query = (
         "SELECT r.RoomNumber, r.RoomType, COALESCE(r.Status, 'Available') AS Status, "
@@ -389,25 +424,38 @@ def export_housekeeping(export_format="csv", floor=None, on_date=None):
         query += " AND LEFT(r.RoomNumber, LEN(r.RoomNumber) - 3) = ?"
         params.append(str(floor))
     query += " ORDER BY r.RoomNumber"
-    return [_export_query("housekeeping", query, "Housekeeping Report", tuple(params))]
+    return _run_query(query, tuple(params))
 
 
-
-def export_audit_log(export_format="csv", limit=5000):
-    """Recent audit trail rows (migration 016)."""
+def export_housekeeping(export_format="csv", floor=None, on_date=None):
+    """Housekeeping board as a CSV file; see rows_housekeeping() for the data."""
     if export_format != "csv":
         raise ValueError("Only csv export is supported.")
+    headers, rows = rows_housekeeping(floor=floor, on_date=on_date)
+    csv_path = _write_csv(f"housekeeping_{_timestamp()}.csv", headers, rows)
+    return [csv_path]
+
+
+def rows_audit_log(limit=5000):
+    """Recent audit trail rows (migration 016), newest first."""
     query = (
         "SELECT TOP (?) AuditID, CreatedAt, Username, Action, EntityType, EntityID, Details "
         "FROM AuditLog ORDER BY AuditID DESC"
     )
-    return [_export_query("audit_log", query, "Audit Log Report", (int(limit),))]
+    return _run_query(query, (int(limit),))
 
 
-def export_guest_satisfaction(export_format="csv"):
-    """Concierge request turnaround and stay feedback ratings (migration 015)."""
+def export_audit_log(export_format="csv", limit=5000):
+    """Audit trail as a CSV file; see rows_audit_log() for the data."""
     if export_format != "csv":
         raise ValueError("Only csv export is supported.")
+    headers, rows = rows_audit_log(limit=limit)
+    csv_path = _write_csv(f"audit_log_{_timestamp()}.csv", headers, rows)
+    return [csv_path]
+
+
+def rows_guest_satisfaction():
+    """Concierge request turnaround and stay feedback ratings (migration 015)."""
     query = (
         "SELECT 'Feedback' AS Source, f.FeedbackID AS ID, f.RoomNumber, "
         "  f.LastName + ' ' + f.FirstName AS Guest, "
@@ -420,10 +468,19 @@ def export_guest_satisfaction(export_format="csv"):
         "FROM ConciergeRequests c "
         "ORDER BY CreatedAt DESC"
     )
-    return [_export_query("guest_satisfaction", query, "Guest Satisfaction Report")]
+    return _run_query(query)
 
 
-def export_booking_ledger(export_format="csv", booking_ref=None):
+def export_guest_satisfaction(export_format="csv"):
+    """Guest satisfaction as a CSV file; see rows_guest_satisfaction() for the data."""
+    if export_format != "csv":
+        raise ValueError("Only csv export is supported.")
+    headers, rows = rows_guest_satisfaction()
+    csv_path = _write_csv(f"guest_satisfaction_{_timestamp()}.csv", headers, rows)
+    return [csv_path]
+
+
+def rows_booking_ledger(booking_ref=None):
     """Every signed ReservationPayments row, one row per charge/refund/forfeit.
 
     With no `booking_ref` this is the hotel-wide ledger; with one it is that
@@ -431,8 +488,6 @@ def export_booking_ledger(export_format="csv", booking_ref=None):
     statement export. Rows are signed, so a stay's net position is a SUM over this
     table, not a count of charges.
     """
-    if export_format != "csv":
-        raise ValueError("Only csv export is supported.")
     base = (
         "SELECT p.PaymentID, p.BookingRef, p.Kind, p.Amount, p.AppliedAmount, "
         "  CASE WHEN ISNULL(p.AppliedAmount, 0) >= ABS(p.Amount) THEN 'yes' ELSE 'no' END AS FullyApplied, "
@@ -440,18 +495,22 @@ def export_booking_ledger(export_format="csv", booking_ref=None):
         "FROM ReservationPayments p"
     )
     if booking_ref:
-        csv_path = _export_query(
-            f"booking_ledger_{_slug(booking_ref)}",
-            base + " WHERE p.BookingRef = ? ORDER BY p.PaidAt, p.PaymentID",
-            f"Booking Ledger: {booking_ref}",
-            (booking_ref,),
-        )
+        return _run_query(
+            base + " WHERE p.BookingRef = ? ORDER BY p.PaidAt, p.PaymentID", (booking_ref,))
+    return _run_query(base + " ORDER BY p.BookingRef, p.PaidAt, p.PaymentID")
+
+
+def export_booking_ledger(export_format="csv", booking_ref=None):
+    """Booking ledger as a CSV file; see rows_booking_ledger() for the data."""
+    if export_format != "csv":
+        raise ValueError("Only csv export is supported.")
+    if booking_ref:
+        headers, rows = rows_booking_ledger(booking_ref=booking_ref)
+        report_name = f"booking_ledger_{_slug(booking_ref)}"
     else:
-        csv_path = _export_query(
-            "booking_ledger",
-            base + " ORDER BY p.BookingRef, p.PaidAt, p.PaymentID",
-            "Booking Ledger",
-        )
+        headers, rows = rows_booking_ledger()
+        report_name = "booking_ledger"
+    csv_path = _write_csv(f"{report_name}_{_timestamp()}.csv", headers, rows)
     return [csv_path]
 
 
@@ -467,6 +526,38 @@ REPORTS = {
     "guest_satisfaction": export_guest_satisfaction,
     "booking_ledger": export_booking_ledger,
 }
+
+# The data twins behind each export: the same registry the API reads, so a report added
+# here is one entry in REPORTS, one function in REPORT_ROWS and one endpoint -- never
+# three hand-written SQL copies.
+REPORT_ROWS = {
+    "transactions": rows_transactions,
+    "reservations": rows_reservations,
+    "loyalty": rows_loyalty_statements,
+    "invoices": rows_invoices,
+    "revenue": rows_revenue,
+    "occupancy": rows_occupancy,
+    "housekeeping": rows_housekeeping,
+    "audit": rows_audit_log,
+    "guest_satisfaction": rows_guest_satisfaction,
+    "booking_ledger": rows_booking_ledger,
+}
+
+
+def report_rows(report_name, **params):
+    """The rows behind one report with no CSV file written: the API twin.
+
+    `params` use the CLI option names for the reports that filter (customer/room for
+    loyalty, start/end for revenue and occupancy, floor/date for housekeeping,
+    booking_ref for the ledger, limit for audit); reports without filters take none.
+    Returns (headers, rows). An unknown name raises ValueError and an unreachable
+    database RuntimeError -- the API maps 404/503, the CLI never gets here.
+    """
+    if report_name not in REPORT_ROWS:
+        raise ValueError(
+            f"Unknown report '{report_name}'. Choose from: {', '.join(sorted(REPORT_ROWS))}.")
+    data = REPORT_ROWS[report_name](**params)
+    return data[0], data[1]
 
 
 def run_cli():

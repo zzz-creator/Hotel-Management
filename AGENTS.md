@@ -46,11 +46,11 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 | File | Role |
 |---|---|
 | `main.py` | Entry point **and compatibility facade**: `handle_cli_args()`, `main()`, the `get_connection = db.get_connection` alias, and the `from <module> import *` re-exports so `import main as app` still reaches every moved name. The application body lives in the domain modules below |
-| `api.py` | FastAPI web/API edition — a **second entry point** (`uvicorn api:app`) alongside the console, so the two share one service layer. Phases 1-4 shipped: scaffold, session middleware, and the pilot endpoints (auth login/logout/me, availability, bookings, check-in) wired to the service twins, with the cookie principal as the audit actor. `python main.py` is unchanged and remains the fallback |
+| `api.py` | FastAPI web/API edition — a **second entry point** (`uvicorn api:app`) alongside the console, so the two share one service layer. Phases 1-4 shipped: scaffold, session middleware, and the pilot endpoints (auth login/logout/me, availability, bookings, check-in) wired to the service twins, with the cookie principal as the audit actor. Phase 5 added the read-only report endpoints (`/api/reports/{name}`, staff-only) over the report data twins. `python main.py` is unchanged and remains the fallback |
 | `auth.py` | Signed-cookie session handling for the web edition (PLAN-web-api.md phase 3): principal payloads, cookie issue/clear, `current_principal`. Deliberately free of FastAPI/Starlette imports so it imports before the web deps are installed; the endpoint layer registers it with `Depends()` in phase 4 |
 | `schemas.py` | Pydantic request models for the pilot endpoints (PLAN-web-api.md phase 4): the discriminated staff/guest login body, the booking body, the check-in body |
 | `ui.py` | `rich`-based console helpers (menus, tables, prompts, `clear_screen`/`pause`) |
-| `reports.py` | CSV report exports, also a standalone CLI |
+| `reports.py` | Report data twins (`rows_*` → `_run_query`) with `export_*` CSV adapters over the same SQL (one definition, two front-ends), the `REPORTS` export registry, the `REPORT_ROWS` registry + `report_rows()` the API reads, also a standalone CLI |
 | `db.py` | Connection string + `get_connection()` context manager |
 | `clearance.py` | Clearance-card catalog: SVG name extraction, tier×category guest matrix, role cards, room/username lookup, export |
 | `clearance_ui.py` | Tkinter "tap your keycard" window: card image, extracted name, scan entry at the bottom |
@@ -120,7 +120,7 @@ re-runnable; it is not part of the runtime.
 | `tests/test_keycards.py` | The key-card panel shared by check-in and "My Key Card": the card number and stay details it shows |
 | `tests/test_web_services.py` | The Phase-2 web-facing services (PLAN-web-api.md): `verify_staff_login`, `authenticate_customer`, `create_booking`, `check_in_eligibility` / `perform_check_in`, the `card_last4` ledger parameter |
 | `tests/test_auth.py` | Phase-3 web auth (PLAN-web-api.md): principal payloads, the signed-cookie round-trip, `current_principal` and the `audit_actor` mapping |
-| `tests/test_api.py` | Phase-4 pilot endpoints (PLAN-web-api.md): TestClient suite for login/logout/me, availability, bookings and check-in — HTTP status mapping, the cookie, the audit actor and the server-side quote, with every service patched and no DB writes |
+| `tests/test_api.py` | Pilot endpoints + phase-5 reports (PLAN-web-api.md): TestClient suite for login/logout/me, availability, bookings, check-in and the staff-only report endpoints — HTTP status mapping, the cookie, the audit actor, the server-side quote and the report-row dispatcher, with every service patched and no DB writes |
 | `tests/patch_main.py` | Test helper: `patch_main(name, ...)` resolves the module that owns `name` after the split, so a test patch still reaches every caller (the split's standing risk) |
 | `tests/check_schema_sync.py` | `database.sql` vs migrations (a **script**, not a test) |
 | `tests/check_migration_sql.py` | Static T-SQL lint (a **script**, not a test) |
