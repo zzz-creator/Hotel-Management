@@ -17,6 +17,8 @@ __all__ = [
     'revoke_active_key_cards',
     'move_key_cards',
     'get_active_key_card',
+    '_render_key_card',
+    'show_active_key_card',
     'get_key_cards_for_room',
     '_log_door_event',
     'try_open_door',
@@ -407,22 +409,43 @@ def door_access_menu(view_only=False):
         ui.pause()
 
 
+def _render_key_card(card, title="My Key Card"):
+    """Render a KeyCards row as the guest-facing card panel.
+
+    Pure formatting: no lookup and no door event, so the check-in flow can reuse
+    the exact panel the guest sees under "My Key Card".
+    """
+    expires = card.ExpiresAt.strftime("%Y-%m-%d") if card.ExpiresAt else "end of stay"
+    ui.box(
+        title,
+        f"Card number: {card.CardNumber}\n"
+        f"Room:         {card.RoomNumber}\n"
+        f"Status:       {card.Status}\n"
+        f"Valid until:  {expires}",
+    )
+
+
+def show_active_key_card(room_number, title="My Key Card"):
+    """Show the Active card for a room as a card panel.
+
+    Returns the card row when one was displayed, else None. Shared by "My Key
+    Card" and by check-in, so both render the same card and show its number.
+    """
+    card = get_active_key_card(room_number)
+    if not card:
+        return None
+    _render_key_card(card, title)
+    return card
+
+
 def view_my_key_card():
     """Guest: show the key card for the room they are staying in."""
     room_number, first_name = core.validate_room()
     if not room_number:
         logging.info("Could not verify your room.")
         return
-    card = get_active_key_card(room_number)
+    card = show_active_key_card(room_number)
     if not card:
         logging.info(f"No active key card for room {room_number}. Please see the front desk.")
         return
-    expires = card.ExpiresAt.strftime("%Y-%m-%d") if card.ExpiresAt else "end of stay"
-    ui.box(
-        "My Key Card",
-        f"Card number: {card.CardNumber}\n"
-        f"Room:         {card.RoomNumber}\n"
-        f"Status:       {card.Status}\n"
-        f"Valid until:  {expires}",
-    )
     _log_door_event(card.CardNumber, room_number, "Granted", "Guest viewed key card")

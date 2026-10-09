@@ -879,6 +879,9 @@ def check_in():
         time.sleep(2)
         logging.info(f"Your room number is {room_number}.")
         if key_card:
+            # Show the same card panel the guest sees under "My Key Card", then state
+            # the number in plain text as well so it is readable without the box.
+            keycards.show_active_key_card(room_number, title="Your Key Card")
             logging.info(f"Your key card number is {key_card} and is ready for use.")
         else:
             logging.info("Your key card is ready for use. Please collect it from the front desk.")
