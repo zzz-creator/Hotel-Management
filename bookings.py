@@ -15,6 +15,7 @@ import rooms
 __all__ = [
     'book_room',
     'create_booking',
+    'customer_stays',
     '_find_booking',
     '_own_booking',
     'view_my_booking',
@@ -310,6 +311,32 @@ def book_room():
     lines.append(booking_ledger.booking_refund_policy(check_in, refund_cutoff, amount_charged=pay_amount)["summary"])
     ui.box("Booking Confirmed", "\n".join(lines))
     logging.info("Please quote your booking reference at the front desk.")
+
+
+def customer_stays(customer_id):
+    """A guest's own stays, keyed on their CustomerID (the web twin for "my bookings").
+
+    The console surfaces resolve a stay by room number or by name, which is right for
+    a shared console but wrong for the web: the signed-in principal's CustomerID is
+    the verified identity, and querying on it can never surface another same-named
+    guest's stays (docs/BOOKING.md privacy rules). Returns (room_number, check_in,
+    check_out) tuples, newest stay first. A missing profile id yields nothing.
+    """
+    if not customer_id:
+        return []
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return []
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT RoomNumber, CheckInDate, CheckOutDate FROM Reservations "
+                "WHERE CustomerID = ? ORDER BY CheckInDate DESC",
+                (customer_id,))
+            return [(r[0], r[1], r[2]) for r in cursor.fetchall()]
+    except Exception as e:
+        logging.error(f"Error reading stays for customer {customer_id}: {e}")
+        return []
 
 
 def _find_booking(booking_ref, customer_id=None):

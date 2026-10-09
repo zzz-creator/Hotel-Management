@@ -156,13 +156,21 @@ Each phase is one coherent, signed commit with the checks green.
       in tests/test_api.py (TestClient, services patched) ahead of the phase-6 test
       pass.
 - [ ] Phase 5 — expand to remaining domains + reports
-      Started: the read-only report slice shipped. Every reports.py report gained a
+      Slice 1 shipped: the read-only report slice. Every reports.py report gained a
       `rows_*` data twin over one `_run_query`, with `export_*` as thin CSV adapters over
       the same SQL (one definition; verify_e2e reads the loyalty CSV back to prove the
       export path did not drift). `GET /api/reports/{name}` (staff-only) serves those
       rows, taking the CLI option names (customer/room, start/end, floor/date,
-      booking_ref, limit). Still to come in this phase: rooms/reservations/billing/
-      loyalty/orders/admin read + write endpoints, each needing its own service twin.
+      booking_ref, limit).
+      Slice 2 shipped: the read surfaces. `GET /api/rooms` (open) quotes from the same
+      get_room_types() the wizard uses; `GET /api/reservations/board` (staff-only) wraps
+      the existing non-interactive arrivals_departures_board() twin; `GET
+      /api/guests/me/bookings` and `GET /api/guests/me/loyalty` (guest-only via a new
+      require_guest dependency) serve the guest's own stays and loyalty, keyed on the
+      cookie's verified CustomerID -- bookings.customer_stays() is the one new service
+      twin, because the console resolves a stay by room/name and the web must not.
+      Still to come in this phase: billing/folios, orders and admin read + write
+      endpoints, each needing its own service twin.
 - [ ] Phase 6 — API tests + docs/file-map updates
 
 ## Risks

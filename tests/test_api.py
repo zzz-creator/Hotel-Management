@@ -21,6 +21,7 @@ import booking_ledger
 import bookings
 import core
 import customer
+import loyalty
 import reservations
 import reports
 import rooms
@@ -436,6 +437,120 @@ class ReportTests(unittest.TestCase):
                                side_effect=RuntimeError("Database connection failed.")):
             response = client.get("/api/reports/transactions")
         self.assertEqual(response.status_code, 503)
+
+
+class ReadEndpointsTests(unittest.TestCase):
+    """Phase-5 read surfaces: the open room list, the staff board, and the guest's own
+    bookings + loyalty. Every data call is patched, so no database is touched."""
+
+    def _guest(self, email="g@example.com", customer_id=9):
+        client = _client()
+        _login_guest(client, email=email, customer_id=customer_id)
+        return client
+
+    def _staff(self):
+        client = _client()
+        _login_staff(client, username="ada")
+        return client
+
+    def test_room_types_are_open_and_mapped(self):
+        with mock.patch.object(rooms, "get_room_types",
+                               return_value=[("Deluxe", 200.0), ("Suite", 320.0)]):
+            response = _client().get("/api/rooms")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"rooms": [
+            {"room_type": "Deluxe", "nightly_rate": 200.0},
+            {"room_type": "Suite", "nightly_rate": 320.0},
+        ]})
+
+    def test_board_is_staff_only(self):
+        self.assertEqual(_client().get("/api/reservations/board").status_code, 401)
+        guest = self._guest()
+        self.assertEqual(guest.get("/api/reservations/board").status_code, 403)
+
+    def test_board_defaults_to_the_business_date(self):
+        client = self._staff()
+        board = ([("9012", "Garcia", "Ana", date(2026, 10, 9), date(2026, 10, 12))], [], [])
+        with mock.patch.object(core, "business_date", return_value=date(2026, 10, 9)), \
+             mock.patch.object(reservations, "arrivals_departures_board",
+                               return_value=board) as build:
+            response = client.get("/api/reservations/board")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(build.call_args.args, (date(2026, 10, 9),))
+        body = response.json()
+        self.assertEqual(body["date"], "2026-10-09")
+        self.assertEqual(body["arrivals"], [{
+            "room_number": "9012", "last_name": "Garcia", "first_name": "Ana",
+            "check_in": "2026-10-09", "check_out": "2026-10-12"}])
+        self.assertEqual(body["in_house"], [])
+        self.assertEqual(body["departures"], [])
+
+    def test_board_accepts_an_explicit_date(self):
+        client = self._staff()
+        board = ([], [], [("9001", "Lee", "Bo", date(2026, 10, 9), date(2026, 10, 9))])
+        with mock.patch.object(reservations, "arrivals_departures_board",
+                               return_value=board) as build:
+            response = client.get("/api/reservations/board", params={"on_date": "2026-10-09"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(build.call_args.args, (date(2026, 10, 9),))
+        self.assertEqual(response.json()["departures"][0]["first_name"], "Bo")
+
+    def test_guest_bookings_are_their_own(self):
+        client = self._guest(customer_id=9)
+        stays = [("9012", date(2026, 10, 1), date(2026, 10, 3)),
+                 ("9011", date(2026, 9, 1), date(2026, 9, 2))]
+        with mock.patch.object(bookings, "customer_stays", return_value=stays) as lookup:
+            response = client.get("/api/guests/me/bookings")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(lookup.call_args.args, (9,))
+        body = response.json()
+        self.assertEqual(body["customer_id"], 9)
+        self.assertEqual(body["email"], "g@example.com")
+        self.assertEqual(body["stays"], [
+            {"room_number": "9012", "check_in": "2026-10-01", "check_out": "2026-10-03",
+             "nights": 2},
+            {"room_number": "9011", "check_in": "2026-09-01", "check_out": "2026-09-02",
+             "nights": 1},
+        ])
+
+    def test_guest_bookings_require_a_guest_session(self):
+        self.assertEqual(_client().get("/api/guests/me/bookings").status_code, 401)
+        with mock.patch.object(bookings, "customer_stays") as lookup:
+            response = self._staff().get("/api/guests/me/bookings")
+        self.assertEqual(response.status_code, 403)
+        lookup.assert_not_called()
+
+    def test_loyalty_reads_balance_and_tier(self):
+        client = self._guest(customer_id=9)
+        details = {"tier": "Gold", "lifetime_points": 500, "points_multiplier": 1.5,
+                   "discount_percent": 5.0, "perks": "Late checkout"}
+        with mock.patch.object(loyalty, "get_points_by_customer", return_value=120) as points, \
+             mock.patch.object(loyalty, "get_tier_details_by_customer",
+                               return_value=details) as tier:
+            response = client.get("/api/guests/me/loyalty")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(points.call_args.args, (9,))
+        self.assertEqual(tier.call_args.args, (9,))
+        self.assertEqual(response.json(), {
+            "customer_id": 9, "email": "g@example.com", "eligible": True, "points": 120,
+            "lifetime_points": 500, "tier": "Gold", "points_multiplier": 1.5,
+            "discount_percent": 5.0, "perks": "Late checkout",
+        })
+
+    def test_loyalty_without_an_account_is_not_eligible(self):
+        client = self._guest(customer_id=9)
+        with mock.patch.object(loyalty, "get_points_by_customer", return_value=0), \
+             mock.patch.object(loyalty, "get_tier_details_by_customer", return_value=None):
+            response = client.get("/api/guests/me/loyalty")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertFalse(body["eligible"])
+        self.assertIsNone(body["tier"])
+        self.assertEqual(body["points"], 0)
+
+    def test_loyalty_requires_a_guest_session(self):
+        self.assertEqual(_client().get("/api/guests/me/loyalty").status_code, 401)
+        self.assertEqual(self._staff().get("/api/guests/me/loyalty").status_code, 403)
 
 
 class RequestValidationTests(unittest.TestCase):

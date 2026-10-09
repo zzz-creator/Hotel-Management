@@ -7,10 +7,12 @@ owns a business rule: both call the same non-interactive service functions in th
 domain modules, so the two cannot drift (AGENTS.md section 5).
 
 Phases 1-3 built the scaffold, the service twins and the cookie-session layer;
-phase 4 adds the pilot endpoints. Every handler touches the database only through
-a service function and is a plain `def`, so Starlette runs the blocking pyodbc call
-in its threadpool; never make such a handler `async def`, because a synchronous
-database call inside the event loop blocks every other request.
+phase 4 adds the pilot endpoints; phase 5 adds the report endpoints and the read
+surfaces (room list, staff board, guest's own bookings/loyalty). Every handler
+touches the database only through a service function and is a plain `def`, so
+Starlette runs the blocking pyodbc call in its threadpool; never make such a handler
+`async def`, because a synchronous database call inside the event loop blocks every
+other request.
 """
 import logging
 import os
@@ -32,6 +34,7 @@ import auth
 import booking_ledger
 import bookings
 import customer
+import loyalty
 import payments
 import reports
 import reservations
@@ -79,6 +82,14 @@ def require_staff(request: Request) -> dict:
     principal = require_principal(request)
     if principal["kind"] != "staff":
         raise HTTPException(status_code=403, detail="This action requires a staff account.")
+    return principal
+
+
+def require_guest(request: Request) -> dict:
+    """A guest principal; their own data (bookings, loyalty) is 403 for staff sessions."""
+    principal = require_principal(request)
+    if principal["kind"] != "guest":
+        raise HTTPException(status_code=403, detail="This endpoint is for signed-in guest accounts.")
     return principal
 
 
@@ -172,6 +183,78 @@ def availability(check_in: date, check_out: date, room_type: Optional[str] = Non
         {"room_number": room, "room_type": rtype, "status": status}
         for room, rtype, status in found
     ]}
+
+
+@router.get("/rooms")
+def rooms_list():
+    """Room categories with their nightly rates -- what the booking desk shows a guest before sign-in.
+
+    Like the availability endpoint this is deliberately open. The rates come from the
+    same get_room_types() the wizard quotes from, including its graceful fallback to
+    DEFAULT_ROOM_TYPE_RATES when the RoomTypes table is missing, so a disabled database
+    reads exactly as it does on the console rather than as a fabricated price.
+    """
+    return {"rooms": [
+        {"room_type": room_type, "nightly_rate": nightly_rate}
+        for room_type, nightly_rate in rooms.get_room_types()
+    ]}
+
+
+@router.get("/reservations/board")
+def reservations_board(on_date: Optional[date] = None,
+                       principal: dict = Depends(require_staff)):
+    """The staff arrivals / in-house / departures board for one day.
+
+    Staff-only because it names every arriving, in-house and departing guest
+    (docs/BOOKING.md privacy rules). `on_date` defaults to the business date; a day
+    with no activity arrives as three empty lists, matching the console board.
+    """
+    board_date = on_date or core.business_date()
+    arrivals, in_house, departures = reservations.arrivals_departures_board(board_date)
+
+    def _rows(entries):
+        return [{"room_number": entry[0], "last_name": entry[1], "first_name": entry[2],
+                 "check_in": str(entry[3]), "check_out": str(entry[4])} for entry in entries]
+
+    return {"date": str(board_date), "arrivals": _rows(arrivals),
+            "in_house": _rows(in_house), "departures": _rows(departures)}
+
+
+@router.get("/guests/me/bookings")
+def my_bookings(request: Request, principal: dict = Depends(require_guest)):
+    """The signed-in guest's own stays, newest first.
+
+    Privacy: the web identity is the cookie's verified CustomerID, never a name, so a
+    same-named stranger's stays cannot leak -- bookings.customer_stays() is keyed on
+    that id alone (docs/BOOKING.md privacy rules).
+    """
+    stays = bookings.customer_stays(principal["customer_id"])
+    return {"customer_id": principal["customer_id"], "email": principal["email"],
+            "stays": [{"room_number": stay[0], "check_in": str(stay[1]),
+                       "check_out": str(stay[2]),
+                       "nights": core.stay_nights(stay[1], stay[2])} for stay in stays]}
+
+
+@router.get("/guests/me/loyalty")
+def my_loyalty(request: Request, principal: dict = Depends(require_guest)):
+    """The signed-in guest's loyalty balance and tier, read-only.
+
+    Unlike the console flow, this GET never creates a missing loyalty account -- a read
+    must not write. When loyalty is disabled or the guest has no account yet, `eligible`
+    is false and the tier fields are null (the console prints the same pair of states).
+    """
+    customer_id = principal["customer_id"]
+    points = loyalty.get_points_by_customer(customer_id)
+    details = loyalty.get_tier_details_by_customer(customer_id)
+    name = principal["email"]
+    if details is None:
+        return {"customer_id": customer_id, "email": name, "eligible": False,
+                "points": points, "tier": None, "lifetime_points": None,
+                "points_multiplier": None, "discount_percent": None, "perks": None}
+    return {"customer_id": customer_id, "email": name, "eligible": True,
+            "points": points, "lifetime_points": details["lifetime_points"],
+            "tier": details["tier"], "points_multiplier": details["points_multiplier"],
+            "discount_percent": details["discount_percent"], "perks": details["perks"]}
 
 
 @router.post("/bookings", status_code=201)
