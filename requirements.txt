@@ -5,3 +5,10 @@ svglib
 reportlab
 rlPyCairo
 Pillow
+
+# Web/API edition (PLAN-web-api.md) -- run with `uvicorn api:app`
+fastapi
+uvicorn
+python-multipart
+itsdangerous
+httpx          # test-only: Starlette TestClient for tests/test_api.py

@@ -46,6 +46,7 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 | File | Role |
 |---|---|
 | `main.py` | Entry point **and compatibility facade**: `handle_cli_args()`, `main()`, the `get_connection = db.get_connection` alias, and the `from <module> import *` re-exports so `import main as app` still reaches every moved name. The application body lives in the domain modules below |
+| `api.py` | FastAPI web/API edition — a **second entry point** (`uvicorn api:app`) alongside the console, so the two share one service layer. Scaffold only today; see PLAN-web-api.md. `python main.py` is unchanged and remains the fallback |
 | `ui.py` | `rich`-based console helpers (menus, tables, prompts, `clear_screen`/`pause`) |
 | `reports.py` | CSV report exports, also a standalone CLI |
 | `db.py` | Connection string + `get_connection()` context manager |
@@ -129,7 +130,8 @@ re-runnable; it is not part of the runtime.
 reports), `PLAN-booking-system.md` (public booking desk), `PLAN-loyalty-per-night.md`,
 `PLAN-wire-up-rooms.md`, `PLAN-test-plan.md`, `PLAN-clearance-cards.md`,
 `PLAN-split-main-py.md` (the completed split of `main.py` into domain modules — layout,
-rules and risks).
+rules and risks), `PLAN-web-api.md` (the FastAPI edition alongside the console — service
+extraction, sessions, phases).
 Approved designs — read the relevant one before reworking a feature it covers.
 
 ---

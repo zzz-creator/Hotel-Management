@@ -52,6 +52,8 @@ CODE_FILES = (
     'keycards.py', 'reservations.py', 'booking_ledger.py', 'billing.py', 'orders.py',
     'notifications.py', 'bookings.py', 'customer.py', 'concierge.py', 'admin.py',
     'onboarding.py',
+    # The FastAPI edition (PLAN-web-api.md): a second entry point over the same services.
+    'api.py',
     'tests/patch_main.py',
     'reports.py', 'ui.py', 'db.py',
 )

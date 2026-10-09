@@ -25,7 +25,7 @@ programme. Python 3 on the console, SQL Server behind it.
 
 - Python 3.10+ (developed against 3.14)
 - SQL Server (LocalDB, Express, or full)
-- `pip install -r requirements.txt` — `pyodbc`, `rich`, `tqdm`, `svglib`, `reportlab`, `rlPyCairo`, `Pillow`
+- `pip install -r requirements.txt` — `pyodbc`, `rich`, `tqdm`, `svglib`, `reportlab`, `rlPyCairo`, `Pillow`, plus the web/API stack `fastapi`, `uvicorn`, `python-multipart`, `itsdangerous` (`httpx` is for the API tests)
 
 ## Getting started
 
@@ -41,6 +41,10 @@ copy config.ini.example config.ini
 # 3. Run it.
 pip install -r requirements.txt
 python main.py
+
+# 4. Optional: the web/API edition, a second entry point over the same service layer.
+#    The console above keeps working unchanged.
+uvicorn api:app --reload
 ```
 
 On first run the app detects that setup has not happened and walks you through it: it creates
@@ -90,6 +94,7 @@ python tests/check_applied_migrations.py    # the live server vs database.sql
 | `ui.py` | `rich` console helpers — menus, tables, prompts |
 | `reports.py` | CSV exports, also a standalone CLI |
 | `db.py` | Connection string and the `get_connection()` context manager |
+| `api.py` | FastAPI web/API edition — a second entry point (`uvicorn api:app`) over the same services as the console. Scaffold only today; see `PLAN-web-api.md` |
 | `clearance.py` / `clearance_ui.py` | Clearance-card catalog/mapping and the tkinter keycard window |
 | `database.sql` | Authoritative fresh-install script |
 | `migrations/` | 25 incremental changes, applied in order |
