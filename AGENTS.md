@@ -46,7 +46,8 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 | File | Role |
 |---|---|
 | `main.py` | Entry point **and compatibility facade**: `handle_cli_args()`, `main()`, the `get_connection = db.get_connection` alias, and the `from <module> import *` re-exports so `import main as app` still reaches every moved name. The application body lives in the domain modules below |
-| `api.py` | FastAPI web/API edition — a **second entry point** (`uvicorn api:app`) alongside the console, so the two share one service layer. Scaffold only today; see PLAN-web-api.md. `python main.py` is unchanged and remains the fallback |
+| `api.py` | FastAPI web/API edition — a **second entry point** (`uvicorn api:app`) alongside the console, so the two share one service layer. Scaffold only today (health probe + session middleware); the pilot endpoints are PLAN-web-api.md phase 4. `python main.py` is unchanged and remains the fallback |
+| `auth.py` | Signed-cookie session handling for the web edition (PLAN-web-api.md phase 3): principal payloads, cookie issue/clear, `current_principal`. Deliberately free of FastAPI/Starlette imports so it imports before the web deps are installed; the endpoint layer registers it with `Depends()` in phase 4 |
 | `ui.py` | `rich`-based console helpers (menus, tables, prompts, `clear_screen`/`pause`) |
 | `reports.py` | CSV report exports, also a standalone CLI |
 | `db.py` | Connection string + `get_connection()` context manager |
@@ -76,7 +77,7 @@ re-runnable; it is not part of the runtime.
 | `rooms.py` | Rooms, room types and rates, housekeeping status, availability |
 | `items.py` | The orderable item catalogue |
 | `loyalty.py` | Loyalty points, tiers, accrual and redemption |
-| `payments.py` | Credit-card entry and validation (`process_credit_card`, `luhn_check`) |
+| `payments.py` | Credit-card entry and validation (`process_credit_card`, `luhn_check`, `validate_card`) |
 | `keycards.py` | Key cards and door access |
 | `reservations.py` | Reservations, check-in, the arrivals/departures board |
 | `booking_ledger.py` | Booking-desk money: deposits, prepayments, refunds, booking references |
@@ -117,6 +118,7 @@ re-runnable; it is not part of the runtime.
 | `tests/test_clearance.py` | Clearance-card SVG name extraction, the tier×category matrix, role cards |
 | `tests/test_keycards.py` | The key-card panel shared by check-in and "My Key Card": the card number and stay details it shows |
 | `tests/test_web_services.py` | The Phase-2 web-facing services (PLAN-web-api.md): `verify_staff_login`, `authenticate_customer`, `create_booking`, `check_in_eligibility` / `perform_check_in`, the `card_last4` ledger parameter |
+| `tests/test_auth.py` | Phase-3 web auth (PLAN-web-api.md): principal payloads, the signed-cookie round-trip, `current_principal` and the `audit_actor` mapping |
 | `tests/patch_main.py` | Test helper: `patch_main(name, ...)` resolves the module that owns `name` after the split, so a test patch still reaches every caller (the split's standing risk) |
 | `tests/check_schema_sync.py` | `database.sql` vs migrations (a **script**, not a test) |
 | `tests/check_migration_sql.py` | Static T-SQL lint (a **script**, not a test) |

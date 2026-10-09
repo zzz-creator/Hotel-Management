@@ -781,6 +781,51 @@ class CardInputHardeningTests(unittest.TestCase):
             self.assertFalse(app.validate_expiration_date(bad), f"{bad!r} should be rejected")
 
 
+class WebCardValidationTests(unittest.TestCase):
+    """validate_card() is the web path's non-interactive gate (PLAN-web-api.md phase 3):
+    the same acceptance criteria as process_credit_card(), but it returns
+    (ok, reason, last4) and never touches the process-global digits."""
+
+    def test_accepts_a_real_card_and_returns_only_last_four(self):
+        ok, reason, last4 = app.validate_card("4111111111111111", "12/2030", "123")
+        self.assertTrue(ok)
+        self.assertIsNone(reason)
+        self.assertEqual(last4, "1111")
+
+    def test_rejects_a_bad_number_with_the_console_reason(self):
+        ok, reason, last4 = app.validate_card("nope", "12/2030", "123")
+        self.assertFalse(ok)
+        self.assertEqual(reason, "Invalid credit card number.")
+        self.assertIsNone(last4)
+
+    def test_rejects_expired_or_shapeless_expiry(self):
+        for expiry in ("01/2020", "00/2030", "13/2030", "", "nope"):
+            ok, reason, _ = app.validate_card("4111111111111111", expiry, "123")
+            self.assertFalse(ok, f"{expiry!r} should be rejected")
+            self.assertEqual(reason, "Invalid or expired credit card expiration date.")
+
+    def test_rejects_a_bad_cvv(self):
+        for cvv in ("12", "1234", "12a", "abc"):
+            ok, reason, _ = app.validate_card("4111111111111111", "12/2030", cvv)
+            self.assertFalse(ok, f"{cvv!r} should be rejected")
+            self.assertEqual(reason, "Invalid CVV.")
+
+    def test_a_missing_cvv_is_allowed(self):
+        ok, _, last4 = app.validate_card("4111111111111111", "12/2030")
+        self.assertTrue(ok)
+        self.assertEqual(last4, "1111")
+
+    def test_never_writes_the_process_global_digits(self):
+        with patch_main("LAST_CARD_DIGITS", "9999"):
+            ok, _, last4 = app.validate_card("4111111111111111", "12/2030", "123")
+            self.assertTrue(ok)
+            self.assertEqual(last4, "1111")
+            self.assertEqual(
+                session.LAST_CARD_DIGITS, "9999",
+                "the web gate must not write the shared process global",
+            )
+
+
 class InvoiceInsertTests(unittest.TestCase):
     """The check-out INSERT must work both before and after migration 018."""
 

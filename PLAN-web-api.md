@@ -1,6 +1,6 @@
 # PLAN: Web/API edition alongside the console
 
-**Status:** approved 9 October 2026. Phase 2, commit 1 in progress.
+**Status:** approved 9 October 2026. Phases 1-3 shipped; phase 4 (pilot endpoints) is next.
 
 ## Goal
 
@@ -137,9 +137,16 @@ Each phase is one coherent, signed commit with the checks green.
 
 - [x] **Commit 1 — `log_audit()` actor parameter.** Additive; console unaffected; existing
       audit tests stay green; new test pins the override.
-- [ ] Phase 1 — scaffold `api.py`, `requirements.txt`
-- [ ] Phase 2 — extract services (login, availability, create booking, check-in); console delegates
-- [ ] Phase 3 — auth + session (cookies, principal, actor plumbing, de-globalise card digits)
+- [x] Phase 1 — scaffold `api.py`, `requirements.txt`
+- [x] Phase 2 — extract services (login, availability, create booking, check-in); console delegates
+- [x] Phase 3 — auth + session (cookies, principal, actor plumbing, de-globalise card digits)
+      Shipped dependency-light: `auth.py` has no FastAPI/Starlette import, so it imports
+      before the web deps are installed. `current_principal` is a plain callable over the
+      signed session dict; phase 4 registers it with `Depends()` and owns the Request
+      annotation, the `SameSite` baseline and the HTTPException mapping. The
+      de-globalisation piece is `payments.validate_card()`, returning `(ok, reason, last4)`
+      and never writing `session.LAST_CARD_DIGITS`; `create_booking` already takes the
+      digits explicitly via `card_last4`.
 - [ ] Phase 4 — pilot endpoints + Pydantic models
 - [ ] Phase 5 — expand to remaining domains + reports
 - [ ] Phase 6 — API tests + docs/file-map updates

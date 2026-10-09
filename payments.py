@@ -7,6 +7,7 @@ import session
 __all__ = [
     'luhn_check',
     'process_credit_card',
+    'validate_card',
     'validate_expiration_date',
 ]
 
@@ -103,3 +104,27 @@ def validate_expiration_date(expiration_date):
     except (ValueError, IndexError):
         # Return False if the date format is invalid
         return False
+
+
+def validate_card(card_number, expiration_date, cvv=None):
+    """Non-interactive card gate for the web path (PLAN-web-api.md phase 3).
+
+    Mirrors process_credit_card()'s acceptance criteria -- Luhn, a real non-expired
+    month, a 3-digit CVV, in that order -- but returns (ok, reason, last4) instead of
+    prompting, and **never** writes session.LAST_CARD_DIGITS. That global is the
+    console's process-wide convenience; under concurrent web users guest A's digits
+    must never be attributed to guest B, so the caller owns the returned digits and
+    passes them into record_booking_payment(card_last4=...).
+
+    `reason` is None on success and a console-identical message on failure, so the
+    endpoint layer can hand it back to the caller unchanged. `cvv=None` skips the CVV
+    check for a caller that does not collect one. Unlike process_credit_card(), the
+    CVV here must be all digits, not merely three characters long.
+    """
+    if not luhn_check(card_number):
+        return False, "Invalid credit card number.", None
+    if not validate_expiration_date(expiration_date):
+        return False, "Invalid or expired credit card expiration date.", None
+    if cvv is not None and (not str(cvv).isdigit() or len(str(cvv)) != 3):
+        return False, "Invalid CVV.", None
+    return True, None, str(card_number).strip()[-4:]
