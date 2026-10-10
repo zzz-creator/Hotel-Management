@@ -2,10 +2,10 @@
 """concierge: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see PLAN-split-main-py.md)."""
 import logging
 from datetime import datetime
-import db
-import ui
-import session
-import core
+from . import db
+from . import ui
+from . import session
+from . import core
 
 __all__ = [
     'contact_concierge',

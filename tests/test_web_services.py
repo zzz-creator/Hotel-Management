@@ -24,8 +24,8 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import main as app
-import session
 from patch_main import patch_main
+from hotel import session
 
 
 def _row(**kwargs):

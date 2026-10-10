@@ -2,7 +2,7 @@
 """payments: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see PLAN-split-main-py.md)."""
 import logging
 from datetime import datetime
-import session
+from . import session
 
 __all__ = [
     'luhn_check',

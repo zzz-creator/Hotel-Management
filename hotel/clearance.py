@@ -19,10 +19,12 @@ import re
 import shutil
 import logging
 
-from db import get_connection
+from .db import get_connection
 
-ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Clearance cards")
-EXPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "exports")
+# Both the card assets and the report exports live at the repository root, one level up
+# from this package, so resolve them as ../<name> rather than next to this module.
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Clearance cards")
+EXPORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "exports")
 
 CATEGORIES = [
     "Standard", "Deluxe", "Junior Suite", "Suite",

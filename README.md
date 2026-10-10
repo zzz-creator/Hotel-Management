@@ -33,7 +33,7 @@ programme. Python 3 on the console, SQL Server behind it.
 # 1. Create the database and schema. This is the authoritative fresh-install script:
 #    it creates the database if absent, then all 28 tables, constraints, indexes and seeds.
 #    Run it in SSMS or sqlcmd. Never run it against a database that already has data.
-sqlcmd -S localhost -E -i database.sql
+sqlcmd -S localhost -E -i sql/database.sql
 
 # 2. Configure. config.ini is untracked and holds the SQL Server password.
 copy config.ini.example config.ini
@@ -64,7 +64,7 @@ for databases that predate a feature.
 
 ```powershell
 python main.py --report transactions --format csv
-python reports.py --report loyalty --room 9012
+python -m hotel.reports --report loyalty --room 9012
 ```
 
 ## Tests
@@ -88,18 +88,19 @@ python tests/check_applied_migrations.py    # the live server vs database.sql
 
 ## How it is laid out
 
-| File | Role |
+The repository root holds only what launches the application and the documentation;
+everything the two entry points import lives in the `hotel/` package (moved there on
+9 October 2026).
+
+| File / folder | Role |
 |---|---|
-| `main.py` | Entry point and compatibility facade; the app body is split by domain across `core.py`, `session.py`, `rooms.py`, `items.py`, `loyalty.py`, `payments.py`, `keycards.py`, `reservations.py`, `booking_ledger.py`, `billing.py`, `orders.py`, `notifications.py`, `bookings.py`, `customer.py`, `concierge.py`, `admin.py`, `onboarding.py` |
-| `ui.py` | `rich` console helpers — menus, tables, prompts |
-| `reports.py` | CSV exports, also a standalone CLI |
-| `db.py` | Connection string and the `get_connection()` context manager |
-| `api.py` | FastAPI web/API edition — a second entry point (`uvicorn api:app`) over the same services as the console. Scaffold only today; see `PLAN-web-api.md` |
-| `clearance.py` / `clearance_ui.py` | Clearance-card catalog/mapping and the tkinter keycard window |
-| `database.sql` | Authoritative fresh-install script |
+| `main.py` | Console entry point and compatibility facade — re-exports the `hotel/` package so `import main as app` still works |
+| `api.py` | FastAPI web/API edition — a second entry point (`uvicorn api:app`) over the same services as the console; see `docs/plans/PLAN-web-api.md` |
+| `hotel/` | The runtime package: `core.py`, `session.py`, `rooms.py`, `items.py`, `loyalty.py`, `payments.py`, `keycards.py`, `reservations.py`, `booking_ledger.py`, `billing.py`, `orders.py`, `notifications.py`, `bookings.py`, `customer.py`, `concierge.py`, `admin.py`, `onboarding.py`, plus `db.py` (connection + `get_connection()`), `ui.py` (rich console helpers), `reports.py` (CSV exports, also `python -m hotel.reports`), `clearance.py` / `clearance_ui.py` (clearance cards), `auth.py` / `schemas.py` (web edition) |
+| `sql/database.sql` | Authoritative fresh-install script |
 | `migrations/` | 25 incremental changes, applied in order |
-| `docs/` | Schema reference, booking/loyalty rules, deviations, onboarding |
-| `tests/` | The suite, plus the four check scripts |
+| `docs/` | Schema reference, booking/loyalty rules, deviations, onboarding, and the design plans under `docs/plans/` |
+| `tests/` | The suite, plus the four check scripts and `verify_e2e.py` |
 | `config.ini.example` | The tracked config template. `config.ini` itself is never committed |
 
 `AGENTS.md` is the working agreement for coding agents on this repo: the invariants that must

@@ -65,7 +65,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-DATABASE_SQL = ROOT / 'database.sql'
+DATABASE_SQL = ROOT / 'sql' / 'database.sql'
 MIGRATIONS_DIR = ROOT / 'migrations'
 SEED_SQL = ROOT / 'tests' / 'seed_smoke_test.sql'
 
@@ -604,10 +604,10 @@ def phase_exercise(server, scratch, user, password):
     check_in, check_out = _as_date(check_in), _as_date(check_out)
     info('using stay %s / %s -> %s, customer %s' % (room, check_in, check_out, customer_id))
 
-    import core as coremod
-    import db as dbmod
+    from hotel import core as coremod
+    from hotel import db as dbmod
     import main as app
-    import session
+    from hotel import session
 
     scratch_cs = conn_str(server, scratch, user, password)
     coremod.CONNECTION_STRING = scratch_cs
@@ -750,7 +750,7 @@ def phase_exercise(server, scratch, user, password):
                                 "WHERE CustomerID = ?", (customer_id,))
         conn_or_none().commit()
 
-        import reports as reportsmod
+        from hotel import reports as reportsmod
         _EXPORT_DIR[0] = tempfile.mkdtemp(prefix='verify_e2e_exports_')
         reportsmod.EXPORT_DIR = _EXPORT_DIR[0]
 
@@ -1045,7 +1045,7 @@ def phase_rollback_safety(app):
 
 def get_connection_mod():
     """The db module, imported lazily so a bad import cannot skip the earlier phases."""
-    import db
+    from hotel import db
     return db
 
 

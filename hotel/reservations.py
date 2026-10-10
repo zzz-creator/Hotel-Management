@@ -5,13 +5,13 @@ import time
 import re
 from datetime import datetime
 from datetime import timedelta
-import db
-import ui
-import core
-import keycards
-import loyalty
-import session
-import rooms as _mod_rooms
+from . import db
+from . import ui
+from . import core
+from . import keycards
+from . import loyalty
+from . import session
+from . import rooms as _mod_rooms
 
 __all__ = [
     'add_reservation',

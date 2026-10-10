@@ -3,6 +3,12 @@
 Status: **DONE** (8 October 2026). Approved 8 October 2026.
 Decisions confirmed by the user: Strategy B (clean modules, tests adapted), ~15-file split.
 
+> **Update, 9 October 2026:** every module this plan created now lives in the `hotel/`
+> package, with `main.py` (console) and `api.py` (web) left at the repository root as the
+> only two entry points. Imports inside the package are relative (`from . import db`); the
+> tier rule and the `__all__`-ownership rule below are unchanged, and the file names in the
+> tables below are now under `hotel/`.
+
 `main.py` was 8,998 lines with 257 functions. This plan moved them into domain modules
 without changing behaviour. **See the "What actually happened" section at the end for the
 handful of places the build diverged from the design below.**

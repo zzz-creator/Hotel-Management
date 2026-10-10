@@ -2,15 +2,15 @@
 """bookings: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see PLAN-split-main-py.md)."""
 import logging
 from datetime import timedelta
-import db
-import ui
-import session
-import booking_ledger
-import core
-import customer
-import payments
-import reservations
-import rooms
+from . import db
+from . import ui
+from . import session
+from . import booking_ledger
+from . import core
+from . import customer
+from . import payments
+from . import reservations
+from . import rooms
 
 __all__ = [
     'book_room',

@@ -34,6 +34,13 @@ consumes. Re-running therefore needs the monolith restored from the tag first:
 The tool refuses to run against a file that does not look like the monolith (fewer than 200
 top-level defs), so a forgotten restore fails loudly instead of rewriting every module from
 the facade.
+
+Note (9 October 2026): this tool regenerates the *pre-package* layout. It writes each module
+to `ROOT/<name>.py` and re-exports them from `main.py`, which was correct when the split ran,
+but the modules now live in `hotel/` with relative imports and `main.py` / `api.py` are the
+only root Python files (AGENTS.md section 2). Re-running it here therefore rebuilds the loose
+root modules; treat its output as a historical reproduction and repackage afterwards, or
+repoint the write/import generation at `hotel/`.
 """
 import ast
 import collections

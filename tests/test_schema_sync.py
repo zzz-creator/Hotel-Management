@@ -88,7 +88,7 @@ class ProjectSqlIsParsedTests(unittest.TestCase):
     """
 
     def setUp(self):
-        # The checker resolves 'migrations/*.sql' and 'database.sql' relative to the CWD,
+        # The checker resolves 'migrations/*.sql' and 'sql/database.sql' relative to the CWD,
         # so run from the repository root regardless of where the suite was invoked.
         self._cwd = os.getcwd()
         os.chdir(ROOT)
@@ -109,7 +109,7 @@ class ProjectSqlIsParsedTests(unittest.TestCase):
 
     def test_database_sql_parses_the_same_two_indexes(self):
         found = checker.parse_unique_indexes(
-            (ROOT / 'database.sql').read_text(encoding='utf-8'), True)
+            (ROOT / 'sql' / 'database.sql').read_text(encoding='utf-8'), True)
         self.assertIn('UX_CustomerProfiles_Email', found)
         self.assertIn('UX_ReservationPayments_BookingRef_Charge', found)
 
@@ -117,7 +117,7 @@ class ProjectSqlIsParsedTests(unittest.TestCase):
         migration = checker.parse_unique_indexes(
             (ROOT / 'migrations' / '019_customer_identity.sql').read_text(encoding='utf-8'), False)
         database = checker.parse_unique_indexes(
-            (ROOT / 'database.sql').read_text(encoding='utf-8'), True)
+            (ROOT / 'sql' / 'database.sql').read_text(encoding='utf-8'), True)
         for found in (migration, database):
             self.assertTrue(found['UX_CustomerProfiles_Email'][2],
                             'the Email unique index must stay FILTERED in both files')

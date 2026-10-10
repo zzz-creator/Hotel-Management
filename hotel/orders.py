@@ -3,14 +3,14 @@
 import logging
 from decimal import Decimal
 from datetime import datetime
-import db
-import ui
-import session
-import billing
-import core
-import items
-import loyalty
-import payments
+from . import db
+from . import ui
+from . import session
+from . import billing
+from . import core
+from . import items
+from . import loyalty
+from . import payments
 
 __all__ = [
     'ORDER_STATUSES',

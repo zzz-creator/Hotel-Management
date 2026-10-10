@@ -6,7 +6,7 @@ the repo's current environment; `_FakeRequest` stands in for the SessionMiddlewa
 """
 import unittest
 
-import auth
+from hotel import auth
 
 
 class _FakeRequest:

@@ -4,7 +4,9 @@
 The application used to live here in one ~9,000-line file. It is now split by domain --
 rooms, items, loyalty, payments, keycards, reservations, booking_ledger, billing, orders,
 notifications, bookings, customer, concierge, admin, onboarding -- on top of core (config,
-settings, audit, shared helpers) and session (process-wide mutable state). See
+settings, audit, shared helpers) and session (process-wide mutable state). The modules
+live in the `hotel/` package (since 9 October 2026); this facade re-exports them for
+callers that still write `import main as app`. See
 PLAN-split-main-py.md for the layout and the rules the modules follow.
 
 This file keeps three jobs:
@@ -29,39 +31,39 @@ import logging
 import sys
 import time
 
-import db
-import reports
-import ui
+from hotel import db
+from hotel import reports
+from hotel import ui
 
 # Named imports for the few owners main() itself calls. The star imports below bind the
 # same names, but a star import binds a value once, so `patch_main("run_first_run_onboarding")`
 # (which patches onboarding.run_first_run_onboarding) would miss main()'s copy. Calling
 # through the module keeps main() patchable like every other caller.
-import core
-import rooms
-import loyalty
-import onboarding
-import customer
-import admin
-import bookings
+from hotel import core
+from hotel import rooms
+from hotel import loyalty
+from hotel import onboarding
+from hotel import customer
+from hotel import admin
+from hotel import bookings
 
 # Importing core is also what reads config.ini and calls db.init(CONNECTION_STRING).
-from core import *            # noqa: F401,F403
-from rooms import *           # noqa: F401,F403
-from items import *           # noqa: F401,F403
-from loyalty import *         # noqa: F401,F403
-from payments import *        # noqa: F401,F403
-from keycards import *        # noqa: F401,F403
-from reservations import *    # noqa: F401,F403
-from booking_ledger import *  # noqa: F401,F403
-from billing import *         # noqa: F401,F403
-from orders import *          # noqa: F401,F403
-from notifications import *   # noqa: F401,F403
-from bookings import *        # noqa: F401,F403
-from customer import *        # noqa: F401,F403
-from concierge import *       # noqa: F401,F403
-from admin import *           # noqa: F401,F403
-from onboarding import *      # noqa: F401,F403
+from hotel.core import *
+from hotel.rooms import *
+from hotel.items import *
+from hotel.loyalty import *
+from hotel.payments import *
+from hotel.keycards import *
+from hotel.reservations import *
+from hotel.booking_ledger import *
+from hotel.billing import *
+from hotel.orders import *
+from hotel.notifications import *
+from hotel.bookings import *
+from hotel.customer import *
+from hotel.concierge import *
+from hotel.admin import *
+from hotel.onboarding import *
 
 # Set up logging
 #logging.basicConfig(filename='hotel_management.log', level=logging.DEBUG, format='%(asctime)s:%(levelname)s:%(message)s')
@@ -104,7 +106,7 @@ def __getattr__(name):
     the session state changes at runtime. `app.CURRENT_CUSTOMER` must read the live value,
     so an unknown attribute is looked up in session before failing.
     """
-    import session
+    from hotel import session
     try:
         return getattr(session, name)
     except AttributeError:

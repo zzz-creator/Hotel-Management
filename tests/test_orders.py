@@ -11,11 +11,7 @@ the thing that must never drift between the two front-ends.
 import unittest
 from unittest import mock
 
-import db
-import core
-import billing
-import loyalty
-import orders
+from hotel import db, core, billing, loyalty, orders
 
 
 class _FakeCursor:

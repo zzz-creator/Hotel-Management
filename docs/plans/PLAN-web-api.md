@@ -2,6 +2,10 @@
 
 **Status:** approved 9 October 2026. Phases 1-4 shipped; phase 5 (expand) is next.
 
+> **Update, 9 October 2026:** the domain modules referenced below now live in the `hotel/`
+> package (see `AGENTS.md` §2); `api.py` and `main.py` stay at the repository root. Decision
+> 1 still holds — this is a location change, not a new `services/` layer.
+
 ## Goal
 
 Add a **FastAPI** web/API front-end for multi-user use, **without changing the console

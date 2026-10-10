@@ -46,16 +46,18 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 CODE_FILES = (
     'main.py',
-    # The split of main.py into domain modules (see PLAN-split-main-py.md). All of them are
-    # project code, so a function named in the docs may now be defined in any of these.
-    'core.py', 'session.py', 'rooms.py', 'items.py', 'loyalty.py', 'payments.py',
-    'keycards.py', 'reservations.py', 'booking_ledger.py', 'billing.py', 'orders.py',
-    'notifications.py', 'bookings.py', 'customer.py', 'concierge.py', 'admin.py',
-    'onboarding.py',
+    # The split of main.py into domain modules (see PLAN-split-main-py.md), packaged under
+    # hotel/ since 9 October 2026. All of them are project code, so a function named in the
+    # docs may be defined in any of these.
+    'hotel/core.py', 'hotel/session.py', 'hotel/rooms.py', 'hotel/items.py',
+    'hotel/loyalty.py', 'hotel/payments.py', 'hotel/keycards.py',
+    'hotel/reservations.py', 'hotel/booking_ledger.py', 'hotel/billing.py',
+    'hotel/orders.py', 'hotel/notifications.py', 'hotel/bookings.py',
+    'hotel/customer.py', 'hotel/concierge.py', 'hotel/admin.py', 'hotel/onboarding.py',
     # The FastAPI edition (PLAN-web-api.md): a second entry point over the same services.
     'api.py',
     'tests/patch_main.py',
-    'reports.py', 'ui.py', 'db.py',
+    'hotel/reports.py', 'hotel/ui.py', 'hotel/db.py',
 )
 DOC_FILES = ('AGENTS.md', 'docs/SCHEMA.md', 'docs/BOOKING.md', 'docs/DEVIATIONS.md',
              'docs/ONBOARDING.md')
@@ -161,7 +163,7 @@ def check_documented_functions(docs, functions):
 
 
 def database_tables():
-    sql = read('database.sql')
+    sql = read('sql', 'database.sql')
     return set(re.findall(r'CREATE TABLE \[dbo\]\.\[(\w+)\]', sql, re.I))
 
 

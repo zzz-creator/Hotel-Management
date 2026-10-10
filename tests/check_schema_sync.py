@@ -71,7 +71,7 @@ def parse_migration_tables():
 
 
 def parse_database_sql():
-    dsql = open('database.sql', encoding='utf-8').read()
+    dsql = open('sql/database.sql', encoding='utf-8').read()
     tables = {}
     for m in re.finditer(r'CREATE TABLE \[dbo\]\.\[(\w+)\]\(\s*(.*?)\n\) ON', dsql, re.S):
         table, body = m.group(1), m.group(2)
@@ -131,7 +131,7 @@ def parse_migration_alters(migration):
 
 def database_sql_primary_keys():
     """Read each table's PRIMARY KEY column(s) out of database.sql."""
-    dsql = ' '.join(open('database.sql', encoding='utf-8').read().split())
+    dsql = ' '.join(open('sql/database.sql', encoding='utf-8').read().split())
     pks = {}
     for m in re.finditer(r'CREATE TABLE \[dbo\]\.\[(\w+)\].*?PRIMARY KEY CLUSTERED '
                          r'\(\s*\[?(\w+)\]?', dsql, re.I):
@@ -275,7 +275,7 @@ def check_unique_indexes():
     for path in sorted(glob.glob('migrations/*.sql')):
         for name, spec in parse_unique_indexes(open(path, encoding='utf-8').read(), False).items():
             expected[name] = (spec, path)
-    actual = parse_unique_indexes(open('database.sql', encoding='utf-8').read(), True)
+    actual = parse_unique_indexes(open('sql/database.sql', encoding='utf-8').read(), True)
 
     for name in sorted(expected):
         spec, path = expected[name]

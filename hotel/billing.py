@@ -2,15 +2,15 @@
 """billing: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see PLAN-split-main-py.md)."""
 import logging
 import os
-import db
-import ui
-import session
-import booking_ledger
-import core
-import keycards
-import loyalty
-import payments
-import rooms
+from . import db
+from . import ui
+from . import session
+from . import booking_ledger
+from . import core
+from . import keycards
+from . import loyalty
+from . import payments
+from . import rooms
 
 __all__ = [
     '_invoices_have_prepaid_column',
@@ -817,7 +817,7 @@ def print_invoice(invoice_id):
         logging.info("Note: 'Card (pay now)' items were charged when the order was placed and are not part of the check-out Subtotal/Tax above.")
 
     try:
-        save_dir = os.path.join(os.path.dirname(__file__), "exports")
+        save_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "exports")
         os.makedirs(save_dir, exist_ok=True)
         path = os.path.join(save_dir, f"invoice_{invoice_id}.txt")
         lines = ["=" * 64, f"INVOICE #{inv.InvoiceID}", f"Room: {inv.RoomNumber}", f"Date: {inv.InvoiceDate}"]

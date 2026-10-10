@@ -16,7 +16,7 @@ from PIL import Image, ImageTk
 from svglib.svglib import svg2rlg
 from reportlab.graphics import renderPM
 
-import clearance
+from . import clearance
 
 CARD_W, CARD_H = 338, 189  # 4x the 84.5 x 47.25 card viewBox
 

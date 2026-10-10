@@ -3,9 +3,9 @@
 import logging
 import random
 from datetime import timedelta
-import db
-import session
-import core
+from . import db
+from . import session
+from . import core
 
 __all__ = [
     'BOOKING_REF_PREFIX',

@@ -1,11 +1,11 @@
 # type: ignore
 """items: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see PLAN-split-main-py.md)."""
 import logging
-import db
-import ui
-import core
-import loyalty
-import rooms
+from . import db
+from . import ui
+from . import core
+from . import loyalty
+from . import rooms
 
 __all__ = [
     'display_items',

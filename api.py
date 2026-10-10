@@ -28,22 +28,22 @@ from starlette.middleware.sessions import SessionMiddleware
 # core._ensure_database_config()'s interactive setup prompt: an API server must not block on
 # stdin. A missing config.ini simply leaves connections returning None, which every
 # get_connection() caller already handles.
-import core  # noqa: F401
+from hotel import core  # noqa: F401
 
-import admin
-import auth
-import billing
-import booking_ledger
-import bookings
-import customer
-import items
-import loyalty
-import orders
-import payments
-import reports
-import reservations
-import rooms
-from schemas import (
+from hotel import admin
+from hotel import auth
+from hotel import billing
+from hotel import booking_ledger
+from hotel import bookings
+from hotel import customer
+from hotel import items
+from hotel import loyalty
+from hotel import orders
+from hotel import payments
+from hotel import reports
+from hotel import reservations
+from hotel import rooms
+from hotel.schemas import (
     AdvanceOrderRequest, CheckInRequest, CreateBookingRequest, CreateOrderRequest,
     CreateUserRequest, LoginRequest, SetPasswordRequest,
 )

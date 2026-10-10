@@ -10,9 +10,9 @@ import getpass
 import configparser
 import re
 from datetime import datetime
-import db
-import ui
-import session
+from . import db
+from . import ui
+from . import session
 
 __all__ = [
     'config',
@@ -79,7 +79,9 @@ __all__ = [
 
 # Database connection settings
 config = configparser.ConfigParser()
-config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
+# The code lives under hotel/, but config.ini stays at the repository root (it is untracked
+# and shared by every entry point), so resolve it as the package's parent directory.
+config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.ini')
 config.read(config_path)
 #DATABASE
 server = config.get('database', 'server', fallback='' )

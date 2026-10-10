@@ -16,19 +16,11 @@ from unittest import mock
 
 from fastapi.testclient import TestClient
 
-import admin
 import api
-import billing
-import booking_ledger
-import bookings
-import core
-import customer
-import items
-import loyalty
-import orders
-import reservations
-import reports
-import rooms
+from hotel import (
+    admin, billing, booking_ledger, bookings, core, customer, items, loyalty, orders,
+    reservations, reports, rooms,
+)
 
 
 def _client():

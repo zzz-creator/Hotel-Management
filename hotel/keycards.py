@@ -6,11 +6,11 @@ import string
 from datetime import datetime
 from datetime import timedelta
 import pyodbc
-import db
-import ui
-import session
-import core
-import rooms
+from . import db
+from . import ui
+from . import session
+from . import core
+from . import rooms
 
 __all__ = [
     'KEY_CARD_PREFIX',

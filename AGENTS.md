@@ -45,15 +45,15 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 
 | File | Role |
 |---|---|
-| `main.py` | Entry point **and compatibility facade**: `handle_cli_args()`, `main()`, the `get_connection = db.get_connection` alias, and the `from <module> import *` re-exports so `import main as app` still reaches every moved name. The application body lives in the domain modules below |
+| `main.py` | Entry point **and compatibility facade**: `handle_cli_args()`, `main()`, the `get_connection = db.get_connection` alias, and the `from hotel.<module> import *` re-exports so `import main as app` still reaches every moved name. The application body lives in the `hotel/` package below |
 | `api.py` | FastAPI web/API edition — a **second entry point** (`uvicorn api:app`) alongside the console, so the two share one service layer. Phases 1-4 shipped: scaffold, session middleware, and the pilot endpoints (auth login/logout/me, availability, bookings, check-in) wired to the service twins, with the cookie principal as the audit actor. Phase 5 added the read-only report endpoints (`/api/reports/{name}`, staff-only) and the read surfaces: the open room list, the staff arrivals/departures board, the guest-only `/api/guests/me/bookings` + `/api/guests/me/loyalty` (new `require_guest` dependency; the guest reads are keyed on the cookie's CustomerID), and the staff-only billing reads (`/api/rooms/{room}/invoices`, `/api/invoices/{invoice_id}`, `/api/rooms/{room}/folio`, `/api/rooms/{room}/outstanding`). `python main.py` is unchanged and remains the fallback |
-| `auth.py` | Signed-cookie session handling for the web edition (PLAN-web-api.md phase 3): principal payloads, cookie issue/clear, `current_principal`. Deliberately free of FastAPI/Starlette imports so it imports before the web deps are installed; the endpoint layer registers it with `Depends()` in phase 4 |
-| `schemas.py` | Pydantic request models for the pilot endpoints (PLAN-web-api.md phase 4): the discriminated staff/guest login body, the booking body, the check-in body |
-| `ui.py` | `rich`-based console helpers (menus, tables, prompts, `clear_screen`/`pause`) |
-| `reports.py` | Report data twins (`rows_*` → `_run_query`) with `export_*` CSV adapters over the same SQL (one definition, two front-ends), the `REPORTS` export registry, the `REPORT_ROWS` registry + `report_rows()` the API reads, also a standalone CLI |
-| `db.py` | Connection string + `get_connection()` context manager |
-| `clearance.py` | Clearance-card catalog: SVG name extraction, tier×category guest matrix, role cards, room/username lookup, export |
-| `clearance_ui.py` | Tkinter "tap your keycard" window: card image, extracted name, scan entry at the bottom |
+| `hotel/auth.py` | Signed-cookie session handling for the web edition (PLAN-web-api.md phase 3): principal payloads, cookie issue/clear, `current_principal`. Deliberately free of FastAPI/Starlette imports so it imports before the web deps are installed; the endpoint layer registers it with `Depends()` in phase 4 |
+| `hotel/schemas.py` | Pydantic request models for the pilot endpoints (PLAN-web-api.md phase 4): the discriminated staff/guest login body, the booking body, the check-in body |
+| `hotel/ui.py` | `rich`-based console helpers (menus, tables, prompts, `clear_screen`/`pause`) |
+| `hotel/reports.py` | Report data twins (`rows_*` → `_run_query`) with `export_*` CSV adapters over the same SQL (one definition, two front-ends), the `REPORTS` export registry, the `REPORT_ROWS` registry + `report_rows()` the API reads, also a standalone CLI (`python -m hotel.reports`) |
+| `hotel/db.py` | Connection string + `get_connection()` context manager |
+| `hotel/clearance.py` | Clearance-card catalog: SVG name extraction, tier×category guest matrix, role cards, room/username lookup, export |
+| `hotel/clearance_ui.py` | Tkinter "tap your keycard" window: card image, extracted name, scan entry at the bottom |
 | `tools/convert_clearance_svgs.py` | Optional one-shot SVG→PNG rasterizer for the cards (needs `svglib`/`reportlab`/`Pillow`) |
 | `config.ini` | DB connection only. **Untracked** — copy `config.ini.example` |
 | `config.ini.example` | The tracked template for the above; blank `password` |
@@ -62,40 +62,48 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 | `README.md` | What the project is, requirements, setup, tests, and the "not production software" warnings. The first thing anyone landing on the repo reads |
 | `LICENSE` | AGPLv3, verbatim from gnu.org. §13 is why this is AGPL and not GPL — a modified copy served over a network must offer its source |
 
-New interactive output goes through `ui.py`, never inline `rich`.
+New interactive output goes through `hotel/ui.py`, never inline `rich`.
 
-**The `main.py` split** (see [PLAN-split-main-py.md](PLAN-split-main-py.md)). `main.py` was
+**The `main.py` split** (see [docs/plans/PLAN-split-main-py.md](docs/plans/PLAN-split-main-py.md)). `main.py` was
 one ~9,000-line file; it is now a facade over these modules. Cross-module calls are
 **module-qualified** (`billing.post_room_charge(...)`, `session.CURRENT_USER`) so a test that
 patches the owner module affects every caller, and mutable process state lives in
 `session.py`. `tools/split_main.py` performs the split from the old monolith and is
 re-runnable; it is not part of the runtime.
 
+**On 9 October 2026 the modules moved into the `hotel/` package.** `main.py` (console) and
+`api.py` (web) stay at the repository root as the only two entry points — nothing outside
+`hotel/` is needed to launch either — and imports inside the package are **relative**
+(`from . import db`), which keeps the one-binding-per-module rule intact: patching
+`hotel.<module>.<name>` still reaches every caller. Resources that stayed at the root
+(`config.ini`, `exports/`, `Clearance cards/`) are resolved as the package's parent, not
+next to the module.
+
 | Module | Owns |
 |---|---|
-| `core.py` | Config bootstrap (`_ensure_database_config`), `HotelSettings` access (`get_setting`/`_setting_float`), `log_audit`, tax/pricing, and the shared helpers (`validate_room`, `stay_nights`, `upsert_customer_profile`, …) |
-| `session.py` | Process-wide mutable state: `CURRENT_USER`, `CURRENT_CUSTOMER`, `LAST_CARD_DIGITS` and the three cached capability probes. `main.__getattr__` forwards reads here; writers use `session.X = ...` |
-| `rooms.py` | Rooms, room types and rates, housekeeping status, availability |
-| `items.py` | The orderable item catalogue |
-| `loyalty.py` | Loyalty points, tiers, accrual and redemption |
-| `payments.py` | Credit-card entry and validation (`process_credit_card`, `luhn_check`, `validate_card`) |
-| `keycards.py` | Key cards and door access |
-| `reservations.py` | Reservations, check-in, the arrivals/departures board |
-| `booking_ledger.py` | Booking-desk money: deposits, prepayments, refunds, booking references |
-| `billing.py` | Check-out, invoices, the room charge, the folio. The invoice/folio **reads** are twins: `load_invoice()` (the data `print_invoice()` renders — one definition) and `open_folio()` (the IsBilled window a check-out bills) |
-| `orders.py` | F&B and in-room orders |
-| `notifications.py` | In-app notifications and staff alerts |
-| `bookings.py` | The public booking desk; also `customer_stays()`, the CustomerID-keyed "my bookings" twin the web reads (the console resolves a stay by room/name, which the web must not) |
-| `customer.py` | Guest accounts, sign-in, the guest panel |
-| `concierge.py` | Concierge requests |
-| `admin.py` | The Admin Panel, users, the IT/valet panels |
-| `onboarding.py` | The first-run wizard and setup checklist |
+| `hotel/core.py` | Config bootstrap (`_ensure_database_config`), `HotelSettings` access (`get_setting`/`_setting_float`), `log_audit`, tax/pricing, and the shared helpers (`validate_room`, `stay_nights`, `upsert_customer_profile`, …) |
+| `hotel/session.py` | Process-wide mutable state: `CURRENT_USER`, `CURRENT_CUSTOMER`, `LAST_CARD_DIGITS` and the three cached capability probes. `main.__getattr__` forwards reads here; writers use `session.X = ...` |
+| `hotel/rooms.py` | Rooms, room types and rates, housekeeping status, availability |
+| `hotel/items.py` | The orderable item catalogue |
+| `hotel/loyalty.py` | Loyalty points, tiers, accrual and redemption |
+| `hotel/payments.py` | Credit-card entry and validation (`process_credit_card`, `luhn_check`, `validate_card`) |
+| `hotel/keycards.py` | Key cards and door access |
+| `hotel/reservations.py` | Reservations, check-in, the arrivals/departures board |
+| `hotel/booking_ledger.py` | Booking-desk money: deposits, prepayments, refunds, booking references |
+| `hotel/billing.py` | Check-out, invoices, the room charge, the folio. The invoice/folio **reads** are twins: `load_invoice()` (the data `print_invoice()` renders — one definition) and `open_folio()` (the IsBilled window a check-out bills) |
+| `hotel/orders.py` | F&B and in-room orders |
+| `hotel/notifications.py` | In-app notifications and staff alerts |
+| `hotel/bookings.py` | The public booking desk; also `customer_stays()`, the CustomerID-keyed "my bookings" twin the web reads (the console resolves a stay by room/name, which the web must not) |
+| `hotel/customer.py` | Guest accounts, sign-in, the guest panel |
+| `hotel/concierge.py` | Concierge requests |
+| `hotel/admin.py` | The Admin Panel, users, the IT/valet panels |
+| `hotel/onboarding.py` | The first-run wizard and setup checklist |
 
 ### Schema
 
 | File | Role |
 |---|---|
-| `database.sql` | **Authoritative fresh-install script.** Creates the database if absent, then every table, constraint, index and seed row. Never relies on a migration to produce a table |
+| `sql/database.sql` | **Authoritative fresh-install script.** Creates the database if absent, then every table, constraint, index and seed row. Never relies on a migration to produce a table |
 | `migrations/001..028_*.sql` | Incremental changes, applied in order, for databases that already exist |
 | `docs/SCHEMA.md` | Per-table reference, migration inventory, degradation matrix |
 | `docs/DEVIATIONS.md` | Behaviours this app deliberately does **not** have, and what would close each |
@@ -132,11 +140,12 @@ re-runnable; it is not part of the runtime.
 
 ### Design docs
 
-`PLAN-room-rates-and-folios.md` (room rates, split folio, availability, guest features,
-reports), `PLAN-booking-system.md` (public booking desk), `PLAN-loyalty-per-night.md`,
-`PLAN-wire-up-rooms.md`, `PLAN-test-plan.md`, `PLAN-clearance-cards.md`,
-`PLAN-split-main-py.md` (the completed split of `main.py` into domain modules — layout,
-rules and risks), `PLAN-web-api.md` (the FastAPI edition alongside the console — service
+`docs/plans/PLAN-room-rates-and-folios.md` (room rates, split folio, availability, guest features,
+reports), `docs/plans/PLAN-booking-system.md` (public booking desk),
+`docs/plans/PLAN-loyalty-per-night.md`, `docs/plans/PLAN-wire-up-rooms.md`,
+`docs/plans/PLAN-test-plan.md`, `docs/plans/PLAN-clearance-cards.md`,
+`docs/plans/PLAN-split-main-py.md` (the completed split of `main.py` into domain modules — layout,
+rules and risks), `docs/plans/PLAN-web-api.md` (the FastAPI edition alongside the console — service
 extraction, sessions, phases).
 Approved designs — read the relevant one before reworking a feature it covers.
 
@@ -395,15 +404,16 @@ quietly committing a failure.
 ## 6. Verification
 
 ```powershell
-python -m py_compile main.py core.py session.py rooms.py items.py loyalty.py `
-    payments.py keycards.py reservations.py booking_ledger.py billing.py orders.py `
-    notifications.py bookings.py customer.py concierge.py admin.py onboarding.py `
-    db.py reports.py ui.py                                    # syntax
+python -m py_compile main.py api.py hotel/core.py hotel/session.py hotel/rooms.py `
+    hotel/items.py hotel/loyalty.py hotel/payments.py hotel/keycards.py `
+    hotel/reservations.py hotel/booking_ledger.py hotel/billing.py hotel/orders.py `
+    hotel/notifications.py hotel/bookings.py hotel/customer.py hotel/concierge.py `
+    hotel/admin.py hotel/onboarding.py hotel/db.py hotel/reports.py hotel/ui.py  # syntax
 python -m unittest discover -s tests                          # unit tests
 python tests/check_schema_sync.py                             # schema drift
 python tests/check_migration_sql.py                           # T-SQL lint
 python tests/check_docs_sync.py                               # docs are stale?
-python tests/check_applied_migrations.py                      # live DB matches database.sql
+python tests/check_applied_migrations.py                      # live DB matches sql/database.sql
 python tests/verify_e2e.py                                    # run it, on a throwaway database
 ```
 
@@ -432,10 +442,10 @@ Also useful:
 pip install -r requirements.txt
 python main.py                                          # run the app
 python main.py --report transactions --format csv       # report via the app
-python reports.py --report loyalty --room 9012                  # report via the CLI
+python -m hotel.reports --report loyalty --room 9012          # report via the CLI
 ```
 
-`reports.py` exposes a `REPORTS` registry (`transactions`, `reservations`, `loyalty`,
+`hotel/reports.py` exposes a `REPORTS` registry (`transactions`, `reservations`, `loyalty`,
 `invoices`, `revenue`, `occupancy`, `housekeeping`, `audit`, `guest_satisfaction`,
 `booking_ledger`); both
 CLIs and the admin "Export Reports" menu dispatch through it, so a new report needs one
