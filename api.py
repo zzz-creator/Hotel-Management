@@ -44,7 +44,8 @@ import reports
 import reservations
 import rooms
 from schemas import (
-    AdvanceOrderRequest, CheckInRequest, CreateBookingRequest, CreateOrderRequest, LoginRequest,
+    AdvanceOrderRequest, CheckInRequest, CreateBookingRequest, CreateOrderRequest,
+    CreateUserRequest, LoginRequest, SetPasswordRequest,
 )
 
 # Signed-cookie sessions (PLAN-web-api.md, decision 2). The secret is read from the
@@ -533,6 +534,48 @@ def admin_promotions(principal: dict = Depends(require_admin)):
         {"promotion_id": p[0], "title": p[1], "details": p[2], "discount_code": p[3]}
         for p in orders.get_promotions()
     ]}
+
+
+@router.post("/admin/users", status_code=201)
+def admin_create_user(body: CreateUserRequest,
+                      principal: dict = Depends(require_admin)):
+    """Create a staff account, admin-only -- the Admin Panel's Add User.
+
+    Returns 409 when the name is taken, 400 for a role the console cannot sign in to.
+    delete_user() and edit_user() have no API twin on purpose: deleting an account is
+    the destructive, master-override class of action and editing can overwrite
+    credentials, so both stay on the console.
+    """
+    outcome = admin.create_user(body.username, body.password, body.role,
+                                actor=auth.audit_actor(principal))
+    if outcome == 'exists':
+        raise HTTPException(409, f"User '{body.username}' already exists.")
+    if outcome == 'invalid_role':
+        raise HTTPException(400, "Role must be one of: admin, manager, staff.")
+    if outcome == 'error':
+        raise HTTPException(500, f"User '{body.username}' could not be created.")
+    return {"username": body.username, "role": body.role}
+
+
+@router.post("/admin/users/{username}/unlock")
+def admin_unlock_user(username: str, principal: dict = Depends(require_admin)):
+    """Clear a locked account, admin-only -- the console's Clear Lockout screen."""
+    if not admin.clear_lockout(username):
+        raise HTTPException(500, f"Lockout for '{username}' could not be cleared.")
+    return {"username": username, "status": "unlocked"}
+
+
+@router.post("/admin/users/{username}/password")
+def admin_reset_password(username: str, body: SetPasswordRequest,
+                         principal: dict = Depends(require_admin)):
+    """Reset a user's password, admin-only -- the console's Reset Password screen."""
+    outcome = admin.set_password(username, body.password,
+                                 actor=auth.audit_actor(principal))
+    if outcome == 'not_found':
+        raise HTTPException(404, f"User '{username}' not found.")
+    if outcome == 'error':
+        raise HTTPException(500, f"Password for '{username}' could not be reset.")
+    return {"username": username, "status": "reset"}
 
 
 @router.post("/bookings", status_code=201)

@@ -155,7 +155,7 @@ Each phase is one coherent, signed commit with the checks green.
       and the audit actor comes from auth.audit_actor(principal). Endpoint tests live
       in tests/test_api.py (TestClient, services patched) ahead of the phase-6 test
       pass.
-- [ ] Phase 5 — expand to remaining domains + reports
+- [x] Phase 5 — expand to remaining domains + reports
       Slice 1 shipped: the read-only report slice. Every reports.py report gained a
       `rows_*` data twin over one `_run_query`, with `export_*` as thin CSV adapters over
       the same SQL (one definition; verify_e2e reads the loyalty CSV back to prove the
@@ -197,9 +197,16 @@ Each phase is one coherent, signed commit with the checks green.
       (manager+) and require_admin() mirror the menu capability sets tests/test_admin_menu.py
       pins. Endpoints: `GET /api/admin/users`, `/items` and `/discounts` for manager+,
       `GET /api/admin/promotions` for admin only.
-      Still to come in this phase: the admin write endpoints (create user, unlock,
-      reset password); the destructive, master-override-gated console actions stay on the
-      console.
+      Slice 6 shipped: the admin writes. create_user() (role set locked to the three
+      core._prompt_role() offers, outcomes 'created'/'exists'/'invalid_role'/'error') and
+      set_password() ('ok'/'not_found'/'error') are the non-interactive twins of
+      add_user()/reset_user_password(); the console prints the same messages through
+      them, now also naming its current admin as the audit actor. Endpoints, all
+      admin-only: `POST /api/admin/users` (201/409/400/500), `POST
+      /api/admin/users/{username}/unlock` (clear_lockout, already a twin) and `POST
+      /api/admin/users/{username}/password` (404/500). The destructive console actions
+      have no API twin: delete_user() and edit_user() stay on the console, as does the
+      interactive require_master_override() gate (docs/DEVIATIONS.md section 15).
 - [ ] Phase 6 — API tests + docs/file-map updates
 
 ## Risks

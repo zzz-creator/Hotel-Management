@@ -105,3 +105,23 @@ class AdvanceOrderRequest(BaseModel):
     console's numbered prompt is the same two choices.
     """
     action: Literal["advance", "cancel"]
+
+
+class CreateUserRequest(BaseModel):
+    """Body for POST /api/admin/users (admin-only): a new staff account.
+
+    The role is validated as the service's job (create_user rejects anything the
+    console's core._prompt_role() cannot offer), so the API cannot mint an account the
+    Admin Panel has no branch for.
+    """
+    username: str
+    password: str
+    role: str
+
+
+class SetPasswordRequest(BaseModel):
+    """Body for POST /api/admin/users/{username}/password (admin-only).
+
+    Plaintext on purpose, like every login flow in the app (AGENTS.md section 3).
+    """
+    password: str

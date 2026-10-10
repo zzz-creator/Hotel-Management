@@ -332,3 +332,24 @@ Two decisions inside that gate:
   NULL for exactly the front-desk and pre-019 stays, so requiring an owned reservation
   would lock out the guests whose link the desk has not made yet. A message is the whole
   enforcement; the reservation check was considered and rejected here, not overlooked.
+
+## 15. The web edition has no delete/edit-account or master-gated endpoints
+
+**Where:** `api.py` — the admin writes that exist are `POST /api/admin/users`,
+`POST /api/admin/users/{username}/unlock` and `POST /api/admin/users/{username}/password`;
+**Severity:** a deliberate API boundary, effective 9 October 2026.
+
+Phase 5 wired the account-management reads and those three writes onto the API, and
+stopped there. `delete_user()` and `edit_user()` stay console-only: deleting an account
+is destructive in the same class as the master-gated console actions — a leaked API
+credential deleting staff accounts is exactly the blast radius those guards exist for —
+and in-place editing can overwrite credentials and blank out a username. The API's own
+admin write is creation only, so its blast radius is bounded by the account count.
+
+`require_master_override()` is interactive by design — a typed master password at the
+console, separate from being admin — and has no HTTP twin: the web session already
+proves the admin's identity, and a second "master" secret sent over the wire would only
+re-introduce the config-password the override was built to avoid. The on-boundary fee is
+that a deletion or an account edit needs a console session. Closing it would mean a
+`DELETE /api/admin/users/{username}` plus an edit endpoint, and (to keep the master gate)
+a body field for the master password — deliberately not built.

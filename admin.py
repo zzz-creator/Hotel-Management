@@ -31,6 +31,7 @@ __all__ = [
     'admin_login',
     'verify_staff_login',
     'add_user',
+    'create_user',
     'delete_user',
     'view_users',
     'list_users',
@@ -43,6 +44,7 @@ __all__ = [
     'list_discount_codes',
     'manage_discount_codes',
     'reset_user_password',
+    'set_password',
     'IT_SYSTEMS',
     'IT_SOFTWARE',
     'IT_TROUBLESHOOTING',
@@ -238,6 +240,39 @@ def admin_login():
             return False, None, False
 
 
+def create_user(new_username: str, new_password: str, role: str, actor=None):
+    """Create a user account. Returns 'created', 'exists', 'invalid_role' or 'error'.
+
+    Non-interactive twin of add_user(): the prompts (and the core._prompt_role() gate)
+    stay on the console; this is the shared write both front-ends use, and the audit
+    row names the actor who created the account rather than whichever console signed
+    in last. The role set matches core._prompt_role(), so the API cannot mint an
+    account the Admin Panel has no branch for.
+    """
+    new_username = new_username.strip()
+    new_password = new_password.strip()
+    if role not in ('admin', 'manager', 'staff'):
+        logging.info(f"Invalid role for user '{new_username}'.")
+        return 'invalid_role'
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return 'error'
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM Users WHERE Username = ?", (new_username,))
+            if cursor.fetchone():
+                logging.info(f"User '{new_username}' already exists.")
+                return 'exists'
+            cursor.execute("INSERT INTO Users (Username, Password, Role) VALUES (?, ?, ?)", (new_username, new_password, role))
+            conn.commit()
+            core.log_audit("CREATE", "User", new_username, f"Role {role}", user=actor)
+            logging.info(f"User '{new_username}' added successfully.")
+            return 'created'
+    except Exception as e:
+        logging.error(f"Error adding user: {e}")
+        return 'error'
+
+
 def add_user():
     try:
         new_username = input("Enter new username: ").strip()
@@ -246,21 +281,9 @@ def add_user():
         if not role:
             logging.info("No account was created.")
             return
-        with db.get_connection() as conn:
-            if conn is None:
-                return
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1 FROM Users WHERE Username = ?", (new_username,))
-            if cursor.fetchone():
-                logging.info(f"User '{new_username}' already exists.")
-                return
-            cursor.execute("INSERT INTO Users (Username, Password, Role) VALUES (?, ?, ?)", (new_username, new_password, role))
-            conn.commit()
-            core.log_audit("CREATE", "User", new_username, f"Role {role}")
-            logging.info(f"User '{new_username}' added successfully.")
+        create_user(new_username, new_password, role, actor=_mod_session.CURRENT_USER)
     except Exception as e:
         logging.error(f"Error adding user: {e}")
-    # connection closed by context manager
 
 def delete_user():
     try:
@@ -728,26 +751,42 @@ def manage_discount_codes():
                     logging.info("Invalid choice. Please try again.")
     except Exception as e:
         logging.error(f"Error managing discount codes: {e}")
+def set_password(username: str, new_password: str, actor=None):
+    """Change a user's password. Returns 'ok', 'not_found' or 'error'.
+
+    Non-interactive twin of reset_user_password(): the prompts stay on the console;
+    the existence check, the write and the audit row are shared, and the audit row
+    names the actor who reset it. The console maps not_found/error to its single
+    "User not found." line; the endpoint maps them to 404/500.
+    """
+    username = username.strip()
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return 'error'
+            cursor = conn.cursor()
+            cursor.execute("SELECT Username FROM Users WHERE Username = ?", (username,))
+            if not cursor.fetchone():
+                return 'not_found'
+            cursor.execute("UPDATE Users SET Password = ? WHERE Username = ?", (new_password, username))
+            conn.commit()
+            core.log_audit("UPDATE", "User", username, "Password reset by admin", user=actor)
+            logging.info(f"Password for user '{username}' has been reset successfully.")
+            return 'ok'
+    except Exception as e:
+        logging.error(f"Error resetting user password: {e}")
+        return 'error'
+
+
 def reset_user_password():
     """Allow an admin to reset a user's password."""
-    with db.get_connection() as conn:
-        if conn is None:
-            logging.info("Database connection failed.")
-            return
-        try:
-            cursor = conn.cursor()
-            username = input("Enter the username to reset password: ").strip()
-            cursor.execute("SELECT Username FROM Users WHERE Username = ?", (username,))
-            if cursor.fetchone():
-                new_password = input("Enter new password: ").strip()
-                cursor.execute("UPDATE Users SET Password = ? WHERE Username = ?", (new_password, username))
-                conn.commit()
-                core.log_audit("UPDATE", "User", username, "Password reset by admin")
-                logging.info(f"Password for user '{username}' has been reset successfully.")
-            else:
-                logging.info("User not found.")
-        except Exception as e:
-            logging.error(f"Error resetting user password: {e}")
+    try:
+        username = input("Enter the username to reset password: ").strip()
+        new_password = input("Enter new password: ").strip()
+        if set_password(username, new_password, actor=_mod_session.CURRENT_USER) != 'ok':
+            logging.info("User not found.")
+    except Exception as e:
+        logging.error(f"Error resetting user password: {e}")
 
 IT_SYSTEMS = ["Server", "Workstation", "POS Terminal", "WiFi Router", "Printer", "Database Server"]
 IT_SOFTWARE = ["Microsoft Office", "Antivirus", "Hotel Management Suite", "Printer Driver",

@@ -1003,6 +1003,87 @@ class AdminReadTests(unittest.TestCase):
              "discount_code": "SPRING"}]})
 
 
+class AdminWriteTests(unittest.TestCase):
+    """Phase-5 admin writes: create user / unlock / reset password, all admin-only."""
+
+    def _login(self, role):
+        client = _client()
+        _login_staff(client, username="ada", role=role)
+        return client
+
+    def test_writes_are_admin_only(self):
+        anonymous = _client()
+        self.assertEqual(
+            anonymous.post("/api/admin/users", json={
+                "username": "bob", "password": "pw", "role": "staff"}).status_code,
+            401)
+        for role in ("staff", "manager"):
+            client = self._login(role)
+            self.assertEqual(
+                client.post("/api/admin/users", json={
+                    "username": "bob", "password": "pw", "role": "staff"}).status_code,
+                403)
+            self.assertEqual(
+                client.post("/api/admin/users/bob/unlock").status_code, 403)
+            self.assertEqual(
+                client.post("/api/admin/users/bob/password",
+                            json={"password": "pw"}).status_code, 403)
+
+    def test_create_user_returns_201_and_names_the_actor(self):
+        client = self._login("admin")
+        with mock.patch.object(admin, "create_user", return_value="created") as find:
+            response = client.post("/api/admin/users", json={
+                "username": "bob", "password": "pw", "role": "staff"})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json(),
+                         {"username": "bob", "role": "staff"})
+        self.assertEqual(find.call_args.args, ("bob", "pw", "staff"))
+        self.assertEqual(find.call_args.kwargs["actor"], "ada")
+
+    def test_create_user_maps_each_outcome(self):
+        client = self._login("admin")
+        for outcome, status in (("exists", 409), ("invalid_role", 400),
+                                ("error", 500)):
+            with mock.patch.object(admin, "create_user", return_value=outcome):
+                response = client.post("/api/admin/users", json={
+                    "username": "bob", "password": "pw", "role": "staff"})
+            self.assertEqual(response.status_code, status, outcome)
+
+    def test_create_user_rejects_a_role_the_console_cannot_use(self):
+        # The real create_user, unpatched: the role gate returns before any DB open,
+        # so the endpoint answers 400 without a database.
+        client = self._login("admin")
+        response = client.post("/api/admin/users", json={
+            "username": "bob", "password": "pw", "role": "wizard"})
+        self.assertEqual(response.status_code, 400)
+
+    def test_unlock_maps_true_and_false(self):
+        client = self._login("admin")
+        with mock.patch.object(admin, "clear_lockout", return_value=True) as find:
+            response = client.post("/api/admin/users/bob/unlock")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"username": "bob", "status": "unlocked"})
+        self.assertEqual(find.call_args.args, ("bob",))
+        with mock.patch.object(admin, "clear_lockout", return_value=False):
+            self.assertEqual(
+                client.post("/api/admin/users/bob/unlock").status_code, 500)
+
+    def test_reset_password_maps_each_outcome_and_names_the_actor(self):
+        client = self._login("admin")
+        with mock.patch.object(admin, "set_password", return_value="ok") as find:
+            response = client.post("/api/admin/users/bob/password",
+                                   json={"password": "pw"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"username": "bob", "status": "reset"})
+        self.assertEqual(find.call_args.args, ("bob", "pw"))
+        self.assertEqual(find.call_args.kwargs["actor"], "ada")
+        for outcome, status in (("not_found", 404), ("error", 500)):
+            with mock.patch.object(admin, "set_password", return_value=outcome):
+                response = client.post("/api/admin/users/bob/password",
+                                       json={"password": "pw"})
+            self.assertEqual(response.status_code, status, outcome)
+
+
 class RequestValidationTests(unittest.TestCase):
     def test_login_without_a_password_is_422(self):
         response = _client().post("/api/auth/login", json={"kind": "staff", "username": "ada"})
