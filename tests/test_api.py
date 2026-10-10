@@ -11,12 +11,14 @@ global.
 import unittest
 from contextlib import ExitStack
 from datetime import date, datetime
+from types import SimpleNamespace
 from unittest import mock
 
 from fastapi.testclient import TestClient
 
 import admin
 import api
+import billing
 import booking_ledger
 import bookings
 import core
@@ -551,6 +553,162 @@ class ReadEndpointsTests(unittest.TestCase):
     def test_loyalty_requires_a_guest_session(self):
         self.assertEqual(_client().get("/api/guests/me/loyalty").status_code, 401)
         self.assertEqual(self._staff().get("/api/guests/me/loyalty").status_code, 403)
+
+
+class InvoiceReadTests(unittest.TestCase):
+    """Phase-5 billing reads: invoice list/detail, the live folio and the settlement
+    residue. All staff-only (billing names a guest's money), every data call patched."""
+
+    def _staff(self):
+        client = _client()
+        _login_staff(client, username="ada")
+        return client
+
+    def test_room_invoices_are_staff_only(self):
+        self.assertEqual(_client().get("/api/rooms/9012/invoices").status_code, 401)
+        guest = _client()
+        _login_guest(guest)
+        with mock.patch.object(billing, "list_invoices_for_room") as rows:
+            self.assertEqual(guest.get("/api/rooms/9012/invoices").status_code, 403)
+        rows.assert_not_called()
+
+    def test_room_invoices_list(self):
+        rows = [(101, "9012", date(2026, 10, 1), 276.85, 276.85),
+                (100, "9012", date(2026, 9, 1), 220.00, 0.0)]
+        with mock.patch.object(billing, "list_invoices_for_room", return_value=rows) as find:
+            response = self._staff().get("/api/rooms/9012/invoices")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(find.call_args.args, ("9012",))
+        self.assertEqual(response.json(), {
+            "room_number": "9012",
+            "invoices": [
+                {"invoice_id": 101, "room_number": "9012", "invoice_date": "2026-10-01",
+                 "total_amount": 276.85, "amount_paid": 276.85},
+                {"invoice_id": 100, "room_number": "9012", "invoice_date": "2026-09-01",
+                 "total_amount": 220.0, "amount_paid": 0.0},
+            ],
+        })
+
+    def test_invoice_detail_is_staff_only(self):
+        self.assertEqual(_client().get("/api/invoices/101").status_code, 401)
+        guest = _client()
+        _login_guest(guest)
+        with mock.patch.object(billing, "load_invoice") as load:
+            self.assertEqual(guest.get("/api/invoices/101").status_code, 403)
+        load.assert_not_called()
+
+    def test_invoice_detail_itemized(self):
+        header = SimpleNamespace(
+            InvoiceID=101, RoomNumber="9012", InvoiceDate=date(2026, 10, 1),
+            GuestName=" Ana Garcia ", Subtotal=250.0, DiscountCodeAmount=0.0,
+            TierDiscountAmount=0.0, TaxAmount=25.0, TotalAmount=275.0,
+            PointsRedeemed=0, RedemptionValue=0.0, AmountPaid=275.0,
+            PrepaidAmount=0.0, RoomSubtotal=200.0, RoomTaxAmount=20.0, RoomTotal=220.0,
+            FnbSubtotal=50.0, FnbDiscountCodeAmount=0.0, FnbTierDiscountAmount=0.0,
+            FnbTaxAmount=5.0)
+        items = [
+            SimpleNamespace(ID=1, ItemName="Room charge for 2026-10-01 - Deluxe",
+                            Quantity=2, UnitPrice=100.0, Amount=200.0, PaidEarlier=0,
+                            ChargeGroup="Room", CreatedAt=datetime(2026, 10, 1, 12, 0)),
+            SimpleNamespace(ID=2, ItemName="Club Sandwich", Quantity=2, UnitPrice=12.5,
+                            Amount=25.0, PaidEarlier=1, ChargeGroup="F&B",
+                            CreatedAt=datetime(2026, 10, 1, 13, 0)),
+        ]
+        payments = [
+            SimpleNamespace(Kind="Prepayment", Amount=200.0, CardLast4="1111",
+                            PaidAt=datetime(2026, 10, 1, 10, 30), Notes=None,
+                            AppliedToInvoiceID=101),
+        ]
+        with mock.patch.object(billing, "load_invoice",
+                               return_value=(header, items, payments)) as load:
+            response = self._staff().get("/api/invoices/101")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(load.call_args.args, (101,))
+        body = response.json()
+        self.assertEqual(body["invoice_id"], 101)
+        self.assertEqual(body["guest_name"], "Ana Garcia")
+        self.assertEqual(body["total_amount"], 275.0)
+        self.assertEqual(body["room_total"], 220.0)
+        self.assertEqual(body["fnb_subtotal"], 50.0)
+        self.assertEqual(body["items"], [
+            {"id": 1, "item_name": "Room charge for 2026-10-01 - Deluxe", "quantity": 2,
+             "unit_price": 100.0, "amount": 200.0, "paid_earlier": False,
+             "charge_group": "Room", "created_at": "2026-10-01 12:00:00"},
+            {"id": 2, "item_name": "Club Sandwich", "quantity": 2, "unit_price": 12.5,
+             "amount": 25.0, "paid_earlier": True, "charge_group": "F&B",
+             "created_at": "2026-10-01 13:00:00"},
+        ])
+        self.assertEqual(body["payments"], [
+            {"kind": "Prepayment", "amount": 200.0, "card_last4": "1111",
+             "paid_at": "2026-10-01 10:30:00", "notes": None,
+             "applied_to_invoice_id": 101},
+        ])
+
+    def test_invoice_not_found_is_404(self):
+        with mock.patch.object(billing, "load_invoice", return_value=None):
+            response = self._staff().get("/api/invoices/999")
+        self.assertEqual(response.status_code, 404)
+
+    def test_invoice_unreachable_is_503(self):
+        with mock.patch.object(billing, "load_invoice",
+                               side_effect=RuntimeError("Database connection failed.")):
+            response = self._staff().get("/api/invoices/101")
+        self.assertEqual(response.status_code, 503)
+
+    def test_folio_lists_unbilled_lines(self):
+        rows = [
+            (1, "Room charge for 2026-10-01 - Deluxe", 2, 100.0, 200.0, 0, "Room",
+             datetime(2026, 10, 1, 12, 0)),
+            (2, "Club Sandwich", 2, 12.5, 25.0, 1, "F&B", datetime(2026, 10, 1, 13, 0)),
+        ]
+        with mock.patch.object(billing, "open_folio", return_value=rows) as folio:
+            response = self._staff().get("/api/rooms/9012/folio")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(folio.call_args.args, ("9012",))
+        body = response.json()
+        self.assertEqual(body["room_number"], "9012")
+        self.assertEqual(body["lines"], [
+            {"id": 1, "item_name": "Room charge for 2026-10-01 - Deluxe", "quantity": 2,
+             "unit_price": 100.0, "amount": 200.0, "paid_earlier": False,
+             "charge_group": "Room", "created_at": "2026-10-01 12:00:00"},
+            {"id": 2, "item_name": "Club Sandwich", "quantity": 2, "unit_price": 12.5,
+             "amount": 25.0, "paid_earlier": True, "charge_group": "F&B",
+             "created_at": "2026-10-01 13:00:00"},
+        ])
+
+    def test_folio_is_staff_only(self):
+        self.assertEqual(_client().get("/api/rooms/9012/folio").status_code, 401)
+        guest = _client()
+        _login_guest(guest)
+        with mock.patch.object(billing, "open_folio") as folio:
+            self.assertEqual(guest.get("/api/rooms/9012/folio").status_code, 403)
+        folio.assert_not_called()
+
+    def test_outstanding_reports_the_residue(self):
+        residue = ["no invoice was ever issued, so the bill was never settled",
+                   "2 charge(s) are still unbilled"]
+        with mock.patch.object(billing, "settlement_outstanding", return_value=residue) as scan:
+            response = self._staff().get("/api/rooms/9012/outstanding")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(scan.call_args.args, ("9012",))
+        self.assertEqual(response.json(),
+                         {"room_number": "9012", "outstanding": residue})
+
+    def test_outstanding_is_staff_only(self):
+        self.assertEqual(_client().get("/api/rooms/9012/outstanding").status_code, 401)
+        guest = _client()
+        _login_guest(guest)
+        self.assertEqual(guest.get("/api/rooms/9012/outstanding").status_code, 403)
+
+    def test_print_invoice_is_a_renderer_over_load_invoice(self):
+        # The console renderer must not grow a second copy of the invoice query: it
+        # delegates all data to the twin the API reads.
+        with mock.patch.object(billing, "load_invoice", return_value=None) as load:
+            self.assertFalse(billing.print_invoice(5))
+        self.assertEqual(load.call_args.args, (5,))
+        with mock.patch.object(billing, "load_invoice",
+                               side_effect=RuntimeError("Database connection failed.")):
+            self.assertFalse(billing.print_invoice(5))
 
 
 class RequestValidationTests(unittest.TestCase):

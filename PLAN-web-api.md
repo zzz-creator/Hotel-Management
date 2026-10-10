@@ -169,7 +169,15 @@ Each phase is one coherent, signed commit with the checks green.
       require_guest dependency) serve the guest's own stays and loyalty, keyed on the
       cookie's verified CustomerID -- bookings.customer_stays() is the one new service
       twin, because the console resolves a stay by room/name and the web must not.
-      Still to come in this phase: billing/folios, orders and admin read + write
+      Slice 3 shipped: the billing reads, all staff-only. `GET /api/rooms/{room}/invoices`
+      and `GET /api/invoices/{invoice_id}` (404 vs 503 mapped) read the same
+      list_invoices_for_room() and a new load_invoice() twin: the itemized load was
+      extracted out of print_invoice(), which is now a pure renderer over it, so the
+      console and the API cannot disagree about an invoice's contents. `GET
+      /api/rooms/{room}/folio` is the live folio through the new open_folio() twin -- the
+      same IsBilled window bill_room_transactions() bills -- and `GET
+      /api/rooms/{room}/outstanding` serves the settlement_outstanding() residue strings.
+      Still to come in this phase: orders and admin read + write
       endpoints, each needing its own service twin.
 - [ ] Phase 6 — API tests + docs/file-map updates
 

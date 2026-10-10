@@ -31,6 +31,7 @@ import core  # noqa: F401
 
 import admin
 import auth
+import billing
 import booking_ledger
 import bookings
 import customer
@@ -255,6 +256,106 @@ def my_loyalty(request: Request, principal: dict = Depends(require_guest)):
             "points": points, "lifetime_points": details["lifetime_points"],
             "tier": details["tier"], "points_multiplier": details["points_multiplier"],
             "discount_percent": details["discount_percent"], "perks": details["perks"]}
+
+
+@router.get("/rooms/{room}/invoices")
+def room_invoices(room: str, principal: dict = Depends(require_staff)):
+    """The stored invoices for a room, newest first.
+
+    Staff-only: an invoice is a snapshot of a guest's money, and the room does not
+    belong to the reader by construction. The rows are the same list_invoices_for_room()
+    the console invoice menu reads, so the two cannot disagree about what exists.
+    """
+    rows = billing.list_invoices_for_room(room)
+    return {"room_number": room, "invoices": [
+        {"invoice_id": row[0], "room_number": row[1], "invoice_date": str(row[2]),
+         "total_amount": float(row[3] or 0.0), "amount_paid": float(row[4] or 0.0)}
+        for row in rows
+    ]}
+
+
+@router.get("/invoices/{invoice_id}")
+def invoice_detail(invoice_id: int, principal: dict = Depends(require_staff)):
+    """One invoice, itemized: header, the room/F&B lines and the payments that settled it.
+
+    Staff-only (guest name, card last four). The data is billing.load_invoice(), the
+    same twin print_invoice() renders, so a change to what an invoice contains lands
+    once. A missing invoice is 404; an unreachable database is 503.
+    """
+    try:
+        loaded = billing.load_invoice(invoice_id)
+    except RuntimeError:
+        raise _unavailable()
+    if not loaded:
+        raise HTTPException(404, f"No invoice #{invoice_id}.")
+    inv, items, payments = loaded
+    return {
+        "invoice_id": inv.InvoiceID, "room_number": inv.RoomNumber,
+        "invoice_date": str(inv.InvoiceDate),
+        "guest_name": (inv.GuestName or "").strip() or None,
+        "subtotal": float(inv.Subtotal or 0.0),
+        "discount_code_amount": float(inv.DiscountCodeAmount or 0.0),
+        "tier_discount_amount": float(inv.TierDiscountAmount or 0.0),
+        "tax_amount": float(inv.TaxAmount or 0.0),
+        "total_amount": float(inv.TotalAmount or 0.0),
+        "points_redeemed": inv.PointsRedeemed,
+        "redemption_value": float(inv.RedemptionValue or 0.0),
+        "amount_paid": float(inv.AmountPaid or 0.0),
+        "prepaid_amount": float(getattr(inv, "PrepaidAmount", 0) or 0.0),
+        "room_subtotal": float(getattr(inv, "RoomSubtotal", 0) or 0.0),
+        "room_tax_amount": float(getattr(inv, "RoomTaxAmount", 0) or 0.0),
+        "room_total": float(getattr(inv, "RoomTotal", 0) or 0.0),
+        "fnb_subtotal": float(getattr(inv, "FnbSubtotal", 0) or 0.0),
+        "fnb_discount_code_amount": float(getattr(inv, "FnbDiscountCodeAmount", 0) or 0.0),
+        "fnb_tier_discount_amount": float(getattr(inv, "FnbTierDiscountAmount", 0) or 0.0),
+        "fnb_tax_amount": float(getattr(inv, "FnbTaxAmount", 0) or 0.0),
+        "items": [
+            {"id": t.ID, "item_name": t.ItemName, "quantity": t.Quantity or 1,
+             "unit_price": float(t.UnitPrice or 0.0), "amount": float(t.Amount or 0.0),
+             "paid_earlier": bool(t.PaidEarlier),
+             "charge_group": t.ChargeGroup or core.CHARGE_GROUP_FNB,
+             "created_at": str(t.CreatedAt)}
+            for t in items
+        ],
+        "payments": [
+            {"kind": p.Kind, "amount": float(p.Amount or 0.0), "card_last4": p.CardLast4,
+             "paid_at": str(p.PaidAt), "notes": p.Notes,
+             "applied_to_invoice_id": p.AppliedToInvoiceID}
+            for p in payments
+        ],
+    }
+
+
+@router.get("/rooms/{room}/folio")
+def room_folio(room: str, principal: dict = Depends(require_staff)):
+    """The live folio a room's next check-out would bill, oldest line first.
+
+    Staff-only. Read through billing.open_folio(), the same window
+    bill_room_transactions() bills: unbilled lines, plus pay-now rows awaiting an
+    invoice. `paid_earlier` is true exactly for those pay-now rows.
+    """
+    rows = billing.open_folio(room)
+    return {"room_number": room, "lines": [
+        {"id": row[0], "item_name": row[1], "quantity": row[2] or 1,
+         "unit_price": float(row[3] or 0.0), "amount": float(row[4] or 0.0),
+         "paid_earlier": bool(row[5]),
+         "charge_group": row[6] or core.CHARGE_GROUP_FNB,
+         "created_at": str(row[7])}
+        for row in rows
+    ]}
+
+
+@router.get("/rooms/{room}/outstanding")
+def room_outstanding(room: str, principal: dict = Depends(require_staff)):
+    """What is still true before the stay's settlement counts as finished; empty = done.
+
+    Staff-only (stay state). The strings are exactly what settlement_outstanding()
+    reports on the console; here it is called with the room alone, so the stay-points
+    check -- which needs the stay's customer id and dates, not derivable from a room
+    number -- is skipped.
+    """
+    return {"room_number": room,
+            "outstanding": billing.settlement_outstanding(room)}
 
 
 @router.post("/bookings", status_code=201)

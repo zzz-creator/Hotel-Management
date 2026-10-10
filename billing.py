@@ -22,7 +22,9 @@ __all__ = [
     'bill_room_transactions',
     'billing_creator',
     'list_invoices_for_room',
+    'load_invoice',
     'print_invoice',
+    'open_folio',
     'invoices_menu',
     'void_invoice',
     'refund_invoice',
@@ -556,74 +558,139 @@ def list_invoices_for_room(room_number):
         return []
 
 
+def open_folio(room_number):
+    """The live folio a room's next check-out would bill: its unbilled Transactions.
+
+    The money a settlement will collect, read through the same window
+    bill_room_transactions() bills and settlement_outstanding() counts: rows with
+    IsBilled = 0, plus pay-now rows already billed at order time but not yet linked to
+    an invoice (IsBilled = 1 AND InvoiceID IS NULL). For rows in this window IsBilled is
+    the honest "paid at order" flag -- PaidEarlier is only stamped at invoicing, so it is
+    always 0/None here. Returns (it reads) rows of (ID, ItemName, Quantity, UnitPrice,
+    Amount, IsBilled, ChargeGroup, CreatedAt), oldest first; an empty list means nothing
+    is outstanding. The ItemName resolution mirrors load_invoice() so the same line is
+    named the same way before and after it is invoiced.
+    """
+    if not room_number:
+        return []
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return []
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT t.ID, "
+                "  COALESCE(it.Name, t.Description, "
+                "    CASE WHEN t.ItemID IS NULL THEN 'Charge' "
+                "         ELSE 'Item ' + CAST(t.ItemID AS varchar(20)) END) AS ItemName, "
+                "  t.Quantity, t.UnitPrice, t.Amount, t.IsBilled, "
+                "  COALESCE(t.ChargeGroup, 'F&B') AS ChargeGroup, t.CreatedAt "
+                "FROM Transactions t LEFT JOIN Items it ON it.ItemID = t.ItemID "
+                "WHERE t.RoomNumber = ? "
+                "  AND (t.IsBilled = 0 OR (t.IsBilled = 1 AND t.InvoiceID IS NULL)) "
+                "ORDER BY t.CreatedAt, t.ID",
+                (room_number,),
+            )
+            return cursor.fetchall()
+    except Exception as e:
+        logging.error(f"Error reading folio for room {room_number}: {e}")
+        return []
+
+
+def load_invoice(invoice_id):
+    """Load a stored invoice's data: (header row, item rows, payment rows), or None.
+
+    The data half of print_invoice(). The header carries every Invoices column the
+    renderer reads -- the 013 split-folio breakdown, and PrepaidAmount when migration
+    018 has applied. The items are the invoice's Transactions rows with the Items name
+    and ChargeGroup resolved. The payments are the ReservationPayments rows that settle
+    the stay: rows naming this exact invoice, falling back to the most recent check-in
+    for the room so an unapplied front-desk deposit still shows.
+
+    None means no such invoice exists; a connection failure raises RuntimeError and a
+    query failure propagates, so a caller can tell "not found" from "unavailable".
+    print_invoice() renders it and GET /api/invoices/{id} serializes it, so what an
+    invoice contains is defined once.
+    """
+    try:
+        invoice_id = int(invoice_id)
+    except (TypeError, ValueError):
+        return None
+    with db.get_connection() as conn:
+        if conn is None:
+            raise RuntimeError("Database connection failed.")
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT i.InvoiceID, i.RoomNumber, i.InvoiceDate, i.Subtotal, i.DiscountCodeAmount, "
+            "i.TierDiscountAmount, i.TaxAmount, i.TotalAmount, i.PointsRedeemed, i.RedemptionValue, i.AmountPaid, "
+            "i.RoomSubtotal, i.RoomTaxAmount, i.RoomTotal, i.FnbSubtotal, "
+            "i.FnbDiscountCodeAmount, i.FnbTierDiscountAmount, i.FnbTaxAmount, "
+            "(SELECT TOP 1 r.FirstName + ' ' + r.LastName FROM Reservations r "
+            "  WHERE r.RoomNumber = i.RoomNumber ORDER BY r.CheckInDate DESC) AS GuestName "
+            + (", i.PrepaidAmount" if _invoices_have_prepaid_column() else "")
+            + " FROM Invoices i WHERE i.InvoiceID = ?",
+            (invoice_id,),
+        )
+        inv = cursor.fetchone()
+        if not inv:
+            return None
+        cursor.execute(
+            "SELECT t.ID, t.Quantity, t.UnitPrice, t.Amount, t.PaidEarlier, t.CreatedAt, "
+            "  COALESCE(t.ChargeGroup, 'F&B') AS ChargeGroup, "
+            "  COALESCE(it.Name, t.Description, "
+            "    CASE WHEN t.ItemID IS NULL THEN 'Charge' "
+            "         ELSE 'Item ' + CAST(t.ItemID AS varchar(20)) END) AS ItemName "
+            "FROM Transactions t LEFT JOIN Items it ON it.ItemID = t.ItemID "
+            "WHERE t.InvoiceID = ? ORDER BY t.CreatedAt, t.ID",
+            (invoice_id,),
+        )
+        items = cursor.fetchall()
+        cursor.execute(
+            "SELECT Kind, Amount, CardLast4, PaidAt, Notes, AppliedToInvoiceID "
+            "FROM ReservationPayments WHERE RoomNumber = ? AND AppliedToInvoiceID = ? "
+            "ORDER BY PaidAt",
+            (inv.RoomNumber, invoice_id),
+        )
+        payment_rows = cursor.fetchall()
+        if not payment_rows:
+            cursor.execute(
+                "SELECT TOP 1 StayCheckIn FROM ReservationPayments "
+                "WHERE RoomNumber = ? ORDER BY StayCheckIn DESC",
+                (inv.RoomNumber,),
+            )
+            stay = cursor.fetchone()
+            if stay:
+                cursor.execute(
+                    "SELECT Kind, Amount, CardLast4, PaidAt, Notes, AppliedToInvoiceID "
+                    "FROM ReservationPayments WHERE RoomNumber = ? AND StayCheckIn = ? "
+                    "ORDER BY PaidAt",
+                    (inv.RoomNumber, stay[0]),
+                )
+                payment_rows = cursor.fetchall()
+        return inv, items, payment_rows
+
+
 def print_invoice(invoice_id):
     """Print a stored invoice with a full itemized breakdown, including items that were
-    paid before check-out. Also saves a plain-text copy to exports/ for real printing."""
+    paid before check-out. Also saves a plain-text copy to exports/ for real printing.
+
+    The data comes from load_invoice(); this function only renders it and writes the
+    text copy, so the console and the API cannot disagree about an invoice's contents.
+    """
     try:
         invoice_id = int(invoice_id)
     except (TypeError, ValueError):
         logging.info("Invalid invoice number.")
         return False
     try:
-        with db.get_connection() as conn:
-            if conn is None:
-                return False
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT i.InvoiceID, i.RoomNumber, i.InvoiceDate, i.Subtotal, i.DiscountCodeAmount, "
-                "i.TierDiscountAmount, i.TaxAmount, i.TotalAmount, i.PointsRedeemed, i.RedemptionValue, i.AmountPaid, "
-                "i.RoomSubtotal, i.RoomTaxAmount, i.RoomTotal, i.FnbSubtotal, "
-                "i.FnbDiscountCodeAmount, i.FnbTierDiscountAmount, i.FnbTaxAmount, "
-                "(SELECT TOP 1 r.FirstName + ' ' + r.LastName FROM Reservations r "
-                "  WHERE r.RoomNumber = i.RoomNumber ORDER BY r.CheckInDate DESC) AS GuestName "
-                + (", i.PrepaidAmount" if _invoices_have_prepaid_column() else "")
-                + " FROM Invoices i WHERE i.InvoiceID = ?",
-                (invoice_id,),
-            )
-            inv = cursor.fetchone()
-            if not inv:
-                logging.info("Invoice not found.")
-                return False
-            cursor.execute(
-                "SELECT t.ID, t.Quantity, t.UnitPrice, t.Amount, t.PaidEarlier, t.CreatedAt, "
-                "  COALESCE(t.ChargeGroup, 'F&B') AS ChargeGroup, "
-                "  COALESCE(it.Name, t.Description, "
-                "    CASE WHEN t.ItemID IS NULL THEN 'Charge' "
-                "         ELSE 'Item ' + CAST(t.ItemID AS varchar(20)) END) AS ItemName "
-                "FROM Transactions t LEFT JOIN Items it ON it.ItemID = t.ItemID "
-                "WHERE t.InvoiceID = ? ORDER BY t.CreatedAt, t.ID",
-                (invoice_id,),
-            )
-            items = cursor.fetchall()
-            # Payment-method breakdown: the booking desk's money, joined back on the
-            # stay. Applied rows name this exact invoice; unapplied rows that share
-            # the most recent check-in for the room are the fallback so a front-desk
-            # deposit still shows up on the folio even when it was never marked applied.
-            cursor.execute(
-                "SELECT Kind, Amount, CardLast4, PaidAt, Notes, AppliedToInvoiceID "
-                "FROM ReservationPayments WHERE RoomNumber = ? AND AppliedToInvoiceID = ? "
-                "ORDER BY PaidAt",
-                (inv.RoomNumber, invoice_id),
-            )
-            payment_rows = cursor.fetchall()
-            if not payment_rows:
-                cursor.execute(
-                    "SELECT TOP 1 StayCheckIn FROM ReservationPayments "
-                    "WHERE RoomNumber = ? ORDER BY StayCheckIn DESC",
-                    (inv.RoomNumber,),
-                )
-                stay = cursor.fetchone()
-                if stay:
-                    cursor.execute(
-                        "SELECT Kind, Amount, CardLast4, PaidAt, Notes, AppliedToInvoiceID "
-                        "FROM ReservationPayments WHERE RoomNumber = ? AND StayCheckIn = ? "
-                        "ORDER BY PaidAt",
-                        (inv.RoomNumber, stay[0]),
-                    )
-                    payment_rows = cursor.fetchall()
+        loaded = load_invoice(invoice_id)
     except Exception as e:
         logging.error(f"Error loading invoice {invoice_id}: {e}")
         return False
+    if not loaded:
+        logging.info("Invoice not found.")
+        return False
+    inv, items, payment_rows = loaded
 
     guest = (inv.GuestName or "").strip()
     header = (
