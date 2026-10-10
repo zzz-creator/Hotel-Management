@@ -99,6 +99,28 @@ def require_guest(request: Request) -> dict:
     return principal
 
 
+def require_management(request: Request) -> dict:
+    """A manager-or-admin staff principal.
+
+    Matches the console Admin Panel's capability sets: the account list and the item and
+    discount catalogues are the manager tier up, exactly as tests/test_admin_menu.py pins
+    them -- a plain staff account cannot reach these.
+    """
+    principal = require_staff(request)
+    if principal["role"] not in ("manager", "admin"):
+        raise HTTPException(status_code=403,
+                            detail="This action requires a manager or admin account.")
+    return principal
+
+
+def require_admin(request: Request) -> dict:
+    """An admin-only staff principal (account management, promotions)."""
+    principal = require_staff(request)
+    if principal["role"] != "admin":
+        raise HTTPException(status_code=403, detail="This action requires an admin account.")
+    return principal
+
+
 def _unavailable():
     return HTTPException(status_code=503, detail="The database is unreachable.")
 
@@ -478,6 +500,39 @@ def advance_order(order_id: int, body: AdvanceOrderRequest,
     if status is None:
         raise HTTPException(500, f"Order #{order_id} could not be updated.")
     return {"order_id": order_id, "status": status}
+
+
+@router.get("/admin/users")
+def admin_users(principal: dict = Depends(require_management)):
+    """Usernames and roles (never passwords), excluding the master override account.
+
+    Manager-or-admin, like the console's "View Users". The master-gated password screen
+    has no API twin on purpose: a credential never travels over HTTP.
+    """
+    return {"users": [{"username": u, "role": r} for (u, r) in admin.list_users()]}
+
+
+@router.get("/admin/items")
+def admin_items(principal: dict = Depends(require_management)):
+    """The item catalogue, read exactly as the console's Items screen reads it."""
+    return {"items": [{"item_id": i, "name": n, "price": float(p), "pricing_rule": rule}
+                      for (i, n, p, rule) in items.list_items()]}
+
+
+@router.get("/admin/discounts")
+def admin_discounts(principal: dict = Depends(require_management)):
+    """The discount codes on the book, for the manager tier up."""
+    return {"discounts": [{"code": c, "percentage": float(p)}
+                          for (c, p) in admin.list_discount_codes()]}
+
+
+@router.get("/admin/promotions")
+def admin_promotions(principal: dict = Depends(require_admin)):
+    """Current promotions -- admin-only, like the console's Manage Promotions."""
+    return {"promotions": [
+        {"promotion_id": p[0], "title": p[1], "details": p[2], "discount_code": p[3]}
+        for p in orders.get_promotions()
+    ]}
 
 
 @router.post("/bookings", status_code=201)

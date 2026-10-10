@@ -33,12 +33,14 @@ __all__ = [
     'add_user',
     'delete_user',
     'view_users',
+    'list_users',
     '_run_report',
     'export_reports_menu',
     '_admin_menu',
     '_run_admin_submenu',
     'admin_panel',
     'view_discount_codes',
+    'list_discount_codes',
     'manage_discount_codes',
     'reset_user_password',
     'IT_SYSTEMS',
@@ -280,35 +282,49 @@ def delete_user():
         logging.error(f"Error deleting user: {e}")
     # connection closed by context manager
 
-def view_users():
-    """Display users; optionally show passwords after verifying the master secret."""
+def list_users(show_passwords=False):
+    """Usernames and roles -- never passwords unless the console's master-gated screen asks.
+
+    The web reads only the default (no passwords, no master override account), so the API
+    surface never carries a credential or the console's special account; the console may
+    pass show_passwords=True after its master override has verified.
+    """
     try:
         with db.get_connection() as conn:
             if conn is None:
-                return
+                return []
             cursor = conn.cursor()
-            passwords = input("Would you like to see the passwords? (Y/N): ").strip().upper()
-            show_passwords = False
-            if passwords == 'Y':
-                # Same check every other master-gated screen uses.
-                if core.require_master_override(prompt="Please enter the master password: "):
-                    logging.info("Master password is correct. Displaying passwords.")
-                    show_passwords = True
-                else:
-                    logging.info("Incorrect master password. Cannot display passwords.")
+            if show_passwords:
+                cursor.execute("SELECT Username, Password, Role FROM Users")
+                return [(r[0], r[1], r[2]) for r in cursor.fetchall()
+                        if not str(r[0]).lower() == 'master']
+            cursor.execute("SELECT Username, Role FROM Users")
+            return [(r[0], r[1]) for r in cursor.fetchall()
+                    if not str(r[0]).lower() == 'master']
+    except Exception as e:
+        logging.error(f"Error loading users: {e}")
+        return []
 
-            cursor.execute("SELECT Username, Password, Role FROM Users")
-            rows = cursor.fetchall()
-            headers = ["Username", "Password", "Role"] if show_passwords else ["Username", "Role"]
-            table_rows = []
-            for user in rows:
-                if user.Username.lower() == 'master':
-                    continue
-                if show_passwords:
-                    table_rows.append((user.Username, user.Password, user.Role))
-                else:
-                    table_rows.append((user.Username, user.Role))
-            ui.show_table("Users and Roles", headers, table_rows)
+
+def view_users():
+    """Display users; optionally show passwords after verifying the master secret."""
+    try:
+        passwords = input("Would you like to see the passwords? (Y/N): ").strip().upper()
+        show_passwords = False
+        if passwords == 'Y':
+            # Same check every other master-gated screen uses.
+            if core.require_master_override(prompt="Please enter the master password: "):
+                logging.info("Master password is correct. Displaying passwords.")
+                show_passwords = True
+            else:
+                logging.info("Incorrect master password. Cannot display passwords.")
+        rows = list_users(show_passwords=show_passwords)
+        if show_passwords:
+            ui.show_table("Users and Roles", ["Username", "Password", "Role"],
+                          [(u, p, r) for (u, p, r) in rows])
+        else:
+            ui.show_table("Users and Roles", ["Username", "Role"],
+                          [(u, r) for (u, r) in rows])
     except Exception as e:
         logging.error(f"Error displaying users: {e}")
 
@@ -591,21 +607,29 @@ def admin_panel():
         if entries is None:
             break  # "Exit Admin Panel"
         _run_admin_submenu(label, entries, session)
-def view_discount_codes():
-    """Display all discount codes as a table."""
+def list_discount_codes():
+    """(Code, DiscountPercentage) rows for the discount codes on the book."""
     try:
         with db.get_connection() as conn:
             if conn is None:
-                logging.info("Database connection failed.")
-                return
+                return []
             cursor = conn.cursor()
             cursor.execute("SELECT Code, DiscountPercentage FROM Discounts")
-            discounts = cursor.fetchall()
-            if discounts:
-                table_rows = [(d.Code, f"{d.DiscountPercentage}%") for d in discounts]
-                ui.show_table("Current Discount Codes", ["Code", "Percentage"], table_rows)
-            else:
-                ui.info("No discount codes found.")
+            return [(r[0], r[1]) for r in cursor.fetchall()]
+    except Exception as e:
+        logging.error(f"Error loading discount codes: {e}")
+        return []
+
+
+def view_discount_codes():
+    """Display all discount codes as a table."""
+    try:
+        discounts = list_discount_codes()
+        if discounts:
+            ui.show_table("Current Discount Codes", ["Code", "Percentage"],
+                          [(d[0], f"{d[1]}%") for d in discounts])
+        else:
+            ui.info("No discount codes found.")
     except Exception as e:
         logging.error(f"Error viewing discount codes: {e}")
 

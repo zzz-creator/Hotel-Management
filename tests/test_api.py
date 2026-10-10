@@ -943,6 +943,66 @@ class OrderWriteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 500)
 
 
+class AdminReadTests(unittest.TestCase):
+    """Phase-5 admin reads: users/items/discounts (manager+) and promotions (admin)."""
+
+    def _login(self, role):
+        client = _client()
+        _login_staff(client, username="ada", role=role)
+        return client
+
+    def test_admin_reads_require_a_staff_session(self):
+        self.assertEqual(_client().get("/api/admin/users").status_code, 401)
+        guest = _client()
+        _login_guest(guest)
+        self.assertEqual(guest.get("/api/admin/users").status_code, 403)
+        self.assertEqual(guest.get("/api/admin/promotions").status_code, 403)
+
+    def test_a_plain_staff_account_is_blocked_from_all(self):
+        staff = self._login("staff")
+        self.assertEqual(staff.get("/api/admin/users").status_code, 403)
+        self.assertEqual(staff.get("/api/admin/items").status_code, 403)
+        self.assertEqual(staff.get("/api/admin/discounts").status_code, 403)
+        self.assertEqual(staff.get("/api/admin/promotions").status_code, 403)
+
+    def test_users_list_for_manager_and_admin(self):
+        for role in ("manager", "admin"):
+            client = self._login(role)
+            with mock.patch.object(admin, "list_users",
+                                   return_value=[("ada", role)]):
+                response = client.get("/api/admin/users")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(),
+                             {"users": [{"username": "ada", "role": role}]})
+
+    def test_items_list_for_manager_and_admin(self):
+        with mock.patch.object(items, "list_items",
+                               return_value=[(1, "Club Sandwich", 12.5, "F&B")]) as find:
+            response = self._login("manager").get("/api/admin/items")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"items": [
+            {"item_id": 1, "name": "Club Sandwich", "price": 12.5, "pricing_rule": "F&B"}]})
+
+    def test_discounts_list_for_manager_and_admin(self):
+        with mock.patch.object(admin, "list_discount_codes",
+                               return_value=[("SAVE10", 10)]):
+            response = self._login("manager").get("/api/admin/discounts")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(),
+                         {"discounts": [{"code": "SAVE10", "percentage": 10.0}]})
+
+    def test_promotions_are_admin_only(self):
+        manager = self._login("manager")
+        self.assertEqual(manager.get("/api/admin/promotions").status_code, 403)
+        with mock.patch.object(orders, "get_promotions", return_value=[
+                (3, "Spring", "10% off", "SPRING")]):
+            response = self._login("admin").get("/api/admin/promotions")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"promotions": [
+            {"promotion_id": 3, "title": "Spring", "details": "10% off",
+             "discount_code": "SPRING"}]})
+
+
 class RequestValidationTests(unittest.TestCase):
     def test_login_without_a_password_is_422(self):
         response = _client().post("/api/auth/login", json={"kind": "staff", "username": "ada"})

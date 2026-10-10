@@ -18,6 +18,7 @@ __all__ = [
     'get_item_choice',
     'update_item',
     'view_items',
+    'list_items',
     'manage_pricing_rules',
     'comp_item_to_room',
     'ITEM_NAME_MAX_LENGTH',
@@ -236,19 +237,25 @@ def update_item():
     except Exception as e:
         logging.error(f"Error updating item: {e}")
 
-def view_items():
-    """Display all items."""
-    with db.get_connection() as conn:
-        if conn is None:
-            return
-        try:
+def list_items():
+    """(ItemID, Name, Price, PricingRule) rows -- the catalogue the menu and the web read."""
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return []
             cursor = conn.cursor()
             cursor.execute("SELECT ItemID, Name, Price, PricingRule FROM Items")
-            rows = cursor.fetchall()
-            table_rows = [(r.ItemID, r.Name, f"${r.Price:.2f}", r.PricingRule) for r in rows]
-            ui.show_table("Items", ["ID", "Name", "Price", "Pricing Rule"], table_rows)
-        except Exception as e:
-            logging.error(f"Error displaying items: {e}")
+            return [(r[0], r[1], r[2], r[3]) for r in cursor.fetchall()]
+    except Exception as e:
+        logging.error(f"Error loading items: {e}")
+        return []
+
+
+def view_items():
+    """Display all items."""
+    rows = list_items()
+    ui.show_table("Items", ["ID", "Name", "Price", "Pricing Rule"],
+                  [(r[0], r[1], f"${r[2]:.2f}", r[3]) for r in rows])
 
 
 def manage_pricing_rules():

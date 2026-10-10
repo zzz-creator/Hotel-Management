@@ -190,8 +190,15 @@ Each phase is one coherent, signed commit with the checks green.
       bookings.customer_stays() (privacy-safe), placement by staff for any room or a
       guest for a room they hold, and the staff-only lifecycle move. tests/test_orders.py
       pins the recording; the order endpoints are covered in tests/test_api.py.
-      Still to come in this phase: admin read and write endpoints, each needing its own
-      service twin; the destructive, master-override-gated console actions stay on the
+      Slice 5 shipped: the admin reads. list_users() (never passwords; the master
+      override account and the master-gated password screen stay on the console),
+      list_discount_codes() and items.list_items() are the non-interactive data twins of
+      view_users()/view_discount_codes()/view_items(); the role gates require_management()
+      (manager+) and require_admin() mirror the menu capability sets tests/test_admin_menu.py
+      pins. Endpoints: `GET /api/admin/users`, `/items` and `/discounts` for manager+,
+      `GET /api/admin/promotions` for admin only.
+      Still to come in this phase: the admin write endpoints (create user, unlock,
+      reset password); the destructive, master-override-gated console actions stay on the
       console.
 - [ ] Phase 6 — API tests + docs/file-map updates
 
