@@ -17,8 +17,10 @@ __all__ = [
     '_build_invoice_insert',
     'record_transaction_for_room',
     'post_room_charge',
+    'lookup_discount_percentage',
     'apply_discount',
     'compute_and_apply_discounts',
+    'price_pay_now',
     'bill_room_transactions',
     'billing_creator',
     'list_invoices_for_room',
@@ -189,26 +191,38 @@ def post_room_charge(room_number, check_in, check_out):
         logging.error(f"Error posting room charge: {e}")
         return None
 
+def lookup_discount_percentage(code):
+    """The percentage a discount code grants, or None when the code is unknown/unreadable.
+
+    Non-interactive: apply_discount() prompts for the code first, the web passes one in,
+    so this is the one definition of what a code is worth.
+    """
+    if not code:
+        return None
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return None
+            cursor = conn.cursor()
+            cursor.execute("SELECT DiscountPercentage FROM Discounts WHERE Code = ?", (code,))
+            row = cursor.fetchone()
+            return float(row[0]) if row and row[0] is not None else None
+    except Exception as e:
+        logging.error(f"Error looking up discount: {e}")
+        return None
+
+
 def apply_discount(total_amount):
     try:
         discount_code = input("Enter discount code: ").strip()
-
-        with db.get_connection() as conn:
-            if conn is None:
-                return total_amount
-            cursor = conn.cursor()
-            cursor.execute("SELECT DiscountPercentage FROM Discounts WHERE Code = ?", (discount_code,))
-            result = cursor.fetchone()
-
-        if result:
-            discount_percentage = result[0]
+        discount_percentage = lookup_discount_percentage(discount_code)
+        if discount_percentage is not None:
             discount_amount = (total_amount * float(discount_percentage)) / 100
             total_with_discount = total_amount - discount_amount
             logging.info(f"Discount applied! New total amount: ${total_with_discount:.2f}")
             return total_with_discount
-        else:
-            logging.info("Invalid discount code.")
-            return total_amount
+        logging.info("Invalid discount code.")
+        return total_amount
     except Exception as e:
         logging.error(f"Error applying discount: {e}")
         return total_amount
@@ -236,6 +250,36 @@ def compute_and_apply_discounts(subtotal, room_number):
         discounted_subtotal -= tier_discount_amount
         lines.append(f"Loyalty Tier Discount ({tier_details['tier']}): -${tier_discount_amount:.2f}")
     return discounted_subtotal, discount_code_amount, tier_discount_amount, lines
+
+
+def price_pay_now(subtotal, room_number, discount_code=None):
+    """Price a pay-now room-service order: optional discount code, the stay's loyalty tier
+    discount, then tax.
+
+    The non-interactive counterpart of compute_and_apply_discounts() (which prompts for the
+    code): the web passes the code in, so a pay-now order is priced exactly as the console
+    prices one. Returns (final_total, discounted_subtotal, tax, savings_lines,
+    discount_factor); the factor scales each line to its discounted, pre-tax price so the
+    future invoice's itemized lines tie out to the subtotal that was charged.
+    """
+    savings_lines = []
+    discounted_subtotal = subtotal
+    percentage = lookup_discount_percentage(discount_code)
+    if percentage is not None:
+        discount_code_amount = (subtotal * float(percentage)) / 100
+        discounted_subtotal = subtotal - discount_code_amount
+        if discount_code_amount > 0:
+            savings_lines.append(f"Discount: -${discount_code_amount:.2f}")
+    tier_details = loyalty.get_tier_details_by_room(room_number) if core.get_loyalty_enabled() else None
+    tier_discount_pct = tier_details["discount_percent"] if tier_details else 0.0
+    if tier_discount_pct > 0:
+        tier_discount_amount = discounted_subtotal * (tier_discount_pct / 100.0)
+        discounted_subtotal -= tier_discount_amount
+        savings_lines.append(f"Loyalty Tier Discount ({tier_details['tier']}): -${tier_discount_amount:.2f}")
+    tax = discounted_subtotal * core.get_tax_rate()
+    final_total = discounted_subtotal + tax
+    discount_factor = (discounted_subtotal / subtotal) if subtotal > 0 else 0.0
+    return final_total, discounted_subtotal, tax, savings_lines, discount_factor
 
 
 def bill_room_transactions(room_number, require_payment=True):

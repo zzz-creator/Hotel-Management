@@ -177,8 +177,22 @@ Each phase is one coherent, signed commit with the checks green.
       /api/rooms/{room}/folio` is the live folio through the new open_folio() twin -- the
       same IsBilled window bill_room_transactions() bills -- and `GET
       /api/rooms/{room}/outstanding` serves the settlement_outstanding() residue strings.
-      Still to come in this phase: orders and admin read + write
-      endpoints, each needing its own service twin.
+      Slice 4 shipped: orders. The console's interactive order_item() delegates its
+      recording to a new non-interactive place_order() twin (bill: lines at list price,
+      unpaid; pay-now: a billing.price_pay_now() quote of discount code + loyalty tier +
+      tax with a billing.lookup_discount_percentage() lookup shared with the console's
+      apply_discount(), the card charged through the passed callable, lines recorded at
+      their discounted pre-tax price, loyalty awarded, a declined card recording nothing),
+      advance_order() takes an explicit action and actor (the console still prompts when
+      action is None, and the in-room notification and audit row name the actor), and
+      get_order() is a new detail read distinguishing 404 from 503. Endpoints: the room
+      order list and a staff order detail, the guest's own orders aggregated from
+      bookings.customer_stays() (privacy-safe), placement by staff for any room or a
+      guest for a room they hold, and the staff-only lifecycle move. tests/test_orders.py
+      pins the recording; the order endpoints are covered in tests/test_api.py.
+      Still to come in this phase: admin read and write endpoints, each needing its own
+      service twin; the destructive, master-override-gated console actions stay on the
+      console.
 - [ ] Phase 6 — API tests + docs/file-map updates
 
 ## Risks

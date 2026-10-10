@@ -7,8 +7,9 @@ owns a business rule: both call the same non-interactive service functions in th
 domain modules, so the two cannot drift (AGENTS.md section 5).
 
 Phases 1-3 built the scaffold, the service twins and the cookie-session layer;
-phase 4 adds the pilot endpoints; phase 5 adds the report endpoints and the read
-surfaces (room list, staff board, guest's own bookings/loyalty). Every handler
+phase 4 adds the pilot endpoints; phase 5 adds the report endpoints, the read
+surfaces (room list, staff board, guest's own bookings/loyalty), the billing reads
+and the order reads/writes. Every handler
 touches the database only through a service function and is a plain `def`, so
 Starlette runs the blocking pyodbc call in its threadpool; never make such a handler
 `async def`, because a synchronous database call inside the event loop blocks every
@@ -35,12 +36,16 @@ import billing
 import booking_ledger
 import bookings
 import customer
+import items
 import loyalty
+import orders
 import payments
 import reports
 import reservations
 import rooms
-from schemas import CheckInRequest, CreateBookingRequest, LoginRequest
+from schemas import (
+    AdvanceOrderRequest, CheckInRequest, CreateBookingRequest, CreateOrderRequest, LoginRequest,
+)
 
 # Signed-cookie sessions (PLAN-web-api.md, decision 2). The secret is read from the
 # environment so it is not committed; the fallback is for local development only and is
@@ -356,6 +361,123 @@ def room_outstanding(room: str, principal: dict = Depends(require_staff)):
     """
     return {"room_number": room,
             "outstanding": billing.settlement_outstanding(room)}
+
+
+def _order_row(row):
+    """Map get_orders_for_room()'s tuple to JSON (order_id, status, placed, updated, items, notes)."""
+    return {"order_id": row[0], "status": row[1], "placed_at": str(row[2]),
+            "updated_at": str(row[3]), "items": row[4], "notes": row[5]}
+
+
+@router.get("/rooms/{room}/orders")
+def room_orders(room: str, active_only: bool = False, principal: dict = Depends(require_staff)):
+    """A room's orders, newest first; `?active_only=true` drops completed/cancelled ones.
+
+    Staff-only: an order says what a guest bought and when. The rows are the same
+    get_orders_for_room() the console's order menu reads, so the web cannot disagree
+    with the queue staff see.
+    """
+    rows = orders.get_orders_for_room(room, active_only=active_only)
+    return {"room_number": room, "orders": [_order_row(r) for r in rows]}
+
+
+@router.get("/guests/me/orders")
+def my_orders(principal: dict = Depends(require_guest)):
+    """The signed-in guest's own orders, across the rooms they hold, newest first.
+
+    Guest-only. Keyed on the cookie's verified CustomerID: the stays come from
+    bookings.customer_stays(), so a same-named stranger's orders can never appear
+    (docs/BOOKING.md privacy rules).
+    """
+    own = [stay[0] for stay in bookings.customer_stays(principal["customer_id"])]
+    results = []
+    for room in own:
+        results.extend(_order_row(r) for r in orders.get_orders_for_room(room))
+    results.sort(key=lambda o: o["placed_at"], reverse=True)
+    return {"customer_id": principal["customer_id"], "orders": results}
+
+
+@router.get("/orders/{order_id}")
+def order_detail(order_id: int, principal: dict = Depends(require_staff)):
+    """One order with its line items.
+
+    Staff-only. A missing order is 404; an unreachable database is 503.
+    """
+    try:
+        record = orders.get_order(order_id)
+    except RuntimeError:
+        raise _unavailable()
+    if not record:
+        raise HTTPException(404, f"No order #{order_id}.")
+    return {
+        "order_id": record[0], "room_number": record[1], "status": record[2],
+        "placed_at": str(record[3]), "updated_at": str(record[4]), "notes": record[5],
+        "items": [
+            {"item_name": i[0], "quantity": i[1], "unit_price": float(i[2] or 0.0)}
+            for i in orders.get_order_items(order_id)
+        ],
+    }
+
+
+@router.post("/rooms/{room}/orders", status_code=201)
+def create_order(room: str, body: CreateOrderRequest,
+                 principal: dict = Depends(require_principal)):
+    """Place a room-service order: charge the card now, or add it to the room bill.
+
+    A staff member may order for any room; a signed-in guest only for a room among their
+    own stays. Each line's price is quoted server-side from the catalogue, so a client
+    cannot set prices, and a pay-now total is priced exactly as the console prices it
+    (discount code + loyalty tier + tax) through the same billing twins. A declined card
+    records nothing and answers 402.
+    """
+    actor = auth.audit_actor(principal)
+    if principal["kind"] == "guest":
+        own = {stay[0] for stay in bookings.customer_stays(principal["customer_id"])}
+        if room not in own:
+            raise HTTPException(403, "You can only order for your own room.")
+    lines = []
+    for line in body.items:
+        price = items.get_dynamic_price(line.item_id)
+        if price is None:
+            raise HTTPException(400, f"Item {line.item_id} is not available.")
+        lines.append((line.item_id, float(price), line.quantity))
+    card_processor = None
+    if body.pay_mode == "pay_now":
+        if not body.card_number or not body.expiration_date:
+            raise HTTPException(400, "Card number and expiration are required to pay now.")
+        ok, reason, last4 = payments.validate_card(body.card_number, body.expiration_date, body.cvv)
+        if not ok:
+            raise HTTPException(400, reason)
+        card_processor = lambda amount: (True, last4)
+    result = orders.place_order(
+        room, lines, pay_mode=body.pay_mode, card_processor=card_processor,
+        discount_code=body.discount_code, actor=actor)
+    if result["status"] == "declined":
+        raise HTTPException(402, "The card was declined; nothing was ordered.")
+    return {"status": "ok", "order_id": result["order_id"], "room_number": room,
+            "total": result["total"], "paid": result["paid"], "pay_mode": body.pay_mode}
+
+
+@router.post("/orders/{order_id}/advance")
+def advance_order(order_id: int, body: AdvanceOrderRequest,
+                  principal: dict = Depends(require_staff)):
+    """Advance an order to its next state, or cancel it.
+
+    Staff-only (the same function the staff "Order Management" menu calls). The pre-read
+    answers 404 for a missing order and 503 for an unreachable database before any write;
+    the audit row and the in-room notification name the web actor.
+    """
+    try:
+        record = orders.get_order(order_id)
+    except RuntimeError:
+        raise _unavailable()
+    if not record:
+        raise HTTPException(404, f"No order #{order_id}.")
+    status = orders.advance_order(order_id, action=body.action,
+                                  actor=auth.audit_actor(principal))
+    if status is None:
+        raise HTTPException(500, f"Order #{order_id} could not be updated.")
+    return {"order_id": order_id, "status": status}
 
 
 @router.post("/bookings", status_code=201)

@@ -17,6 +17,7 @@ __all__ = [
     'ORDER_STATUS_HELP',
     'open_order',
     'add_order_items',
+    'place_order',
     'order_item',
     'view_amenities',
     'provide_feedback',
@@ -25,6 +26,7 @@ __all__ = [
     'track_order_status',
     'get_orders_for_room',
     'get_order_items',
+    'get_order',
     'manage_orders_menu',
     'next_order_status',
     'advance_order',
@@ -93,6 +95,69 @@ def add_order_items(order_id, ordered_items):
     except Exception as e:
         logging.error(f"Error recording order items: {e}")
         return added
+
+
+def place_order(room_number, ordered_items, pay_mode="bill", card_processor=None,
+                discount_code=None, quote=None, actor=None):
+    """Record an order's charges and open its trackable record -- the non-interactive tail
+    of order_item().
+
+    `ordered_items` are (item_id, list_unit_price, quantity) lines at list price.
+    `pay_mode` is "pay_now" or "bill". For "pay_now" the charges are priced (discount
+    code + loyalty tier + tax) and each line recorded at its discounted, pre-tax price
+    with `paid=True`, the loyalty points awarded, and the card charged through
+    `card_processor(amount) -> ok`; `quote` is the (final_total, discounted_subtotal,
+    tax, savings_lines, discount_factor) tuple the console computed interactively, or
+    billing.price_pay_now() is used when it is None. For "bill" the lines are recorded at
+    list price on the room bill, settled at check-out.
+
+    `actor` names the audit row. Returns a dict: {"status": "ok"|"declined", "order_id",
+    "total", "paid", "final_total", "discounted_subtotal", "tax", "savings_lines"}. A
+    declined card records nothing -- the console then asks whether to bill instead (that
+    prompt belongs to the console); the web refuses outright.
+    """
+    ordered_items = [(int(i), float(p), int(q)) for (i, p, q) in ordered_items if p]
+    total = round(sum(p * q for (_i, p, q) in ordered_items), 2)
+    result = {"status": "ok", "order_id": None, "total": total, "paid": 0.0,
+              "final_total": total, "discounted_subtotal": total, "tax": 0.0,
+              "savings_lines": []}
+    if pay_mode == "pay_now":
+        if quote is None:
+            quote = billing.price_pay_now(total, room_number, discount_code)
+        final_total, discounted_subtotal, tax, savings_lines, discount_factor = quote
+        result.update(final_total=final_total, discounted_subtotal=discounted_subtotal,
+                      tax=tax, savings_lines=list(savings_lines))
+        authorised = False
+        if card_processor is not None:
+            try:
+                outcome = card_processor(final_total)
+                authorised = bool(outcome[0]) if isinstance(outcome, tuple) else bool(outcome)
+            except Exception as e:
+                logging.error(f"Error processing card for order: {e}")
+                authorised = False
+        if not authorised:
+            result["status"] = "declined"
+            return result
+        tx_ids = []
+        for (itm_id, unit_price, qty) in ordered_items:
+            discounted_price = round(unit_price * discount_factor, 2)
+            tx = billing.record_transaction_for_room(room_number, itm_id, qty, discounted_price, paid=True)
+            if tx is not None:
+                tx_ids.append(tx)
+        loyalty.award_billed_order_points(room_number, tx_ids)
+        order_id = open_order(room_number)
+        add_order_items(order_id, [(i, round(p * discount_factor, 2), q) for (i, p, q) in ordered_items])
+        result["order_id"] = order_id
+        result["paid"] = final_total
+        core.log_audit("POST", "Order", order_id, f"Paid now: ${final_total:.2f} for room {room_number}", user=actor)
+        return result
+    for (itm_id, unit_price, qty) in ordered_items:
+        billing.record_transaction_for_room(room_number, itm_id, qty, unit_price, paid=False)
+    order_id = open_order(room_number)
+    add_order_items(order_id, ordered_items)
+    result["order_id"] = order_id
+    core.log_audit("POST", "Order", order_id, f"Added to room bill: ${total:.2f} for room {room_number}", user=actor)
+    return result
 
 
 def order_item():
@@ -173,6 +238,7 @@ def order_item():
             discounted_subtotal, _disc_amount, _tier_amount, savings_lines = billing.compute_and_apply_discounts(total, room_number)
             tax = discounted_subtotal * core.get_tax_rate()
             final_total = discounted_subtotal + tax
+            discount_factor = (discounted_subtotal / total) if total > 0 else 0.0
             ui.box("Receipt", "\n".join(
                 ["----- Receipt -----"] + item_lines + savings_lines +
                 [f"Subtotal: ${discounted_subtotal:.2f}",
@@ -180,46 +246,30 @@ def order_item():
                  f"Total Amount: ${final_total:.2f}",
                  "-------------------"]
             ))
-            if payments.process_credit_card(final_total):
-                # Record the paid items at their discounted, pre-tax price so the future
-                # invoice's itemized lines tie out to the discounted subtotal charged.
-                discount_factor = (discounted_subtotal / total) if total > 0 else 0.0
-                tx_ids = []
-                for (itm_id, unit_price, qty) in ordered_items:
-                    discounted_price = round(float(unit_price) * discount_factor, 2)
-                    tx = billing.record_transaction_for_room(room_number, itm_id, qty, discounted_price, paid=True)
-                    if tx is not None:
-                        tx_ids.append(tx)
-                loyalty.award_billed_order_points(room_number, tx_ids)
-                order_id = open_order(room_number)
-                add_order_items(order_id, [(i, round(p * discount_factor, 2), q) for (i, p, q) in ordered_items])
-                core.log_audit("POST", "Order", order_id, f"Paid now: ${final_total:.2f} for room {room_number}")
-                if order_id:
-                    logging.info(f"Payment received. Your order is confirmed. Track it as order #{order_id}.")
-                else:
-                    logging.info("Payment received. Your order is confirmed.")
-            else:
+            placed = place_order(
+                room_number, ordered_items, pay_mode="pay_now",
+                card_processor=payments.process_credit_card,
+                quote=(final_total, discounted_subtotal, tax, savings_lines, discount_factor),
+                actor=session.CURRENT_USER,
+            )
+            if placed["status"] == "declined":
                 add_later = input("Payment declined. Add this order to your room bill instead? (Y/N): ").strip().lower()
                 if add_later == 'y':
                     # Added to the room bill: record at full list price (the discount is
                     # applied again at check-out when the bill is settled).
-                    for (itm_id, unit_price, qty) in ordered_items:
-                        billing.record_transaction_for_room(room_number, itm_id, qty, unit_price, paid=False)
-                    order_id = open_order(room_number)
-                    add_order_items(order_id, ordered_items)
-                    core.log_audit("POST", "Order", order_id, f"Added to room bill: ${total:.2f} for room {room_number}")
+                    place_order(room_number, ordered_items, pay_mode="bill", actor=session.CURRENT_USER)
                     logging.info("Order added to your room bill and will be settled at check-out.")
                 else:
                     logging.info("Order cancelled; no charges recorded.")
                     return
+            elif placed["order_id"]:
+                logging.info(f"Payment received. Your order is confirmed. Track it as order #{placed['order_id']}.")
+            else:
+                logging.info("Payment received. Your order is confirmed.")
         else:
             # Pay later: charges are recorded on the room bill and settled at check-out.
-            for (itm_id, unit_price, qty) in ordered_items:
-                billing.record_transaction_for_room(room_number, itm_id, qty, unit_price, paid=False)
-            order_id = open_order(room_number)
-            add_order_items(order_id, ordered_items)
-            core.log_audit("POST", "Order", order_id, f"Added to room bill: ${total:.2f} for room {room_number}")
-            logging.info(f"This amount (${total:.2f}) will be added to your room bill and settled at check-out.")
+            placed = place_order(room_number, ordered_items, pay_mode="bill", actor=session.CURRENT_USER)
+            logging.info(f"This amount (${placed['total']:.2f}) will be added to your room bill and settled at check-out.")
     except Exception as e:
         logging.error(f"Error finalizing order: {e}")
     logging.info("Thank you for your order! It will be delivered shortly.")
@@ -385,6 +435,32 @@ def get_order_items(order_id):
         return []
 
 
+def get_order(order_id):
+    """One order's record: (order_id, room_number, status, placed_at, updated_at, notes),
+    or None when no such order exists.
+
+    The detail read the console's queue only summarizes, and the pre-read a status change
+    does to answer 404 without writing. None means "not found"; a connection failure raises
+    RuntimeError and a query failure propagates, so a caller can tell missing from
+    unavailable.
+    """
+    try:
+        order_id = int(order_id)
+    except (TypeError, ValueError):
+        return None
+    with db.get_connection() as conn:
+        if conn is None:
+            raise RuntimeError("Database connection failed.")
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT OrderID, RoomNumber, Status, PlacedAt, UpdatedAt, Notes "
+            "FROM Orders WHERE OrderID = ?", (order_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return (row[0], row[1], row[2], row[3], row[4], row[5])
+
+
 def manage_orders_menu():
     """Staff: list live orders and advance them through the lifecycle."""
     while True:
@@ -439,8 +515,14 @@ def next_order_status(current):
     return "Completed" if current == "Delivered" else None
 
 
-def advance_order(order_id):
-    """Move an order to its next state, or cancel it. Returns the new status."""
+def advance_order(order_id, action=None, actor=None):
+    """Move an order to its next state, or cancel it. Returns the new status.
+
+    `action` is "advance" or "cancel"; when it is None the console prompts for the choice.
+    `actor` names the audit row and the in-room notification -- the console passes
+    session.CURRENT_USER, the web passes the request principal, so a status change is
+    attributed to whoever made it rather than to whichever console signed in last.
+    """
     try:
         with db.get_connection() as conn:
             if conn is None:
@@ -459,18 +541,26 @@ def advance_order(order_id):
             if not following:
                 logging.info(f"Order {order_id} is '{current}' and cannot be advanced further.")
                 return current
-            choice = input(
-                f"Order {order_id} is '{current}'.\n"
-                f"  1. Advance to '{following}'\n"
-                f"  2. Cancel the order\n"
-                f"Choose: "
-            ).strip()
-            if choice == "2":
+            if action is None:
+                choice = input(
+                    f"Order {order_id} is '{current}'.\n"
+                    f"  1. Advance to '{following}'\n"
+                    f"  2. Cancel the order\n"
+                    f"Choose: "
+                ).strip()
+                if choice == "2":
+                    action = "cancel"
+                elif choice == "1":
+                    action = "advance"
+                else:
+                    logging.info("Invalid choice. Order unchanged.")
+                    return current
+            if action == "cancel":
                 new_status = "Cancelled"
-            elif choice == "1":
+            elif action == "advance":
                 new_status = following
             else:
-                logging.info("Invalid choice. Order unchanged.")
+                logging.info("Invalid action. Order unchanged.")
                 return current
             cursor.execute(
                 "UPDATE Orders SET Status = ?, UpdatedAt = ?, "
@@ -479,7 +569,7 @@ def advance_order(order_id):
                 (new_status, datetime.now(), new_status, datetime.now(), order_id),
             )
             conn.commit()
-        core.log_audit("UPDATE", "Order", order_id, f"{current} -> {new_status} (room {room_number})")
+        core.log_audit("UPDATE", "Order", order_id, f"{current} -> {new_status} (room {room_number})", user=actor)
         # Tell the guest in their room so the tracker reflects reality immediately.
         if room_number:
             try:
@@ -490,7 +580,7 @@ def advance_order(order_id):
                             "VALUES (?, ?, 'In-Room', ?)",
                             (room_number,
                              f"Order #{order_id} update: {ORDER_STATUS_HELP.get(new_status, new_status)}",
-                             session.CURRENT_USER),
+                             actor if actor is not None else session.CURRENT_USER),
                         )
                         conn.commit()
             except Exception:

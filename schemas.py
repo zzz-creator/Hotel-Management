@@ -7,7 +7,7 @@ client cannot invent a third kind; dates are `date`, which pydantic parses from 
 ISO "YYYY-MM-DD" strings the console uses.
 """
 from datetime import date
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -73,3 +73,35 @@ class CheckInRequest(BaseModel):
     first_name: str
     email: Optional[str] = None
     phone: Optional[str] = None
+
+
+class OrderLine(BaseModel):
+    """One line of a room-service order: an item and how many. Prices are quoted
+    server-side from the catalogue, so a client never sends a price."""
+    item_id: int
+    quantity: int = Field(gt=0)
+
+
+class CreateOrderRequest(BaseModel):
+    """Body for POST /api/rooms/{room}/orders.
+
+    `pay_mode` chooses pay-now (a card is charged server-side through
+    payments.validate_card; the total is priced exactly as the console prices it) or
+    bill (the charges join the room's folio and settle at check-out). `discount_code`
+    and the card fields are only meaningful for pay-now.
+    """
+    items: List[OrderLine] = Field(min_length=1)
+    pay_mode: Literal["pay_now", "bill"] = "bill"
+    discount_code: Optional[str] = None
+    card_number: Optional[str] = None
+    expiration_date: Optional[str] = None  # MM/YYYY, as the console prompts
+    cvv: Optional[str] = None
+
+
+class AdvanceOrderRequest(BaseModel):
+    """Body for POST /api/orders/{order_id}/advance: the lifecycle move to make.
+
+    "advance" steps to the next status in the lifecycle; "cancel" closes the order. The
+    console's numbered prompt is the same two choices.
+    """
+    action: Literal["advance", "cancel"]

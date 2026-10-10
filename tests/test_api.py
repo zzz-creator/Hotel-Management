@@ -23,7 +23,9 @@ import booking_ledger
 import bookings
 import core
 import customer
+import items
 import loyalty
+import orders
 import reservations
 import reports
 import rooms
@@ -709,6 +711,236 @@ class InvoiceReadTests(unittest.TestCase):
         with mock.patch.object(billing, "load_invoice",
                                side_effect=RuntimeError("Database connection failed.")):
             self.assertFalse(billing.print_invoice(5))
+
+
+class OrderReadTests(unittest.TestCase):
+    """Phase-5 order reads: room list, single order detail, the guest's own orders."""
+
+    def _staff(self):
+        client = _client()
+        _login_staff(client, username="ada")
+        return client
+
+    def test_room_orders_are_staff_only(self):
+        self.assertEqual(_client().get("/api/rooms/9012/orders").status_code, 401)
+        guest = _client()
+        _login_guest(guest)
+        with mock.patch.object(orders, "get_orders_for_room") as rows:
+            self.assertEqual(guest.get("/api/rooms/9012/orders").status_code, 403)
+        rows.assert_not_called()
+
+    def test_room_orders_list(self):
+        rows = [(7, "Placed", datetime(2026, 10, 1, 9, 0), datetime(2026, 10, 1, 9, 0),
+                 "2x Club Sandwich", None)]
+        with mock.patch.object(orders, "get_orders_for_room", return_value=rows) as find:
+            response = self._staff().get("/api/rooms/9012/orders")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(find.call_args.args, ("9012",))
+        self.assertEqual(find.call_args.kwargs, {"active_only": False})
+        self.assertEqual(response.json(), {"room_number": "9012", "orders": [
+            {"order_id": 7, "status": "Placed", "placed_at": "2026-10-01 09:00:00",
+             "updated_at": "2026-10-01 09:00:00", "items": "2x Club Sandwich",
+             "notes": None},
+        ]})
+
+    def test_room_orders_can_filter_active_only(self):
+        with mock.patch.object(orders, "get_orders_for_room", return_value=[]) as find:
+            self._staff().get("/api/rooms/9012/orders?active_only=true")
+        self.assertEqual(find.call_args.kwargs, {"active_only": True})
+
+    def test_order_detail_is_staff_only(self):
+        self.assertEqual(_client().get("/api/orders/7").status_code, 401)
+        guest = _client()
+        _login_guest(guest)
+        with mock.patch.object(orders, "get_order") as get:
+            self.assertEqual(guest.get("/api/orders/7").status_code, 403)
+        get.assert_not_called()
+
+    def test_order_detail(self):
+        record = (7, "9012", "Preparing", datetime(2026, 10, 1, 9, 0),
+                  datetime(2026, 10, 1, 9, 30), None)
+        with mock.patch.object(orders, "get_order", return_value=record) as get, \
+                mock.patch.object(orders, "get_order_items",
+                                  return_value=[("Club Sandwich", 2, 12.5)]):
+            response = self._staff().get("/api/orders/7")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(get.call_args.args, (7,))
+        self.assertEqual(response.json(), {
+            "order_id": 7, "room_number": "9012", "status": "Preparing",
+            "placed_at": "2026-10-01 09:00:00", "updated_at": "2026-10-01 09:30:00",
+            "notes": None, "items": [{"item_name": "Club Sandwich", "quantity": 2,
+                                      "unit_price": 12.5}],
+        })
+
+    def test_order_detail_missing_is_404(self):
+        with mock.patch.object(orders, "get_order", return_value=None):
+            self.assertEqual(self._staff().get("/api/orders/7").status_code, 404)
+
+    def test_order_detail_unreachable_is_503(self):
+        with mock.patch.object(orders, "get_order",
+                               side_effect=RuntimeError("Database connection failed.")):
+            self.assertEqual(self._staff().get("/api/orders/7").status_code, 503)
+
+    def test_my_orders_is_guest_only(self):
+        self.assertEqual(_client().get("/api/guests/me/orders").status_code, 401)
+        staff = _client()
+        _login_staff(staff)
+        self.assertEqual(staff.get("/api/guests/me/orders").status_code, 403)
+
+    def test_my_orders_aggregates_only_own_rooms(self):
+        guest = _client()
+        _login_guest(guest)
+        stays = [("9012", date(2026, 10, 1), date(2026, 10, 3)),
+                 ("9011", date(2026, 9, 1), date(2026, 9, 3))]
+        with mock.patch.object(bookings, "customer_stays", return_value=stays), \
+                mock.patch.object(orders, "get_orders_for_room",
+                                  side_effect=lambda room, active_only=False: {
+                                      "9012": [(7, "Delivered", datetime(2026, 10, 1, 9, 0),
+                                                datetime(2026, 10, 1, 10, 0), "Pizza", None)],
+                                      "9011": [(3, "Placed", datetime(2026, 9, 1, 8, 0),
+                                                datetime(2026, 9, 1, 8, 0), "Tea", None)],
+                                  }[room]):
+            response = guest.get("/api/guests/me/orders")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([o["order_id"] for o in response.json()["orders"]], [7, 3])
+        self.assertNotIn("9013", response.json())
+
+
+class OrderWriteTests(unittest.TestCase):
+    """Phase-5 order writes: placement (bill or pay-now) and the staff lifecycle move."""
+
+    def _ok_result(self, **overrides):
+        result = {"status": "ok", "order_id": 7, "total": 25.0, "paid": 0.0,
+                  "final_total": 25.0, "discounted_subtotal": 25.0, "tax": 0.0,
+                  "savings_lines": []}
+        result.update(overrides)
+        return result
+
+    def test_create_order_is_signed_in_only(self):
+        self.assertEqual(
+            _client().post("/api/rooms/9012/orders",
+                           json={"items": [{"item_id": 1, "quantity": 2}]}).status_code, 401)
+
+    def test_staff_bills_an_order(self):
+        staff = _client()
+        _login_staff(staff, username="ada")
+        with mock.patch.object(items, "get_dynamic_price", return_value=12.5), \
+                mock.patch.object(orders, "place_order", return_value=self._ok_result()) as place:
+            response = staff.post("/api/rooms/9012/orders",
+                                  json={"items": [{"item_id": 1, "quantity": 2}],
+                                        "pay_mode": "bill"})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(place.call_args.args, ("9012", [(1, 12.5, 2)]))
+        self.assertEqual(place.call_args.kwargs["pay_mode"], "bill")
+        self.assertIsNone(place.call_args.kwargs["discount_code"])
+        self.assertEqual(place.call_args.kwargs["actor"], "ada")
+        self.assertEqual(response.json()["order_id"], 7)
+        self.assertEqual(response.json()["paid"], 0.0)
+
+    def test_pay_now_requires_a_card(self):
+        staff = _client()
+        _login_staff(staff)
+        with mock.patch.object(orders, "place_order") as place:
+            response = staff.post("/api/rooms/9012/orders",
+                                  json={"items": [{"item_id": 1, "quantity": 2}],
+                                        "pay_mode": "pay_now"})
+        self.assertEqual(response.status_code, 400)
+        place.assert_not_called()
+
+    def test_pay_now_charges_and_prices_server_side(self):
+        staff = _client()
+        _login_staff(staff, username="ada")
+        with mock.patch.object(items, "get_dynamic_price", return_value=12.5), \
+                mock.patch.object(orders, "place_order",
+                                  return_value=self._ok_result(paid=23.5,
+                                                               final_total=23.5)) as place:
+            response = staff.post("/api/rooms/9012/orders",
+                                  json={"items": [{"item_id": 1, "quantity": 2}],
+                                        "pay_mode": "pay_now",
+                                        "discount_code": "SAVE10",
+                                        "card_number": "4111111111111111",
+                                        "expiration_date": "12/2030", "cvv": "123"})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(place.call_args.kwargs["discount_code"], "SAVE10")
+        self.assertEqual(place.call_args.kwargs["actor"], "ada")
+        self.assertEqual(response.json()["paid"], 23.5)
+
+    def test_guest_orders_only_their_own_room(self):
+        guest = _client()
+        _login_guest(guest)
+        with mock.patch.object(bookings, "customer_stays",
+                               return_value=[("9012", date(2026, 10, 1), date(2026, 10, 3))]), \
+                mock.patch.object(orders, "place_order", return_value=self._ok_result()) as place:
+            foreign = guest.post("/api/rooms/9001/orders",
+                                 json={"items": [{"item_id": 1, "quantity": 1}]})
+            self.assertEqual(foreign.status_code, 403)
+            own = guest.post("/api/rooms/9012/orders",
+                             json={"items": [{"item_id": 1, "quantity": 1}]})
+            self.assertEqual(own.status_code, 201)
+        self.assertEqual(place.call_count, 1)
+
+    def test_declined_card_is_402(self):
+        staff = _client()
+        _login_staff(staff)
+        with mock.patch.object(items, "get_dynamic_price", return_value=12.5), \
+                mock.patch.object(orders, "place_order",
+                                  return_value={"status": "declined", "order_id": None,
+                                                "total": 25.0, "paid": 0.0}):
+            response = staff.post("/api/rooms/9012/orders",
+                                  json={"items": [{"item_id": 1, "quantity": 2}],
+                                        "pay_mode": "pay_now",
+                                        "card_number": "4111111111111111",
+                                        "expiration_date": "12/2030", "cvv": "123"})
+        self.assertEqual(response.status_code, 402)
+
+    def test_advance_is_staff_only(self):
+        self.assertEqual(_client().post("/api/orders/7/advance",
+                                        json={"action": "advance"}).status_code, 401)
+        guest = _client()
+        _login_guest(guest)
+        with mock.patch.object(orders, "advance_order") as move:
+            self.assertEqual(guest.post("/api/orders/7/advance",
+                                        json={"action": "advance"}).status_code, 403)
+        move.assert_not_called()
+
+    def test_advance_moves_and_names_the_actor(self):
+        record = (7, "9012", "Placed", datetime(2026, 10, 1, 9, 0),
+                  datetime(2026, 10, 1, 9, 0), None)
+        staff = _client()
+        _login_staff(staff, username="ada")
+        with mock.patch.object(orders, "get_order", return_value=record), \
+                mock.patch.object(orders, "advance_order", return_value="Preparing") as move:
+            response = staff.post("/api/orders/7/advance", json={"action": "advance"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"order_id": 7, "status": "Preparing"})
+        self.assertEqual(move.call_args.args, (7,))
+        self.assertEqual(move.call_args.kwargs["action"], "advance")
+        self.assertEqual(move.call_args.kwargs["actor"], "ada")
+
+    def test_advance_missing_order_is_404(self):
+        staff = _client()
+        _login_staff(staff)
+        with mock.patch.object(orders, "get_order", return_value=None):
+            response = staff.post("/api/orders/7/advance", json={"action": "cancel"})
+        self.assertEqual(response.status_code, 404)
+
+    def test_advance_unreachable_is_503(self):
+        staff = _client()
+        _login_staff(staff)
+        with mock.patch.object(orders, "get_order",
+                               side_effect=RuntimeError("Database connection failed.")):
+            response = staff.post("/api/orders/7/advance", json={"action": "advance"})
+        self.assertEqual(response.status_code, 503)
+
+    def test_advance_that_fails_is_500(self):
+        record = (7, "9012", "Placed", datetime(2026, 10, 1, 9, 0),
+                  datetime(2026, 10, 1, 9, 0), None)
+        staff = _client()
+        _login_staff(staff)
+        with mock.patch.object(orders, "get_order", return_value=record), \
+                mock.patch.object(orders, "advance_order", return_value=None):
+            response = staff.post("/api/orders/7/advance", json={"action": "advance"})
+        self.assertEqual(response.status_code, 500)
 
 
 class RequestValidationTests(unittest.TestCase):
