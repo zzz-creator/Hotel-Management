@@ -1,10 +1,10 @@
 # type: ignore
-"""rooms: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see PLAN-split-main-py.md)."""
+"""rooms: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see plans/PLAN-split-main-py.md)."""
 import logging
-import db
-import ui
-import session
-import core
+from hotel import db
+from hotel import ui
+from hotel import session
+from hotel import core
 
 __all__ = [
     'ROOM_STATUSES',

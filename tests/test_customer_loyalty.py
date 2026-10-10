@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import main as app
 from patch_main import patch_main
-import session
+from hotel import session
 
 
 def _as_queue(result_sets):

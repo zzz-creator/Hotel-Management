@@ -1,5 +1,5 @@
 # type: ignore
-"""core: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see PLAN-split-main-py.md)."""
+"""core: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see plans/PLAN-split-main-py.md)."""
 import logging
 import os
 import sys
@@ -10,9 +10,9 @@ import getpass
 import configparser
 import re
 from datetime import datetime
-import db
-import ui
-import session
+from hotel import db
+from hotel import ui
+from hotel import session
 
 __all__ = [
     'config',
@@ -79,7 +79,8 @@ __all__ = [
 
 # Database connection settings
 config = configparser.ConfigParser()
-config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
+# Resources live at the repository root, one level above this package.
+config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.ini')
 config.read(config_path)
 #DATABASE
 server = config.get('database', 'server', fallback='' )

@@ -13,7 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import clearance  # noqa: E402
+from hotel import clearance  # noqa: E402
 from svglib.svglib import svg2rlg  # noqa: E402
 from reportlab.graphics import renderPM  # noqa: E402
 

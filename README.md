@@ -60,7 +60,7 @@ for databases that predate a feature.
 
 ```powershell
 python main.py --report transactions --format csv
-python reports.py --report loyalty --room 9012
+python -m hotel.reports --report loyalty --room 9012
 ```
 
 ## Tests
@@ -86,13 +86,15 @@ python tests/check_applied_migrations.py    # the live server vs database.sql
 
 | File | Role |
 |---|---|
-| `main.py` | Entry point and compatibility facade; the app body is split by domain across `core.py`, `session.py`, `rooms.py`, `items.py`, `loyalty.py`, `payments.py`, `keycards.py`, `reservations.py`, `booking_ledger.py`, `billing.py`, `orders.py`, `notifications.py`, `bookings.py`, `customer.py`, `concierge.py`, `admin.py`, `onboarding.py` |
-| `ui.py` | `rich` console helpers — menus, tables, prompts |
-| `reports.py` | CSV exports, also a standalone CLI |
-| `db.py` | Connection string and the `get_connection()` context manager |
-| `clearance.py` / `clearance_ui.py` | Clearance-card catalog/mapping and the tkinter keycard window |
+| `main.py` | Entry point and compatibility facade; the app body is split by domain across the `hotel/` package (`hotel/core.py`, `hotel/session.py`, `hotel/rooms.py`, `hotel/items.py`, `hotel/loyalty.py`, `hotel/payments.py`, `hotel/keycards.py`, `hotel/reservations.py`, `hotel/booking_ledger.py`, `hotel/billing.py`, `hotel/orders.py`, `hotel/notifications.py`, `hotel/bookings.py`, `hotel/customer.py`, `hotel/concierge.py`, `hotel/admin.py`, `hotel/onboarding.py`) |
+| `hotel/ui.py` | `rich` console helpers — menus, tables, prompts |
+| `hotel/reports.py` | CSV exports, also a standalone CLI (`python -m hotel.reports`) |
+| `hotel/db.py` | Connection string and the `get_connection()` context manager |
+| `hotel/clearance.py` / `hotel/clearance_ui.py` | Clearance-card catalog/mapping and the tkinter keycard window |
 | `database.sql` | Authoritative fresh-install script |
 | `migrations/` | 25 incremental changes, applied in order |
+| `plans/` | The approved design documents (`PLAN-*.md`) |
+| `assets/Clearance cards/` | The clearance-card SVG assets and sprite map |
 | `docs/` | Schema reference, booking/loyalty rules, deviations, onboarding |
 | `tests/` | The suite, plus the four check scripts |
 | `config.ini.example` | The tracked config template. `config.ini` itself is never committed |

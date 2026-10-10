@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import main as app
 from patch_main import patch_main
-import reports
+from hotel import reports
 
 
 class StayNightsTests(unittest.TestCase):

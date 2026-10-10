@@ -1,11 +1,11 @@
 # type: ignore
-"""notifications: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see PLAN-split-main-py.md)."""
+"""notifications: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see plans/PLAN-split-main-py.md)."""
 import logging
 from datetime import datetime
-import db
-import ui
-import session
-import core
+from hotel import db
+from hotel import ui
+from hotel import session
+from hotel import core
 
 __all__ = [
     'send_notification_to_customer',

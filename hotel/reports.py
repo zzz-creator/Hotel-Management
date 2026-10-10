@@ -5,11 +5,12 @@ import os
 import configparser
 from datetime import datetime
 
-import db
-from db import get_connection
+from hotel import db
+from hotel.db import get_connection
 
 config = configparser.ConfigParser()
-config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
+# Resources live at the repository root, one level above this package.
+config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.ini')
 config.read(config_path)
 server = config.get('database', 'server', fallback='')
 database = config.get('database', 'database', fallback='')
@@ -24,7 +25,8 @@ CONNECTION_STRING = (
 )
 db.init(CONNECTION_STRING)
 
-EXPORT_DIR = os.path.join(os.path.dirname(__file__), "exports")
+EXPORT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "exports")
 
 # Stay windows are HALF-OPEN, [check-in, check-out): a guest who leaves on the 4th does
 # not occupy the night of the 4th. Every occupancy-shaped report in this file uses

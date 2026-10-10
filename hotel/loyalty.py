@@ -1,11 +1,11 @@
 # type: ignore
-"""loyalty: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see PLAN-split-main-py.md)."""
+"""loyalty: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see plans/PLAN-split-main-py.md)."""
 import logging
 from datetime import datetime
-import db
-import ui
-import core
-import rooms
+from hotel import db
+from hotel import ui
+from hotel import core
+from hotel import rooms
 
 __all__ = [
     'points_per_dollar_order_vs_room',

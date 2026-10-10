@@ -160,7 +160,7 @@ def main():
     # the claim that actually matters and the one no schema check can make.
     print('the code, against the live database:')
     import main as app
-    import reports
+    from hotel import reports
 
     business = app.business_date()
     print('%-42s %s' % ('app.business_date()', business))

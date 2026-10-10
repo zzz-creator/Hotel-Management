@@ -1,12 +1,12 @@
 # type: ignore
-"""onboarding: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see PLAN-split-main-py.md)."""
+"""onboarding: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see plans/PLAN-split-main-py.md)."""
 import logging
-import db
-import ui
-import core
-import items
-import loyalty
-import rooms
+from hotel import db
+from hotel import ui
+from hotel import core
+from hotel import items
+from hotel import loyalty
+from hotel import rooms
 
 __all__ = [
     'ONBOARDING_SETTING',

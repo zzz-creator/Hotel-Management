@@ -20,24 +20,24 @@ Usage:
 import contextlib
 from unittest import mock
 
-import db
-import session
-import core
-import rooms
-import items
-import loyalty
-import payments
-import keycards
-import reservations
-import booking_ledger
-import billing
-import orders
-import notifications
-import bookings
-import customer
-import concierge
-import admin
-import onboarding
+from hotel import db
+from hotel import session
+from hotel import core
+from hotel import rooms
+from hotel import items
+from hotel import loyalty
+from hotel import payments
+from hotel import keycards
+from hotel import reservations
+from hotel import booking_ledger
+from hotel import billing
+from hotel import orders
+from hotel import notifications
+from hotel import bookings
+from hotel import customer
+from hotel import concierge
+from hotel import admin
+from hotel import onboarding
 import main
 
 # Owner-resolution order. session and main are listed explicitly because they are the two

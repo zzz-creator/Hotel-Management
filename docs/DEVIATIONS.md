@@ -160,7 +160,7 @@ sit in a file.
 ## 9. A declined card after a point redemption — fixed 4 October 2026
 
 **Where:** `bill_room_transactions()` — the redemption deduction now runs inside the invoice
-transaction (in `billing.py`). `redeem_points_for_invoice()` is the new helper.
+transaction (in `hotel/billing.py`). `redeem_points_for_invoice()` is the new helper.
 **Severity:** was a real money defect. Fixed.
 
 Two facts combined badly. `redeem_points_by_customer()` committed immediately and was the
@@ -181,7 +181,7 @@ the real `check_out()` with a redemption of 500 points and a card that fails the
 
 **Fixed by deferring the deduction.** The prompt still happens where it did, but it now only
 records the *intent*; the points come off in the same transaction that inserts the invoice,
-which is exactly what `apply_booking_credit()` (in `booking_ledger.py`) already did for the same
+which is exactly what `apply_booking_credit()` (in `hotel/booking_ledger.py`) already did for the same
 reason. The deduction carries `SourceID = 'redeem:{invoice_id}'`, so it is self-checking in
 the same way as `award_stay_points()`'s guard, and a repeat is detectable rather than
 silent.
@@ -207,7 +207,7 @@ posts before payment on purpose.
 ## 10. A failed check-out leaves residue — now reported, not prevented
 
 **Where:** `check_out()`, `settlement_outstanding()` and `announce_settlement_outstanding()`
-all in `billing.py`.
+all in `hotel/billing.py`.
 **Severity:** the residue was real and silent. Now reported. The *prevention* is still a
 deliberate non-goal — see below.
 
@@ -280,8 +280,8 @@ console has no out-of-band channel, a wrong *error* must not strand a paying gue
 
 ## 12. Every menu pauses before redraw — convention, effective 5 October 2026
 
-**Where:** each menu loop in the domain modules (`admin.py`, `customer.py`,
-`bookings.py`, …), plus `ui.pause()`.
+**Where:** each menu loop in the domain modules (`hotel/admin.py`, `hotel/customer.py`,
+`hotel/bookings.py`, …), plus `ui.pause()`.
 **Severity:** cosmetic, but load-bearing for the harness.
 
 A handled option used to print its result and then the loop immediately cleared or

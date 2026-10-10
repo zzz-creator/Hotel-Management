@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest import mock
 
-import clearance
+from hotel import clearance
 
 
 class TestCardExtraction(unittest.TestCase):

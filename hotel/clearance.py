@@ -1,4 +1,4 @@
-"""Clearance cards: map guests/staff to the card assets in `Clearance cards/`.
+"""Clearance cards: map guests/staff to the card assets in `assets/Clearance cards/`.
 
 Card display names are extracted from the SVG files themselves (the third
 <text> block, e.g. "DIRECTORY OVERSEER" in Omega.svg), so adding a card means
@@ -19,10 +19,12 @@ import re
 import shutil
 import logging
 
-from db import get_connection
+from hotel.db import get_connection
 
-ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Clearance cards")
-EXPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "exports")
+# Card assets and generated output live at the repository root, one level above this package.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ASSETS_DIR = os.path.join(_REPO_ROOT, "assets", "Clearance cards")
+EXPORTS_DIR = os.path.join(_REPO_ROOT, "exports")
 
 CATEGORIES = [
     "Standard", "Deluxe", "Junior Suite", "Suite",

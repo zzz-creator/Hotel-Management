@@ -1,18 +1,18 @@
 # type: ignore
-"""customer: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see PLAN-split-main-py.md)."""
+"""customer: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see plans/PLAN-split-main-py.md)."""
 import logging
-import db
-import ui
-import session as _mod_session
-import billing
-import concierge
-import core
-import keycards
-import loyalty
-import notifications
-import orders
-import reservations
-import rooms
+from hotel import db
+from hotel import ui
+from hotel import session as _mod_session
+from hotel import billing
+from hotel import concierge
+from hotel import core
+from hotel import keycards
+from hotel import loyalty
+from hotel import notifications
+from hotel import orders
+from hotel import reservations
+from hotel import rooms
 
 __all__ = [
     'register_customer',

@@ -1,16 +1,16 @@
 # type: ignore
-"""bookings: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see PLAN-split-main-py.md)."""
+"""bookings: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see plans/PLAN-split-main-py.md)."""
 import logging
 from datetime import timedelta
-import db
-import ui
-import session
-import booking_ledger
-import core
-import customer
-import payments
-import reservations
-import rooms
+from hotel import db
+from hotel import ui
+from hotel import session
+from hotel import booking_ledger
+from hotel import core
+from hotel import customer
+from hotel import payments
+from hotel import reservations
+from hotel import rooms
 
 __all__ = [
     'book_room',

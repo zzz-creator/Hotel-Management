@@ -1,11 +1,11 @@
 # type: ignore
-"""booking_ledger: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see PLAN-split-main-py.md)."""
+"""booking_ledger: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see plans/PLAN-split-main-py.md)."""
 import logging
 import random
 from datetime import timedelta
-import db
-import session
-import core
+from hotel import db
+from hotel import session
+from hotel import core
 
 __all__ = [
     'BOOKING_REF_PREFIX',

@@ -46,14 +46,17 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 CODE_FILES = (
     'main.py',
-    # The split of main.py into domain modules (see PLAN-split-main-py.md). All of them are
-    # project code, so a function named in the docs may now be defined in any of these.
-    'core.py', 'session.py', 'rooms.py', 'items.py', 'loyalty.py', 'payments.py',
-    'keycards.py', 'reservations.py', 'booking_ledger.py', 'billing.py', 'orders.py',
-    'notifications.py', 'bookings.py', 'customer.py', 'concierge.py', 'admin.py',
-    'onboarding.py',
+    # The split of main.py into domain modules (see plans/PLAN-split-main-py.md). All of
+    # them live in the hotel/ package, so a function named in the docs may now be defined
+    # in any of these.
+    'hotel/core.py', 'hotel/session.py', 'hotel/rooms.py', 'hotel/items.py',
+    'hotel/loyalty.py', 'hotel/payments.py', 'hotel/keycards.py',
+    'hotel/reservations.py', 'hotel/booking_ledger.py', 'hotel/billing.py',
+    'hotel/orders.py', 'hotel/notifications.py', 'hotel/bookings.py',
+    'hotel/customer.py', 'hotel/concierge.py', 'hotel/admin.py', 'hotel/onboarding.py',
+    'hotel/reports.py', 'hotel/ui.py', 'hotel/db.py',
+    'hotel/clearance.py', 'hotel/clearance_ui.py',
     'tests/patch_main.py',
-    'reports.py', 'ui.py', 'db.py',
 )
 DOC_FILES = ('AGENTS.md', 'docs/SCHEMA.md', 'docs/BOOKING.md', 'docs/DEVIATIONS.md',
              'docs/ONBOARDING.md')
@@ -199,7 +202,7 @@ def check_agents_file_map(docs):
                   % required)
 
     covered = 0
-    for folder in ('', 'tests', 'docs'):
+    for folder in ('', 'tests', 'docs', 'hotel', 'plans', 'assets'):
         pattern = os.path.join(ROOT, folder, '*') if folder else os.path.join(ROOT, '*')
         for path in sorted(glob.glob(pattern)):
             name = os.path.basename(path)

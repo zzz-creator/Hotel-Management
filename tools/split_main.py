@@ -11,7 +11,7 @@ Why it exists rather than a hand move: main.py is ~9,000 lines with ~250 functio
 the repository's comments are load-bearing. Slicing by AST line ranges keeps every byte
 of body and comment, only inserting `owner.` prefixes at exact Name-token offsets.
 
-Rules it enforces (agreed in PLAN-split-main-py.md):
+Rules it enforces (agreed in plans/PLAN-split-main-py.md):
   * cross-module references are module-qualified, so each name has exactly one binding
     and patching the owner module affects every caller;
   * mutable process state lives in session.py and is written as session.X = ... ;
@@ -31,9 +31,10 @@ consumes. Re-running therefore needs the monolith restored from the tag first:
     python tools/split_main.py --apply
     git checkout -- main.py              # put the facade back
 
-The tool refuses to run against a file that does not look like the monolith (fewer than 200
-top-level defs), so a forgotten restore fails loudly instead of rewriting every module from
-the facade.
+The domain modules are written into hotel/ (the package the app now lives in); this tool
+only ever rewrites those, never main.py. It refuses to run against a file that does not
+look like the monolith (fewer than 200 top-level defs), so a forgotten restore fails
+loudly instead of rewriting every module from the facade.
 """
 import ast
 import collections
@@ -53,6 +54,20 @@ def resolve_source():
         if arg.startswith('--source='):
             return os.path.join(ROOT, arg.split('=', 1)[1])
     return SOURCE
+
+
+def imported_module(line):
+    """The project module an import line pulls from, or '' for stdlib/other imports.
+
+    Handles both the package form this tool now emits (`from hotel import core`)
+    and any legacy flat form (`import core`) still present in the source it reads.
+    """
+    if line.startswith('from hotel import '):
+        return line.split(' import ', 1)[1].split(' as ')[0].strip()
+    if line.startswith('import '):
+        parts = line.split()
+        return parts[1].split('.')[0] if len(parts) > 1 else ''
+    return ''
 
 
 CORE = 'core'
@@ -237,8 +252,9 @@ IMPORT_MAP = {
     'argparse': 'import argparse', 're': 'import re', 'tqdm': 'import tqdm',
     'Decimal': 'from decimal import Decimal', 'date': 'from datetime import date',
     'datetime': 'from datetime import datetime', 'timedelta': 'from datetime import timedelta',
-    'db': 'import db', 'ui': 'import ui', 'reports': 'import reports',
-    'clearance_ui': 'import clearance_ui', 'session': 'import session',
+    'db': 'from hotel import db', 'ui': 'from hotel import ui',
+    'reports': 'from hotel import reports',
+    'clearance_ui': 'from hotel import clearance_ui', 'session': 'from hotel import session',
 }
 STDLIB_NAMES = ['logging', 'os', 'sys', 'time', 'random', 'string', 'getpass',
                 'configparser', 'argparse', 're', 'tqdm', 'Decimal', 'date', 'datetime',
@@ -530,7 +546,9 @@ def render_module(module, edited_parts, collectors):
     def import_line(name):
         # A shadowed module is imported under an alias the whole module uses (see _ref).
         if name in coll.aliased:
-            return 'import %s as _mod_%s' % (name, name)
+            return 'from hotel import %s as _mod_%s' % (name, name)
+        if name in PROJECT_MODULES:
+            return 'from hotel import %s' % name
         return IMPORT_MAP.get(name, 'import %s' % name)
 
     for name in STDLIB_NAMES + INFRA_NAMES:
@@ -552,7 +570,7 @@ def render_module(module, edited_parts, collectors):
     header = ('# type: ignore\n'
               '"""%s: split out of main.py. Cross-module calls are module-qualified so a '
               'test patching the owner module affects every caller (see '
-              'PLAN-split-main-py.md)."""\n' % module)
+              'plans/PLAN-split-main-py.md)."""\n' % module)
     header += '\n'.join(header_imports) + '\n\n'
     # __all__ lists every name the module binds, private helpers included, so main.py's
     # `from <module> import *` facade exposes the whole surface (a bare star import would
@@ -615,9 +633,9 @@ def main():
     for module in MODULES:
         if module not in reports:
             continue
-        deps = [d.split()[1] for d in reports[module][1]
-                if d.startswith('import ') and d.split()[1] in PROJECT_MODULES
-                and d.split()[1] != module]
+        deps = [imported_module(d) for d in reports[module][1]
+                if imported_module(d) in PROJECT_MODULES
+                and imported_module(d) != module]
         graph[module] = deps
         print('%-16s -> %s' % (module, ', '.join(deps) or '(none)'))
     print('== unknown references (need a home or an import) ==')
@@ -645,12 +663,14 @@ def main():
         print('\n(dry run; pass --apply to write)')
         return
 
+    out_dir = os.path.join(ROOT, 'hotel')
+    os.makedirs(out_dir, exist_ok=True)
     for module in MODULES:
         if module in rendered:
-            path = os.path.join(ROOT, module + '.py')
+            path = os.path.join(out_dir, module + '.py')
             with open(path, 'w', encoding='utf-8', newline='\n') as handle:
                 handle.write(rendered[module])
-            print('wrote %s (%d lines)' % (module + '.py', rendered[module].count('\n')))
+            print('wrote hotel/%s (%d lines)' % (module + '.py', rendered[module].count('\n')))
     with open(os.path.join(ROOT, 'tools', '_main_leftover.txt'), 'w',
               encoding='utf-8', newline='\n') as handle:
         handle.write(''.join(text for _, _, text in main_out))

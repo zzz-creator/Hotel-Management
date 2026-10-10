@@ -1,5 +1,5 @@
 # type: ignore
-"""admin: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see PLAN-split-main-py.md)."""
+"""admin: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see plans/PLAN-split-main-py.md)."""
 import logging
 import time
 import random
@@ -7,23 +7,23 @@ import getpass
 import tqdm
 from datetime import datetime
 from datetime import timedelta
-import db
-import ui
-import reports
-import clearance_ui
-import session as _mod_session
-import billing
-import concierge
-import core
-import customer
-import items
-import keycards
-import loyalty
-import notifications
-import onboarding
-import orders
-import reservations as _mod_reservations
-import rooms
+from hotel import db
+from hotel import ui
+from hotel import reports
+from hotel import clearance_ui
+from hotel import session as _mod_session
+from hotel import billing
+from hotel import concierge
+from hotel import core
+from hotel import customer
+from hotel import items
+from hotel import keycards
+from hotel import loyalty
+from hotel import notifications
+from hotel import onboarding
+from hotel import orders
+from hotel import reservations as _mod_reservations
+from hotel import rooms
 
 __all__ = [
     'clear_lockout',
