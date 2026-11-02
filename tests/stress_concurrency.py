@@ -105,11 +105,15 @@ def main():
     dupes = cur.fetchall()
     cur.execute("SELECT RoomNumber, COUNT(*) FROM Transactions WHERE ChargeGroup='Room' GROUP BY RoomNumber HAVING COUNT(*) > 1")
     double_charges = cur.fetchall()
+    cur.execute("SELECT RoomNumber, COUNT(*) FROM KeyCards WHERE Status='Active' GROUP BY RoomNumber HAVING COUNT(*) > 1")
+    double_cards = cur.fetchall()
+    cur.execute("SELECT SourceID, COUNT(*) FROM LoyaltyTransactions WHERE SourceID IS NOT NULL GROUP BY SourceID HAVING COUNT(*) > 1")
+    dup_sources = cur.fetchall()
     conn.close()
 
-    print("workers=%d ops=%d errors=%d duplicate_reservations=%d double_room_charges=%d"
-          % (args.workers, args.ops, len(errors), len(dupes), len(double_charges)))
-    if errors or dupes or double_charges:
+    print("workers=%d ops=%d errors=%d duplicate_reservations=%d double_room_charges=%d double_cards=%d dup_sources=%d"
+          % (args.workers, args.ops, len(errors), len(dupes), len(double_charges), len(double_cards), len(dup_sources)))
+    if errors or dupes or double_charges or double_cards or dup_sources:
         sys.exit(1)
     print("STRESS OK")
 

@@ -148,6 +148,7 @@ def admin_login():
                     cursor.execute("UPDATE Users SET FailedAttempts = 0, LockoutTime = NULL WHERE Username = ?", (username,))
                     conn.commit()
                     _mod_session.CURRENT_USER = username
+                    _mod_session.set_acting_user(username)
                     core.log_audit("LOGIN", "User", username, f"Role {role}")
                     return True, role, False  # Return role and reauthentication status
                 else:

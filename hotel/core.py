@@ -253,7 +253,7 @@ def log_audit(action, entity_type, entity_id="", details="", old_value=None, new
             cursor.execute(
                 "INSERT INTO AuditLog (Username, Action, EntityType, EntityID, Details, OldValue, NewValue) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (str(user if user is not None else (session.CURRENT_USER or "system")), str(action or "UNKNOWN"),
+                (str(user if user is not None else (session.get_acting_user() or "system")), str(action or "UNKNOWN"),
                  str(entity_type or "Unknown"), str(entity_id or ""), str(details or ""),
                  None if old_value is None else str(old_value),
                  None if new_value is None else str(new_value)),
