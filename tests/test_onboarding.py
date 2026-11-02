@@ -255,7 +255,7 @@ class CreateFirstUserTests(unittest.TestCase):
              patch_main("setup_status", return_value=ChecklistGatingTests.READY), \
              mock.patch.object(app.ui, "pause"):
             with mock.patch("builtins.input",
-                            ChecklistGatingTests()._scripted_input(["2", "6"])[0]):
+                            ChecklistGatingTests()._scripted_input(["2", "10"])[0]):
                 app.onboarding_checklist("admin")
         add_user.assert_called_once_with("master", "pw", "admin")
 
@@ -683,21 +683,36 @@ class SetupStatusTests(unittest.TestCase):
     def _status(self, log, answers=(), raises=None, settings=None):
         # loyalty and the settings rows are patched explicitly rather than inherited:
         # the live config.ini is per-machine, so a developer's own values would
-        # otherwise decide these assertions.
+        # otherwise decide these assertions. `settings` feeds BOTH the get_setting
+        # lookups and the raw HotelSettings probe, so a range check sees the same values
+        # the rest of the screen does.
+        if settings is not None:
+            answers = [("FROM HotelSettings", list(settings.items()))] + list(answers)
         with run_with(log, answers, raises), \
              patch_main("get_loyalty_enabled", return_value=True), \
              patch_main("get_setting",
                                side_effect=lambda k, d=None: (settings or {}).get(k, d)):
             return dict((label, (done, detail)) for label, done, detail in app.setup_status())
 
-    def _answers(self, users=0, master=0, items=0, rooms=0, rated=7, tiers=4):
-        # Specific needles first: "FROM Users" is a substring of the master probe too.
+    def _settings(self, **overrides):
+        rows = {k: str(v) for k, v in app.DEFAULT_HOTEL_SETTINGS.items()}
+        rows.update({k: str(v) for k, v in overrides.items()})
+        return rows
+
+    def _answers(self, users=0, master=0, items=0, rooms=0, rated=0, active=7, tiers=4,
+                 amenities=0, promotions=0, discounts=0):
+        # Specific needles first: "FROM Users" is a substring of the master probe too, and
+        # the unpriced-rate probe contains the active-category probe's FROM clause.
         return [("FROM Users WHERE Username", (master,)),
-                ("FROM RoomTypes", (rated,)),
+                ("ISNULL(NightlyRate", (rated,)),
+                ("FROM RoomTypes WHERE Active = 1", (active,)),
                 ("FROM LoyaltyTiers", (tiers,)),
                 ("FROM Items", (items,)),
                 ("FROM Rooms", (rooms,)),
-                ("FROM Users", (users,))]
+                ("FROM Users", (users,)),
+                ("FROM Amenities", (amenities,)),
+                ("FROM Promotions", (promotions,)),
+                ("FROM Discounts", (discounts,))]
 
     def test_a_fresh_database_reports_the_runbook_gaps(self):
         checks = self._status([], self._answers(), settings={})
@@ -765,6 +780,69 @@ class SetupStatusTests(unittest.TestCase):
         checks = self._status([], answers, settings={"business_date": "2026-10-02"})
         self.assertTrue(checks["Loyalty tiers"][0])
 
+    def test_zero_rate_on_an_active_category_is_a_failure(self):
+        # A zero row exists and parses, but check-out would post a zero-dollar room charge.
+        checks = self._status([], self._answers(rated=2, active=7))
+        self.assertFalse(checks["Nightly rates"][0])
+        self.assertIn("zero-dollar", checks["Nightly rates"][1])
+
+    def test_all_active_categories_priced_is_ready(self):
+        checks = self._status([], self._answers(rated=0, active=7))
+        self.assertTrue(checks["Nightly rates"][0])
+
+    def test_no_active_categories_is_a_failure(self):
+        checks = self._status([], self._answers(rated=0, active=0))
+        self.assertFalse(checks["Nightly rates"][0])
+        self.assertIn("no active room category", checks["Nightly rates"][1])
+
+    def test_a_parseable_but_out_of_range_tax_rate_is_a_failure(self):
+        settings = self._settings(tax_rate="13")
+        checks = self._status([], self._answers(users=1, master=1, items=1, rooms=1),
+                              settings=settings)
+        self.assertFalse(checks["Hotel settings"][0])
+        self.assertIn("tax_rate", checks["Hotel settings"][1])
+        self.assertIn("out of range", checks["Hotel settings"][1])
+
+    def test_a_negative_peak_factor_is_a_failure(self):
+        settings = self._settings(peak_factor="-1")
+        checks = self._status([], self._answers(users=1, master=1, items=1, rooms=1),
+                              settings=settings)
+        self.assertFalse(checks["Hotel settings"][0])
+        self.assertIn("peak_factor", checks["Hotel settings"][1])
+
+    def test_default_settings_are_ready(self):
+        checks = self._status([], self._answers(users=1, master=1, items=1, rooms=1),
+                              settings=self._settings())
+        self.assertTrue(checks["Hotel settings"][0], checks["Hotel settings"][1])
+
+    def test_miscalibrated_loyalty_earn_rate_is_a_failure(self):
+        # The F&B rate must stay below what a Standard night earns per dollar.
+        settings = self._settings(loyalty_accrual_points_per_unit="5")
+        checks = self._status([], self._answers(users=1, master=1, items=1, rooms=1),
+                              settings=settings)
+        self.assertFalse(checks["Hotel settings"][0])
+        self.assertIn("Standard night", checks["Hotel settings"][1])
+
+    def test_empty_reference_data_is_green_and_optional(self):
+        checks = self._status([], self._answers(users=1, master=1, items=1, rooms=1),
+                              settings=self._settings())
+        self.assertTrue(checks["Reference data"][0])
+        self.assertIn("optional", checks["Reference data"][1])
+
+    def test_reference_data_counts_are_reported(self):
+        checks = self._status([], self._answers(users=1, master=1, items=1, rooms=1,
+                                                amenities=3, promotions=1, discounts=2),
+                              settings=self._settings())
+        self.assertTrue(checks["Reference data"][0])
+        self.assertIn("3 amenities", checks["Reference data"][1])
+        self.assertIn("2 discount", checks["Reference data"][1])
+
+    def test_unreachable_reference_data_is_red(self):
+        checks = self._status([], self._answers(users=1, master=1, items=1, rooms=1),
+                              raises="FROM Amenities", settings=self._settings())
+        self.assertFalse(checks["Reference data"][0])
+        self.assertIn("migration 015", checks["Reference data"][1])
+
 
 class ChecklistGatingTests(unittest.TestCase):
     """The checklist lives in the Admin Panel; minting an account must not bypass that."""
@@ -801,7 +879,7 @@ class ChecklistGatingTests(unittest.TestCase):
 
     def test_admin_is_offered_the_actions(self):
         with patch_main("setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["6"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["10"])[0]), \
              mock.patch.object(app.ui, "show_menu") as show_menu:
             app.onboarding_checklist("admin")
         self.assertEqual(show_menu.call_args[0][0], "Setup actions")
@@ -810,7 +888,7 @@ class ChecklistGatingTests(unittest.TestCase):
         # An admin with a partially-filled catalogue needs to add their own item, which the
         # bare seed_default_items() call could not do.
         with patch_main("setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["3", "6"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["3", "10"])[0]), \
              patch_main("_offer_item_catalogue", return_value=2) as offer_items, \
              patch_main("seed_default_items") as seed, \
              mock.patch.object(app.ui, "pause"):
@@ -822,7 +900,7 @@ class ChecklistGatingTests(unittest.TestCase):
         # wizard=True would label the exit "Skip for now", which reads wrong from a screen
         # an admin deliberately navigated to.
         with patch_main("setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["3", "6"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["3", "10"])[0]), \
              patch_main("_offer_item_catalogue", return_value=0) as offer_items, \
              mock.patch.object(app.ui, "pause"):
             app.onboarding_checklist("admin")
@@ -832,7 +910,7 @@ class ChecklistGatingTests(unittest.TestCase):
         # Not create_first_user(): that one refuses once any account exists, which is
         # right for an unauthenticated wizard and wrong for a logged-in admin.
         with patch_main("setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["1", "bob", "s", "6"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["1", "bob", "s", "10"])[0]), \
              patch_main("user_exists", return_value=False), \
              patch_main("_prompt_new_password", return_value="pw"), \
              patch_main("add_user_with_password") as add_user, \
@@ -847,7 +925,7 @@ class ChecklistGatingTests(unittest.TestCase):
             with self.subTest(role=expected):
                 with patch_main("setup_status", return_value=self.READY), \
                      mock.patch("builtins.input",
-                                self._scripted_input(["1", "bob", letter, "6"])[0]), \
+                                self._scripted_input(["1", "bob", letter, "10"])[0]), \
                      patch_main("user_exists", return_value=False), \
                      patch_main("_prompt_new_password", return_value="pw"), \
                      patch_main("add_user_with_password") as add_user, \
@@ -860,7 +938,7 @@ class ChecklistGatingTests(unittest.TestCase):
         # no branch would create an account nobody can sign in to.
         with patch_main("setup_status", return_value=self.READY), \
              patch_main("_prompt_role", return_value="manager") as prompt_role, \
-             mock.patch("builtins.input", self._scripted_input(["1", "bob", "m", "6"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["1", "bob", "m", "10"])[0]), \
              patch_main("user_exists", return_value=False), \
              patch_main("_prompt_new_password", return_value="pw"), \
              patch_main("add_user_with_password"), \
@@ -870,7 +948,7 @@ class ChecklistGatingTests(unittest.TestCase):
 
     def test_existing_username_is_not_re_inserted(self):
         with patch_main("setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["1", "bob", "a", "6"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["1", "bob", "a", "10"])[0]), \
              patch_main("user_exists", return_value=True), \
              patch_main("_prompt_new_password", return_value="pw"), \
              patch_main("add_user_with_password") as add_user, \
@@ -880,7 +958,7 @@ class ChecklistGatingTests(unittest.TestCase):
 
     def test_role_check_is_case_insensitive(self):
         with patch_main("setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["6"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["10"])[0]), \
              mock.patch.object(app.ui, "show_menu") as show_menu:
             app.onboarding_checklist("ADMIN")
         show_menu.assert_called_once()
@@ -888,10 +966,50 @@ class ChecklistGatingTests(unittest.TestCase):
     def test_seven_returns_rather_than_looping_forever(self):
         # The menu must have a way out that does not depend on the database.
         with patch_main("setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["6"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["10"])[0]), \
              mock.patch.object(app.ui, "show_menu") as show_menu:
             app.onboarding_checklist("admin")
         self.assertEqual(show_menu.call_count, 1)
+
+
+class ChecklistActionTests(unittest.TestCase):
+    """The checklist can fix what it reports, not just point at the Admin Panel."""
+
+    READY = [("Staff accounts", True, "2 account(s)")]
+
+    def _drive(self, inputs):
+        queue = list(inputs)
+        with patch_main("setup_status", return_value=self.READY), \
+             mock.patch.object(app.ui, "pause"), \
+             mock.patch("builtins.input", lambda prompt="": queue.pop(0) if queue else inputs[-1]):
+            app.onboarding_checklist("admin")
+
+    def test_rate_action_opens_the_rate_editor(self):
+        with patch_main("_offer_room_rates", return_value=0) as rates:
+            self._drive(["5", "10"])
+        rates.assert_called_once_with()
+
+    def test_hotel_settings_action_opens_the_settings_prompts(self):
+        with patch_main("_offer_hotel_settings") as settings:
+            self._drive(["6", "10"])
+        settings.assert_called_once_with()
+
+    def test_loyalty_action_opens_the_loyalty_menu_when_enabled(self):
+        with patch_main("get_loyalty_enabled", return_value=True), \
+             patch_main("loyalty_admin_menu") as loyalty_menu:
+            self._drive(["7", "10"])
+        loyalty_menu.assert_called_once_with()
+
+    def test_loyalty_action_refuses_when_the_programme_is_off(self):
+        with patch_main("get_loyalty_enabled", return_value=False), \
+             patch_main("loyalty_admin_menu") as loyalty_menu:
+            self._drive(["7", "10"])
+        loyalty_menu.assert_not_called()
+
+    def test_reference_data_action_opens_the_reference_menu(self):
+        with patch_main("_offer_reference_data") as reference:
+            self._drive(["8", "10"])
+        reference.assert_called_once_with()
 
 
 class FirstRunGuardsTests(unittest.TestCase):
@@ -936,15 +1054,20 @@ class WizardStepGuardsTests(unittest.TestCase):
 
     def _answers(self, users=0, items=0, rooms=0, master=1):
         """Answers for setup_status()'s probes, specific needles first."""
-        return [("FROM RoomTypes", (7,)),
+        return [("SELECT RoomType, NightlyRate", [("Standard", 100.0, True)]),
+                ("ISNULL(NightlyRate", (0,)),
+                ("FROM RoomTypes WHERE Active = 1", (7,)),
                 ("FROM LoyaltyTiers", (4,)),
                 ("FROM Users WHERE Username", (master,)),
                 ("FROM Items", (items,)),
                 ("SELECT COUNT(*) FROM Rooms", (rooms,)),
                 ("FROM Rooms", (rooms,)),
-                ("FROM Users", (users,))]
+                ("FROM Users", (users,)),
+                ("FROM Amenities", (0,)),
+                ("FROM Promotions", (0,)),
+                ("FROM Discounts", (0,))]
 
-    def _run(self, answers, answer="y"):
+    def _run(self, answers, answer="1", confirm=True, inputs=None):
         """Run the whole wizard non-interactively. Tests patch the subject under test
         around this call; everything else the wizard touches is neutralised here.
 
@@ -952,22 +1075,35 @@ class WizardStepGuardsTests(unittest.TestCase):
         mock: patching set_setting again inside this helper would shadow the outer mock, so
         the test's own mock would record nothing.
 
-        The catalogue and room menus are stubbed. They are menus in their own right and have
-        their own tests; left real here they would read this helper's scripted input ("y")
-        and loop forever asking for a choice. `self.catalogue` and `self.rooms` are the mocks
-        so a test can assert the wizard offered them at all.
+        The optional sub-menus are stubbed. They are menus in their own right and have their
+        own tests; left real here they would read this helper's scripted input and loop
+        forever asking for a choice. `self.catalogue`, `self.rooms`, `self.rates`,
+        `self.staff` and `self.reference` are the mocks so a test can assert the wizard
+        offered them at all.
+
+        `answer` defaults to "1", which is "mark setup complete" on the review menu; the
+        `confirm` flag controls the explicit sign-off that follows it.
         """
         self.settings_written = []
         self.catalogue = mock.MagicMock(return_value=0)
         self.rooms = mock.MagicMock()
+        self.rates = mock.MagicMock(return_value=0)
+        self.staff = mock.MagicMock(return_value=0)
+        self.reference = mock.MagicMock()
+        self.step_menu = mock.MagicMock()
         self.settings = mock.MagicMock()
         fake_ui = mock.MagicMock()
-        fake_ui.ask_confirmation.return_value = True
+        fake_ui.ask_confirmation.return_value = confirm
         fake_ui.ask_number.side_effect = [20, 40]
 
         def record_setting(key, value, *a, **kw):
             self.settings_written.append((key, value))
             return True
+
+        scripted = list(inputs or [])
+
+        def fake_input(prompt=""):
+            return scripted.pop(0) if scripted else answer
 
         with patch_main("ui", fake_ui), \
              patch_main("set_setting", record_setting), \
@@ -975,7 +1111,11 @@ class WizardStepGuardsTests(unittest.TestCase):
              patch_main("_offer_item_catalogue", self.catalogue), \
              patch_main("_offer_room_layout", self.rooms), \
              patch_main("_offer_hotel_settings", self.settings), \
-             mock.patch("builtins.input", lambda prompt="": answer), \
+             patch_main("_offer_room_rates", self.rates), \
+             patch_main("_offer_staff_accounts", self.staff), \
+             patch_main("_offer_reference_data", self.reference), \
+             patch_main("_wizard_step_menu", self.step_menu), \
+             mock.patch("builtins.input", fake_input), \
              patch_main("_prompt_new_password", return_value="pw"), \
              run_with([], answers):
             app.run_first_run_onboarding()
@@ -1069,6 +1209,103 @@ class WizardStepGuardsTests(unittest.TestCase):
         asked = [c.args[0] for c in fake_ui.ask_confirmation.call_args_list]
         self.assertNotIn("Set it to today instead?", asked)
         self.assertTrue(fake_ui.box.called)
+
+    def test_rates_staff_and_reference_data_are_offered_by_the_wizard(self):
+        # A complete setup needs a price list, the rest of the desk's logins and the
+        # optional guest-facing reference data -- not just items and rooms.
+        self._run(self._answers(users=6, items=15, rooms=138180))
+        self.rates.assert_called_once_with(wizard=True)
+        self.staff.assert_called_once_with(wizard=True)
+        self.reference.assert_called_once_with(wizard=True)
+
+    def test_declining_the_sign_off_leaves_the_marker_unwritten(self):
+        # "Mark setup complete" asks once more; a no must not write the marker, or the
+        # outstanding rows can never be fixed by a re-run.
+        self._run(self._answers(users=6, items=15, rooms=138180),
+                  inputs=["1", "3"], confirm=False)
+        self.assertNotIn((app.ONBOARDING_SETTING, "1"), self.settings_written)
+
+    def test_cancelling_at_the_review_leaves_the_marker_unwritten(self):
+        # Cancelling is resumable: the wizard runs again next start because nothing was
+        # marked complete.
+        self._run(self._answers(users=6, items=15, rooms=138180), answer="3")
+        self.assertNotIn((app.ONBOARDING_SETTING, "1"), self.settings_written)
+
+    def test_the_review_can_go_back_and_rerun_a_step(self):
+        self._run(self._answers(users=6, items=15, rooms=138180), inputs=["2", "1"])
+        self.step_menu.assert_called_once()
+        self.assertIn((app.ONBOARDING_SETTING, "1"), self.settings_written)
+
+
+class RoomRateEditorTests(unittest.TestCase):
+    """The wizard's price-list step. Pure prompts over a stubbed RoomTypes read."""
+
+    def _drive(self, inputs, room_types=(("Standard", 100.0, True),), update_ok=True):
+        queue = list(inputs)
+        fake_ui = mock.MagicMock()
+        with patch_main("ui", fake_ui), \
+             patch_main("get_room_types", return_value=[tuple(r) for r in room_types]) as types, \
+             patch_main("update_room_type_rate", return_value=update_ok) as update, \
+             mock.patch("builtins.input",
+                        lambda prompt="": queue.pop(0) if queue else "3"):
+            changed = app._offer_room_rates()
+        return changed, update, fake_ui
+
+    def test_changing_a_rate_writes_it(self):
+        changed, update, _ = self._drive(["1", "Standard", "150", "3"])
+        update.assert_called_once_with("Standard", 150.0)
+        self.assertEqual(changed, 1)
+
+    def test_the_category_match_is_case_insensitive(self):
+        changed, update, _ = self._drive(["1", "standard", "150", "3"])
+        update.assert_called_once_with("Standard", 150.0)
+
+    def test_a_blank_rate_keeps_the_current_one(self):
+        changed, update, _ = self._drive(["1", "Standard", "", "3"])
+        update.assert_not_called()
+        self.assertEqual(changed, 0)
+
+    def test_an_unparseable_rate_keeps_the_current_one(self):
+        changed, update, _ = self._drive(["1", "Standard", "one fifty", "3"])
+        update.assert_not_called()
+        self.assertEqual(changed, 0)
+
+    def test_a_negative_rate_is_refused(self):
+        changed, update, _ = self._drive(["1", "Standard", "-1", "3"])
+        update.assert_not_called()
+        self.assertEqual(changed, 0)
+
+    def test_an_unknown_category_changes_nothing(self):
+        changed, update, _ = self._drive(["1", "Suite", "150", "3"])
+        update.assert_not_called()
+        self.assertEqual(changed, 0)
+
+    def test_a_new_category_is_added_with_its_rate(self):
+        changed, update, _ = self._drive(["2", "Deluxe", "220", "3"])
+        update.assert_called_once_with("Deluxe", 220.0)
+        self.assertEqual(changed, 1)
+
+    def test_an_overlong_category_name_is_refused(self):
+        # RoomTypes.RoomType is varchar(50); a longer typed name must not reach the driver.
+        too_long = "x" * (app.ROOM_TYPE_NAME_MAX_LENGTH + 1)
+        changed, update, _ = self._drive(["2", too_long, "220", "3"])
+        update.assert_not_called()
+        self.assertEqual(changed, 0)
+
+    def test_a_duplicate_category_name_is_refused(self):
+        changed, update, _ = self._drive(["2", "standard", "220", "3"])
+        update.assert_not_called()
+
+    def test_a_failed_write_is_not_counted_as_changed(self):
+        changed, update, _ = self._drive(["1", "Standard", "150", "3"], update_ok=False)
+        update.assert_called_once()
+        self.assertEqual(changed, 0)
+
+    def test_no_categories_returns_without_a_menu(self):
+        changed, update, fake_ui = self._drive([], room_types=())
+        update.assert_not_called()
+        fake_ui.show_menu.assert_not_called()
+        self.assertEqual(changed, 0)
 
 
 class TowerCountTests(unittest.TestCase):

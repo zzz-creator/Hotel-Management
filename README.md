@@ -44,10 +44,12 @@ python main.py
 ```
 
 On first run the app detects that setup has not happened and walks you through it: it creates
-your first administrator login, then offers a starter item catalogue (or lets you type your
-own), a room layout, and a `master` override account. It runs once. After
-that, **Admin Panel → Setup & Destructive → Setup Checklist** shows what is still outstanding and can finish the
-job.
+your first administrator login, then offers hotel settings, nightly room rates, staff accounts,
+a starter item catalogue (or lets you type your own), a room layout, optional amenities /
+promotions / discount codes, and a review you confirm before setup is marked complete. Every
+step after the login is skippable, and cancelling at the review leaves it resumable. The
+wizard runs once. After that, **Admin Panel → Setup & Destructive → Setup Checklist** shows
+what is still outstanding and can fix it in place.
 
 Staff-first-run instructions live in **[docs/ONBOARDING.md](docs/ONBOARDING.md)**.
 

@@ -7,14 +7,22 @@ from hotel import core
 from hotel import items
 from hotel import loyalty
 from hotel import rooms
+from hotel import orders
 
 __all__ = [
     'ONBOARDING_SETTING',
+    'ROOM_TYPE_NAME_MAX_LENGTH',
     'onboarding_completed',
     'mark_onboarding_complete',
     'create_first_user',
     'setup_status',
     '_offer_hotel_settings',
+    '_offer_room_rates',
+    '_offer_staff_accounts',
+    '_offer_reference_data',
+    '_create_staff_account',
+    '_setup_summary_rows',
+    '_wizard_step_menu',
     'run_first_run_onboarding',
     '_count_tower_rooms',
     'onboarding_checklist',
@@ -157,14 +165,23 @@ def setup_status():
     else:
         checks.append(("Rooms", True, f"{rooms} room(s)"))
 
-    rated = core._scalar_count("SELECT COUNT(*) FROM RoomTypes WHERE ISNULL(NightlyRate, 0) > 0")
-    if rated is None:
+    # A rate of 0 (or NULL) is as unusable as a missing row: check-out would post a
+    # zero-dollar room charge. Only ACTIVE categories matter -- a retired category with no
+    # price is not something anyone can book.
+    unpriced = core._scalar_count(
+        "SELECT COUNT(*) FROM RoomTypes WHERE Active = 1 AND ISNULL(NightlyRate, 0) <= 0")
+    active_rates = core._scalar_count("SELECT COUNT(*) FROM RoomTypes WHERE Active = 1")
+    if unpriced is None or active_rates is None:
         checks.append(("Nightly rates", False, "RoomTypes is unreachable -- migration 013 applied?"))
-    elif rated == 0:
+    elif active_rates == 0:
         checks.append(("Nightly rates", False,
-                       "no room type has a rate -- check-out cannot price a stay"))
+                       "no active room category -- nothing can be priced at check-out"))
+    elif unpriced:
+        checks.append(("Nightly rates", False,
+                       f"{unpriced} of {active_rates} active category(s) have no rate -- "
+                       "check-out would post a zero-dollar room charge"))
     else:
-        checks.append(("Nightly rates", True, f"{rated} priced category(s)"))
+        checks.append(("Nightly rates", True, f"all {active_rates} active category(s) priced"))
 
     if core.get_loyalty_enabled():
         tiers = core._scalar_count("SELECT COUNT(*) FROM LoyaltyTiers")
@@ -194,18 +211,42 @@ def setup_status():
         all_rows = {}
 
     bad = []
+    # Parseable is not the same as usable: tax_rate = "13" parses and then charges 1300%,
+    # and a zero nightly-points rate silently earns nothing. The getters fall back on a
+    # blank or garbage value, so without a range check a plausible typo can sit here
+    # indefinitely. Bounds mirror what _offer_hotel_settings() accepts.
+    ranges = {
+        'tax_rate': (lambda v: 0 <= v <= 1, "between 0 and 1 (0.13 = 13%)"),
+        'peak_factor': (lambda v: v > 0, "greater than 0"),
+        'offpeak_factor': (lambda v: v > 0, "greater than 0"),
+        'loyalty_points_per_night': (lambda v: v >= 0, "0 or more"),
+        'loyalty_accrual_points_per_unit': (lambda v: v >= 0, "0 or more"),
+        'loyalty_redemption_points_per_currency_unit': (lambda v: v > 0, "greater than 0"),
+        'lockout_threshold': (lambda v: v > 0, "greater than 0"),
+        'lockout_duration': (lambda v: v > 0, "greater than 0"),
+        'customer_login_max_attempts': (lambda v: v > 0, "greater than 0"),
+        'booking_refund_cutoff_days': (lambda v: v >= 0, "0 or more"),
+    }
     for key in core.DEFAULT_HOTEL_SETTINGS:
         raw = all_rows.get(key, None)
         if raw is None or str(raw).strip() == '':
             bad.append(f"{key} missing")
-        elif key not in ('hotel_name', 'loyalty_enabled'):
-            try:
-                float(str(raw))
-            except (TypeError, ValueError):
-                bad.append(f"{key} not a number: {raw!r}")
-        elif key == 'loyalty_enabled':
-            if str(raw).strip().lower() not in ('1', '0', 'true', 'false', 'yes', 'no', 'y', 'n', 'on', 'off'):
+            continue
+        text = str(raw).strip()
+        if key == 'hotel_name':
+            continue
+        if key == 'loyalty_enabled':
+            if text.lower() not in ('1', '0', 'true', 'false', 'yes', 'no', 'y', 'n', 'on', 'off'):
                 bad.append(f"loyalty_enabled not a boolean: {raw!r}")
+            continue
+        try:
+            value = float(text)
+        except (TypeError, ValueError):
+            bad.append(f"{key} not a number: {raw!r}")
+            continue
+        in_range = ranges.get(key)
+        if in_range and not in_range[0](value):
+            bad.append(f"{key} out of range ({in_range[1]}): {raw!r}")
 
     for key, raw in all_rows.items():
         if key in core.DEFAULT_HOTEL_SETTINGS or key == 'business_date':
@@ -217,10 +258,39 @@ def setup_status():
         except (TypeError, ValueError):
             bad.append(f"{key} not a number: {raw!r}")
 
+    # The F&B earn rate is calibrated against the room rate: points per dollar on an order
+    # must stay below points per dollar on a Standard night, or a coffee earns more than a
+    # stay. Same rule the Pricing & Settings menu enforces at entry time.
+    if not bad and core.get_loyalty_enabled():
+        try:
+            order_rate = float(str(all_rows.get('loyalty_accrual_points_per_unit', 0)))
+            per_night = int(float(str(all_rows.get('loyalty_points_per_night', 0))))
+            _order, room_rate = loyalty.points_per_dollar_order_vs_room(order_rate, per_night)
+            if order_rate > room_rate:
+                bad.append(f"loyalty_accrual_points_per_unit ({order_rate:g}) is above the "
+                           f"{room_rate:.2f} pts/$1 a Standard night earns")
+        except (TypeError, ValueError):
+            pass
+
     if bad:
         checks.append(("Hotel settings", False, "; ".join(bad)))
     else:
-        checks.append(("Hotel settings", True, f"all {len(all_rows)} row(s) present and parseable"))
+        checks.append(("Hotel settings", True, f"all {len(all_rows)} row(s) present and in range"))
+
+    # Reference data is optional -- an empty amenities list does not stop the desk taking
+    # a payment -- so an empty table stays green and reports "none configured". An
+    # unapplied migration is different, and is red like every other unreachable table.
+    amenities, promotions, discounts = _reference_data_counts()
+    if None in (amenities, promotions, discounts):
+        checks.append(("Reference data", False,
+                       "Amenities/Promotions/Discounts unreachable -- migration 015 applied?"))
+    elif not any((amenities, promotions, discounts)):
+        checks.append(("Reference data", True,
+                       "none configured (optional) -- add amenities, promotions or discount codes"))
+    else:
+        checks.append(("Reference data", True,
+                       f"{amenities} amenit{'y' if amenities == 1 else 'ies'}, "
+                       f"{promotions} promotion(s), {discounts} discount code(s)"))
 
     return checks
 
@@ -235,7 +305,7 @@ def _offer_hotel_settings(wizard=False):
     from database.sql already carries workable defaults.
     """
     logging.info("Press Enter to keep the value in [brackets]. Anything you skip can be "
-                 "changed later from Admin Panel -> 25. Pricing & Settings.")
+                 "changed later from Admin Panel → Discounts & Pricing → Manage Pricing & Settings.")
 
     def _ask(key, label, current, parse, valid):
         raw = input(f"{label} [{current}]: ").strip()
@@ -294,34 +364,310 @@ def _offer_hotel_settings(wizard=False):
                  "on" if core.get_loyalty_enabled() else "off")
 
 
+# RoomTypes.RoomType is varchar(50). Checked here so a long typed category is refused
+# with a message rather than truncated by the ODBC driver.
+ROOM_TYPE_NAME_MAX_LENGTH = 50
+
+
+def _edit_one_room_rate(room_types):
+    """Ask for one category's new rate. Returns 1 if it was changed, else 0."""
+    name = input("Room type to change (Enter to cancel): ").strip()
+    if not name:
+        return 0
+    match = next((rt for rt, _rate, _active in room_types if rt.lower() == name.lower()), None)
+    if match is None:
+        logging.info("Unknown room type. Available: "
+                     + ", ".join(rt for rt, _rate, _active in room_types))
+        return 0
+    current = next((rate for rt, rate, _active in room_types if rt == match), 0.0)
+    raw = input(f"New nightly rate for {match} [{current:,.2f}]: ").strip()
+    if not raw:
+        logging.info("Kept the current rate.")
+        return 0
+    try:
+        new_rate = float(raw)
+    except ValueError:
+        logging.info("That is not a number -- keeping %.2f.", current)
+        return 0
+    if new_rate < 0:
+        logging.info("Nightly rate cannot be negative -- keeping %.2f.", current)
+        return 0
+    return 1 if rooms.update_room_type_rate(match, new_rate) else 0
+
+
+def _add_room_category(room_types):
+    """Ask for a new category and its rate. Returns 1 if it was changed, else 0."""
+    name = input("New room type name (Enter to cancel): ").strip()
+    if not name:
+        return 0
+    if len(name) > ROOM_TYPE_NAME_MAX_LENGTH:
+        logging.info("Room type names are limited to %d characters.", ROOM_TYPE_NAME_MAX_LENGTH)
+        return 0
+    if any(rt.lower() == name.lower() for rt, _rate, _active in room_types):
+        logging.info("Room type '%s' already exists -- change its rate instead.", name)
+        return 0
+    raw = input(f"Nightly rate for {name}: ").strip()
+    if not raw:
+        logging.info("A rate is required to add a room type.")
+        return 0
+    try:
+        new_rate = float(raw)
+    except ValueError:
+        logging.info("That is not a number. Nothing was added.")
+        return 0
+    if new_rate < 0:
+        logging.info("Nightly rate cannot be negative. Nothing was added.")
+        return 0
+    return 1 if rooms.update_room_type_rate(name, new_rate) else 0
+
+
+def _offer_room_rates(wizard=False):
+    """Configure nightly rates for each room category.
+
+    Shared by the first-run wizard and the setup checklist. Rates are captured onto
+    reservations at booking time, so a change here only affects stays booked from now on.
+    Returns how many categories were changed.
+    """
+    logging.info("Room rates are the price list for the house. A booking captures the rate "
+                 "when it is made, so changing a rate never re-prices a stay already booked.")
+    changed = 0
+    while True:
+        try:
+            room_types = rooms.get_room_types(active_only=False, include_status=True)
+        except Exception as e:
+            logging.error(f"Could not load room types: {e}")
+            return changed
+        if not room_types:
+            logging.info("No room types exist to price.")
+            return changed
+        ui.show_table("Room Types & Nightly Rates",
+                      ["Room Type", "Nightly Rate", "Status"],
+                      [(rt, f"${rate:,.2f}", "Active" if active else "Inactive")
+                       for rt, rate, active in room_types])
+        ui.show_menu("Room rates", [
+            "1. Change a category's nightly rate",
+            "2. Add a new room category",
+            "3. %s" % ("Skip for now" if wizard else "Done -- back to setup"),
+        ])
+        try:
+            choice = input("Enter your choice: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            logging.info("Finished configuring room rates.")
+            return changed
+        if choice == "1":
+            try:
+                changed += _edit_one_room_rate(room_types)
+            except (KeyboardInterrupt, EOFError):
+                logging.info("Finished configuring room rates.")
+                return changed
+        elif choice == "2":
+            try:
+                changed += _add_room_category(room_types)
+            except (KeyboardInterrupt, EOFError):
+                logging.info("Finished configuring room rates.")
+                return changed
+        elif choice == "3":
+            return changed
+        else:
+            logging.info("Answer 1, 2 or 3.")
+
+
+
+def _create_staff_account():
+    """Ask for and create one staff account. Returns True on success.
+
+    The logged-in path, not create_first_user(): by the time this is reachable at least one
+    account exists, and create_first_user() deliberately refuses in that case.
+    """
+    try:
+        username = input("Enter new username: ").strip()
+        if not username:
+            logging.info("A username is required.")
+            return False
+        if core.user_exists(username):
+            logging.info(f"User '{username}' already exists.")
+            return False
+        password = core._prompt_new_password("Password: ")
+        if not password:
+            return False
+        role = core._prompt_role("Role (a)dmin/(s)taff/(m)anager: ")
+        if not role:
+            logging.info("No account was created.")
+            return False
+        return core.add_user_with_password(username, password, role)
+    except (KeyboardInterrupt, EOFError):
+        logging.info("Cancelled. No account was created.")
+        return False
+
+
+def _offer_staff_accounts(wizard=False):
+    """Optionally add staff accounts during setup. Returns how many were added.
+
+    The wizard has already created the first administrator; this is where the rest of the
+    desk gets an account in the same sitting, rather than being sent to the Admin Panel.
+    """
+    added = 0
+    while True:
+        existing = core._scalar_count("SELECT COUNT(*) FROM Users")
+        ui.info("%s account(s) exist. Give each person the narrowest role that lets them do "
+                "their job: staff for the desk, manager for the panel, admin for settings."
+                % ("Unknown" if existing is None else existing))
+        ui.show_menu("Staff accounts", [
+            "1. Add a staff account",
+            "2. %s" % ("Skip for now" if wizard else "Done -- back to setup"),
+        ])
+        try:
+            choice = input("Enter your choice: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            logging.info("Finished adding staff accounts.")
+            return added
+        if choice == "1":
+            if _create_staff_account():
+                added += 1
+        elif choice == "2":
+            return added
+        else:
+            logging.info("Answer 1 or 2.")
+
+
+def _reference_data_counts():
+    """(amenities, promotions, discounts) row counts, or None where the table is unreachable."""
+    return (core._scalar_count("SELECT COUNT(*) FROM Amenities"),
+            core._scalar_count("SELECT COUNT(*) FROM Promotions"),
+            core._scalar_count("SELECT COUNT(*) FROM Discounts"))
+
+
+def _offer_reference_data(wizard=False):
+    """Optional reference data: amenities, promotions and discount codes.
+
+    Shared by the wizard and the checklist. None of it is required to take a payment, but
+    a hotel that skips it has an empty guest menu and no discounts, so a full setup flow
+    should offer it rather than hide it behind the Admin Panel.
+    """
+    while True:
+        amenities, promotions, discounts = _reference_data_counts()
+
+        def _fmt(value):
+            return "unreachable" if value is None else str(value)
+
+        ui.show_table("Reference data (optional)", ["Table", "Rows"],
+                      [("Amenities", _fmt(amenities)),
+                       ("Promotions", _fmt(promotions)),
+                       ("Discount codes", _fmt(discounts))])
+        ui.show_menu("Reference data", [
+            "1. Manage amenities",
+            "2. Manage promotions",
+            "3. Manage discount codes",
+            "4. %s" % ("Skip for now" if wizard else "Done -- back to setup"),
+        ])
+        try:
+            choice = input("Enter your choice: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            return
+        if choice == "1":
+            orders.manage_amenities_menu()
+        elif choice == "2":
+            orders.manage_promotions_menu()
+        elif choice == "3":
+            # Local import: admin.py imports onboarding for _admin_menu, so importing it at
+            # module level here would be a cycle.
+            from hotel import admin as admin_module
+            admin_module.manage_discount_codes()
+        elif choice == "4":
+            return
+        else:
+            logging.info("Answer 1, 2, 3 or 4.")
+
+
+def _setup_summary_rows():
+    """The operator-facing review table shown before setup is marked complete."""
+    def _fmt(value):
+        return "unreachable" if value is None else str(value)
+
+    room_types = rooms.get_room_types(active_only=False, include_status=True) or []
+    active = [row for row in room_types if row[2]]
+    priced = sum(1 for _rt, rate, _active in active if rate and rate > 0)
+    return [
+        ("Hotel name", core.get_hotel_name()),
+        ("Tax rate", f"{core.get_tax_rate() * 100:.2f}%"),
+        ("Peak / off-peak factors",
+         f"{core.get_peak_factor():g} / {core.get_offpeak_factor():g}"),
+        ("Loyalty programme",
+         "on" if core.get_loyalty_enabled() else "off"),
+        ("Loyalty earn rates",
+         f"{core.get_loyalty_points_per_night()} pts/night, "
+         f"{core.get_loyalty_accrual_points_per_unit():g} pts/$1 F&B"),
+        ("Active categories priced", f"{priced} of {len(active)}"),
+        ("Sellable items", _fmt(core._scalar_count("SELECT COUNT(*) FROM Items"))),
+        ("Rooms", _fmt(core._scalar_count("SELECT COUNT(*) FROM Rooms"))),
+        ("Staff accounts", _fmt(core._scalar_count("SELECT COUNT(*) FROM Users"))),
+        ("Amenities", _fmt(core._scalar_count("SELECT COUNT(*) FROM Amenities"))),
+        ("Promotions", _fmt(core._scalar_count("SELECT COUNT(*) FROM Promotions"))),
+        ("Discount codes", _fmt(core._scalar_count("SELECT COUNT(*) FROM Discounts"))),
+    ]
+
+
+def _wizard_step_menu():
+    """Re-run one setup step after the review. Returns when the operator is done."""
+    while True:
+        ui.show_menu("Go back and change something", [
+            "1. Hotel settings",
+            "2. Nightly rates",
+            "3. Staff accounts",
+            "4. Item catalogue",
+            "5. Rooms",
+            "6. Reference data",
+            "7. Back to the review",
+        ])
+        try:
+            choice = input("Enter your choice: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            return
+        if choice == "1":
+            _offer_hotel_settings(wizard=True)
+        elif choice == "2":
+            _offer_room_rates(wizard=True)
+        elif choice == "3":
+            _offer_staff_accounts(wizard=True)
+        elif choice == "4":
+            _offer_item_catalogue(wizard=True)
+        elif choice == "5":
+            _offer_room_layout(wizard=True)
+        elif choice == "6":
+            _offer_reference_data(wizard=True)
+        elif choice == "7":
+            return
+        else:
+            logging.info("Answer 1 to 7.")
+
+
 def run_first_run_onboarding():
     """The first-run wizard. Runs once, before the main menu, on a database not yet onboarded.
 
     It exists for the one step of docs/ONBOARDING.md that could not be done in-app at all:
-    the first login. Everything after that is offered but skippable, because the wizard
-    cannot know what a given hotel sells, how many rooms it has, or what its floors are laid
-    out like, and a setup step that guesses wrong is worse than one that asks.
-
-    Unauthenticated by necessity rather than by choice -- there is no account to
-    authenticate against yet. The trust assumption is the one the database already makes:
-    whoever is at this console can also open SSMS against the empty database. It cannot run
-    twice once `mark_onboarding_complete()` has been written, and `create_first_user()`
-    refuses outright if any account already exists, so it cannot become a way to add an
-    admin to a live system.
+    the first login. Everything after that is offered, because a complete setup needs
+    settings, rates, accounts, items, rooms and optional reference data to take a payment
+    without guessing. The trust assumption is the one the database already makes: whoever
+    is at this console can also open SSMS against the empty database. It cannot run twice
+    once `mark_onboarding_complete()` has been written, and `create_first_user()` refuses
+    outright if any account already exists.
     """
     hotel = core.get_hotel_name()
     ui.box(
         f"Welcome to {hotel} - First-Time Setup",
         "This runs once, before the app is usable.\n\n"
-        "It will create your first administrator login, then offer a few starting\n"
-        "defaults. Every step after the login is optional and can be skipped --\n"
-        "Admin Panel -> 34. Setup Checklist shows what is still outstanding at any time.\n\n"
+        "It will create your first administrator login, then walk through hotel\n"
+        "settings, nightly rates, staff accounts, the item catalogue, rooms and\n"
+        "optional reference data. Every step after the login is skippable --\n"
+        "Admin Panel → Setup & Destructive → Setup Checklist shows what is still\n"
+        "outstanding at any time and can fix most of it.\n\n"
         "Before any of this, database.sql has to have been applied to the server,\n"
         "and the [database] section of config.ini has to point at it (the startup\n"
         "prompt creates that section when it is missing). See docs/ONBOARDING.md.",
         border_style="cyan",
     )
 
+    created_admin_username = None
     # --- 1. The first login. The one step that is not optional. ---
     ui.info("\n-- Step 1: create your first administrator --")
     existing_accounts = core._scalar_count("SELECT COUNT(*) FROM Users")
@@ -335,17 +681,45 @@ def run_first_run_onboarding():
             f"This database already has {existing_accounts} account(s), so the wizard will "
             "not create a login over the top of one.\n\n"
             "That is fine -- it just means the first account was inserted by hand. Add "
-            "everyone else from Admin Panel -> 19. Add User.",
+            "everyone else from Admin Panel → Accounts → Add User.",
             border_style="yellow",
         )
     else:
         logging.info("Nothing can be logged into until an account exists, so this is the "
                      "only mandatory step.")
+        attempts = 0
         while True:
-            username = input("Administrator username [admin]: ").strip() or "admin"
-            password = core._prompt_new_password("Password: ")
-            if create_first_user(username, password, "admin"):
+            try:
+                username = input("Administrator username [admin]: ").strip() or "admin"
+            except (KeyboardInterrupt, EOFError):
+                logging.info("Setup cancelled. The wizard will run again next time until "
+                             "setup is complete or an account exists.")
+                return
+            try:
+                password = core._prompt_new_password("Password: ")
+            except (KeyboardInterrupt, EOFError):
+                logging.info("Setup cancelled. The wizard will run again next time until "
+                             "setup is complete or an account exists.")
+                return
+            if not password:
+                attempts += 1
+            elif create_first_user(username, password, "admin"):
+                created_admin_username = username
                 break
+            else:
+                attempts += 1
+            if attempts >= 3:
+                try:
+                    retry = input("Failed to create the first administrator. "
+                                  "Try again? (Y/n): ").strip().lower()
+                except (KeyboardInterrupt, EOFError):
+                    logging.info("Setup cancelled. The wizard will run again next time.")
+                    return
+                if retry in ("n", "no"):
+                    logging.info("Setup cancelled. Create an administrator manually or re-run "
+                                 "the wizard until the first account is created.")
+                    return
+                attempts = 0
             logging.info("Could not create the account. Check the error above and try again.")
 
     # --- 2. The master override account. ---
@@ -355,34 +729,48 @@ def run_first_run_onboarding():
     elif ui.ask_confirmation(
             "Create a 'master' account for the master override? Without it the override "
             "refuses every caller.", default="y"):
-        master_password = core._prompt_new_password("Master password: ")
-        # Role 'admin', not 'master'. require_master_override() matches on the username
-        # alone, but admin_panel() has no 'master' branch and add_user() only offers
-        # admin/staff/manager -- so a 'master'-role row would be an account nobody can ever
-        # sign in to.
-        #
-        # Which insert to use depends on step 1. create_first_user() refuses whenever ANY
-        # account exists, which is right for the first login (nothing else may reach this
-        # screen) and wrong here: an inherited database has accounts, no marker, and no
-        # master -- so it would refuse and leave the override unbacked by the operator's own
-        # choice, which is the one case this step exists for. Fall back to the same
-        # already-authenticated path the checklist uses.
-        if existing_accounts:
-            created = core.add_user_with_password("master", master_password, "admin")
+        try:
+            master_password = core._prompt_new_password("Master password: ")
+        except (KeyboardInterrupt, EOFError):
+            master_password = None
+        if not master_password:
+            logging.info("Skipped creating the 'master' account.")
         else:
-            created = create_first_user("master", master_password, "admin")
-        if created:
-            logging.info("Master override is now backed by a real account.")
-        else:
-            logging.info("Could not create the 'master' account. Create one from Admin "
-                         "Panel -> Add User, or the override will refuse every caller.")
+            # Role 'admin', not 'master'. require_master_override() matches on the username
+            # alone, but admin_panel() has no 'master' branch and add_user() only offers
+            # admin/staff/manager -- so a 'master'-role row would be an account nobody can ever
+            # sign in to.
+            #
+            # Which insert to use depends on step 1. create_first_user() refuses whenever ANY
+            # account exists, which is right for the first login (nothing else may reach this
+            # screen) and wrong here: an inherited database has accounts, no marker, and no
+            # master -- so it would refuse and leave the override unbacked by the operator's own
+            # choice, which is the one case this step exists for. Fall back to the same
+            # already-authenticated path the checklist uses.
+            if existing_accounts:
+                created = core.add_user_with_password("master", master_password, "admin")
+            else:
+                created = create_first_user("master", master_password, "admin")
+            if created:
+                logging.info("Master override is now backed by a real account.")
+            else:
+                logging.info("Could not create the 'master' account. Create one from Admin "
+                             "Panel → Accounts → Add User, or the override will refuse every caller.")
     else:
         logging.info("Skipped. The master override will refuse every caller until you "
-                     "create a 'master' account (Admin Panel -> Add User).")
+                     "create a 'master' account (Admin Panel → Accounts → Add User).")
 
     # --- 2b. Hotel settings. ---
     ui.info("\n-- Step 2b: hotel settings --")
     _offer_hotel_settings(wizard=True)
+
+    # --- 2c. Nightly rates. ---
+    ui.info("\n-- Step 2c: nightly rates --")
+    _offer_room_rates(wizard=True)
+
+    # --- 2d. Staff accounts. ---
+    ui.info("\n-- Step 2d: staff accounts --")
+    _offer_staff_accounts(wizard=True)
 
     # --- 3. Starter catalogue. ---
     ui.info("\n-- Step 3: item catalogue --")
@@ -391,8 +779,9 @@ def run_first_run_onboarding():
         # An inherited or hand-configured database. Offering to seed a catalogue into a
         # populated one would quietly add stock nobody asked for, so each optional step is
         # gated on its own live probe rather than on the marker.
-        logging.info("The catalogue already has %d item(s). Skipping -- add your own from Setup "
-                     "Checklist -> 3, or Admin Panel -> 13.", existing_items)
+        logging.info("The catalogue already has %d item(s). Skipping -- add your own from "
+                     "Admin Panel → Items & Services → Add Item, or "
+                     "Setup & Destructive → Setup Checklist.", existing_items)
     else:
         logging.info("Nothing can be ordered until at least one item exists, and every row in "
                      "Items is something a guest can actually buy. The room charge is not one "
@@ -401,18 +790,68 @@ def run_first_run_onboarding():
         added = _offer_item_catalogue(wizard=True)
         if not added:
             logging.info("No items were added. Nothing can be ordered until there is at least "
-                         "one -- Admin Panel -> 13. Add Item, or Setup Checklist -> 3.")
+                         "one -- Admin Panel → Items & Services → Add Item, or "
+                         "Setup & Destructive → Setup Checklist → 3.")
 
     # --- 4. Rooms. ---
     ui.info("\n-- Step 4: rooms --")
     existing_rooms = core._scalar_count("SELECT COUNT(*) FROM Rooms")
     if existing_rooms:
         logging.info("Rooms already exist (%d). Skipping the layout seed -- top it up from "
-                     "Setup Checklist -> 4 if you need more.", existing_rooms)
+                     "Setup & Destructive → Setup Checklist → 4 if you need more.", existing_rooms)
     else:
         logging.info("A room number is <floor><3-digit code>, so floor 9 code 012 is 9012. "
                      "Skipping this is fine: the first booking registers its own room.")
         _offer_room_layout(wizard=True)
+
+    # --- 5. Optional reference data. ---
+    ui.info("\n-- Step 5: reference data (optional) --")
+    _offer_reference_data(wizard=True)
+
+    # Setup review with explicit confirmation. Only mark complete after the operator
+    # signs off; if they want to change something, re-run a step and review again.
+    while True:
+        outstanding = [label for label, done, _ in setup_status() if not done]
+        ui.show_table("Setup review", ["Setting", "Value"], _setup_summary_rows())
+        if outstanding:
+            ui.box(
+                "Still outstanding",
+                "Some items are not ready for the front desk.\n\n"
+                + "".join("  - %s\n" % label for label in outstanding)
+                + "\nYou can go back and change or add the things above before finishing.",
+                border_style="yellow",
+            )
+        ui.show_menu("Finish setup", [
+            "1. Mark setup complete and go to the main menu",
+            "2. Go back and change something",
+            "3. Cancel setup (run wizard again next time)",
+        ])
+        try:
+            choice = input("Enter your choice: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            logging.info("Setup cancelled. The wizard will run again next time until "
+                         "setup is complete.")
+            return
+        if choice == "1":
+            try:
+                confirm = ui.ask_confirmation(
+                    "Mark first-run setup complete? The wizard will not run again.",
+                    default="y")
+            except (KeyboardInterrupt, EOFError):
+                logging.info("Setup cancelled. The wizard will run again next time.")
+                return
+            if not confirm:
+                continue
+            break
+        elif choice == "2":
+            _wizard_step_menu()
+            continue
+        elif choice == "3":
+            logging.info("Setup cancelled. The wizard will run again next time until "
+                         "an account exists or setup is marked complete.")
+            return
+        else:
+            logging.info("Answer 1, 2 or 3.")
 
     mark_onboarding_complete()
     core.log_audit("CREATE", "Setting", ONBOARDING_SETTING, "First-run onboarding completed")
@@ -420,18 +859,20 @@ def run_first_run_onboarding():
     outstanding = [label for label, done, _ in setup_status() if not done]
     ui.box(
         "Setup complete",
-        (f"Administrator '{username}' can now sign in.\n\n" if not existing_accounts
-         else f"The existing {existing_accounts} account(s) can now sign in.\n\n")
-        + ("Everything on the readiness checklist is green.\n"
-           if not outstanding
-           else "Still outstanding (Admin Panel -> 34. Setup Checklist):\n"
-                + "".join("  - %s\n" % label for label in outstanding))
-        + "\nSmoke test, in this order:\n"
-          "  1. Bookings -> book a stay, two nights, in a room number of your choosing\n"
-          "  2. Admin Panel -> 29. Rooms & Housekeeping -> 2. Explore Floor -- the room should be Available\n"
-          "  3. Order something through the guest menu\n"
-          "  4. Check the guest out -- the folio must split into Room Charges and F&B\n"
-          "  5. Admin Panel -> 30. Invoices & Printing -- print it and check the arithmetic",
+        ((f"Administrator '{created_admin_username}' can now sign in.\n\n"
+          if created_admin_username
+          else (f"The existing {existing_accounts} account(s) can now sign in.\n\n"
+                if existing_accounts else ""))
+         + ("Everything on the readiness checklist is green.\n"
+            if not outstanding
+            else "Still outstanding (Admin Panel → Setup & Destructive → Setup Checklist):\n"
+                 + "".join("  - %s\n" % label for label in outstanding))
+         + "\nSmoke test, in this order:\n"
+           "  1. Bookings → book a stay, two nights, in a room number of your choosing\n"
+           "  2. Admin Panel → Rooms & Housekeeping → Explore Floor -- the room should be Available\n"
+           "  3. Order something through the guest menu\n"
+           "  4. Check the guest out -- the folio must split into Room Charges and F&B\n"
+           "  5. Admin Panel → Invoices & Reports → Invoices & Printing -- print it and check the arithmetic"),
         border_style="green",
     )
     ui.pause("Press Enter to reach the main menu...")
@@ -479,26 +920,20 @@ def onboarding_checklist(role="admin"):
             "2. Create the 'master' override account",
             "3. Add items (starter catalogue, or your own)",
             "4. Seed rooms",
-            "5. Re-check",
-            "6. Back to Admin Panel",
+            "5. Set nightly rates",
+            "6. Edit hotel settings (tax, loyalty, lockout)",
+            "7. Manage loyalty tiers",
+            "8. Manage amenity, promotion and discount reference data",
+            "9. Re-check",
+            "10. Back to Admin Panel",
         ])
-        choice = input("Enter your choice: ").strip()
+        try:
+            choice = input("Enter your choice: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            return
         if choice == '1':
-            username = input("Enter new username: ").strip()
-            if not username:
-                logging.info("A username is required.")
-            else:
-                password = core._prompt_new_password("Password: ")
-                role_prompt = ("Role (a)dmin/(s)taff/(m)anager: ")
-                new_role = core._prompt_role(role_prompt)
-                if not new_role:
-                    logging.info("No account was created.")
-                elif core.user_exists(username):
-                    logging.info(f"User '{username}' already exists.")
-                else:
-                    # Not create_first_user(): that refuses once any account exists, and by
-                    # the time anyone reaches the checklist there is always at least one.
-                    core.add_user_with_password(username, password, new_role)
+            if _create_staff_account():
+                logging.info("Account created. It can sign in immediately.")
         elif choice == '2':
             if core.user_exists("master"):
                 logging.info("A 'master' account already exists. Leaving it alone.")
@@ -510,16 +945,28 @@ def onboarding_checklist(role="admin"):
         elif choice == '3':
             added = _offer_item_catalogue()
             if added:
-                logging.info("Added %d item(s). Admin Panel -> 16. View Items to check them.",
-                             added)
+                logging.info("Added %d item(s). Admin Panel → Items & Services → "
+                             "View Items to check them.", added)
             else:
                 logging.info("Nothing added -- either you finished without adding anything, "
                              "the names already exist, or the write failed. Check the log.")
         elif choice == '4':
             _offer_room_layout()
         elif choice == '5':
-            continue
+            _offer_room_rates()
         elif choice == '6':
+            _offer_hotel_settings()
+        elif choice == '7':
+            if core.get_loyalty_enabled():
+                loyalty.loyalty_admin_menu()
+            else:
+                logging.info("The loyalty programme is off. Turn it on under "
+                             "Setup actions → 6 (hotel settings), then manage tiers here.")
+        elif choice == '8':
+            _offer_reference_data()
+        elif choice == '9':
+            continue
+        elif choice == '10':
             return
         else:
             logging.info("Invalid choice. Please try again.")
@@ -542,7 +989,8 @@ def _offer_item_catalogue(wizard=False):
                   [[name, f"${price:,.2f}", rule or "standard"]
                    for _id, name, price, rule in items.DEFAULT_SEED_ITEMS])
     logging.info("These %d items are a starting point, not a menu. Anything can be edited, "
-                 "added or deleted afterwards from Admin Panel -> 13/14/15.", len(items.DEFAULT_SEED_ITEMS))
+                 "added or deleted afterwards from Admin Panel → Items & Services.",
+                 len(items.DEFAULT_SEED_ITEMS))
     try:
         while True:
             ui.pause()

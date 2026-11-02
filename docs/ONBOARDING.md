@@ -8,14 +8,18 @@ Read this after `database.sql` has been applied and before anyone tries to log i
 
 > **Most of this runbook is now automated.** The first time you start the app against a
 > database that has never been set up, a **first-run wizard** runs before the main menu and
-> walks you through it: it creates your first administrator, then offers the hotel
-> settings, starter items, and rooms. Every step after the login is optional and
-> skippable. The database connection itself (`config.ini`) is prompted for at startup
-> when it is missing, so the wizard has something to connect through.
+> walks you through it: it creates your first administrator, then offers the hotel settings,
+> nightly room rates, staff accounts, starter items, rooms and optional reference data. It
+> ends with a setup review that you confirm before it marks setup complete. Every step after
+> the login is optional and skippable, and cancelling at the review leaves the wizard
+> resumable on the next start. The database connection itself (`config.ini`) is prompted for
+> at startup when it is missing, so the wizard has something to connect through.
 >
-> **Admin Panel → Setup & Destructive → Setup Checklist** shows what is still outstanding at any time, and can
-> re-run the setup actions. It lives in the Admin Panel rather than the main menu on
-> purpose: the main menu is the guest-facing surface, and this screen can write accounts.
+> **Admin Panel → Setup & Destructive → Setup Checklist** shows what is still outstanding at
+> any time and can fix most of it in place: staff and master accounts, items, rooms, nightly
+> rates, hotel settings, loyalty tiers, and the optional reference data. It lives in the
+> Admin Panel rather than the main menu on purpose: the main menu is the guest-facing
+> surface, and this screen can write accounts.
 >
 > What the wizard cannot do is listed under **What is still manual** below.
 
@@ -84,6 +88,9 @@ override matches on the username alone, but the Admin Panel only branches on
 A row with role `master` would be an account that exists and cannot be signed in to.
 
 Once you are logged in as `admin`, use **Admin Panel → Accounts → Add User** for everyone else.
+The wizard's staff-accounts step (step 2d) also lets you create the rest of the desk's logins
+in the same sitting; it offers the same `staff` / `manager` / `admin` roles, and an account
+created there can sign in immediately. The Setup Checklist can add more later.
 
 > The wizard runs unauthenticated. That is unavoidable: there is no account to authenticate
 > *against* yet, so it assumes what the database already assumes — that whoever is at the
@@ -166,10 +173,15 @@ points, which is why `award_billed_order_points()` filters on `'F&B'` only.
 
 ---
 
-## 4. Set prices
+## 4. Set prices (the wizard offers this)
 
-**Admin Panel → Discounts & Pricing → Manage Pricing & Settings → 6. View / Edit Room Types & Nightly
-Rates** (`update_room_type_rate()`).
+This is driven by the wizard's nightly-rates step (2c) and by **Setup Checklist → 5. Set
+nightly rates**. The step lists every category with its current rate; Enter keeps the
+bracketed value, and you can also add a new category and its rate. The validated path is
+`update_room_type_rate()`.
+
+The same rates are editable later from **Admin Panel → Discounts & Pricing → Manage Pricing &
+Settings → View / Edit Room Types & Nightly Rates**.
 
 A `RoomTypes` row is a **price list**. A confirmed booking is a **contract**: the nightly
 rate is captured onto the reservation when the stay is made, so editing a rate later does
@@ -214,13 +226,18 @@ Two things worth knowing:
 
 ---
 
-## 6. Optional reference data
+## 6. Optional reference data (the wizard offers this)
 
-Only needed if you skipped the migrations. All of it is editable afterwards.
+Only needed if you skipped the migrations. All of it is editable afterwards. The wizard's
+step 5 and **Setup Checklist → 8** open the same three managers in one place:
 
 - **Amenities** — Admin Panel → Items & Services → Manage Amenities (`manage_amenities_menu()`)
 - **Promotions** — Admin Panel → Items & Services → Manage Promotions (`manage_promotions_menu()`)
 - **Discount codes** — Admin Panel → Discounts & Pricing → Manage Discount Codes (`manage_discount_codes()`)
+
+None of this blocks taking a payment. The checklist reports the row counts and leaves an
+empty set green, because a hotel with no promotions is not broken — it just has nothing to
+promote.
 
 ---
 
@@ -282,7 +299,10 @@ Everything the wizard cannot reach, in order:
    `config.ini.example` is still fine and skips the prompt.
 3. **Applying migrations 001-029** in order, for a database that already has data.
 4. **Nothing** -- the business date is just today, as of 5 October 2026.
-5. **Nightly rates** if the seeded `RoomTypes` prices are wrong for your hotel (§4).
+
+Nightly rates are no longer on this list: the wizard's step 2c and the Setup Checklist both
+offer them (§4). If your hotel's categories and prices differ from the seeded `RoomTypes`
+rows, change them there rather than editing SQL.
 
 One warning that catches everyone: **never run `database.sql` against a database that
 already has data.** It is a fresh-install script. To upgrade an existing database, apply

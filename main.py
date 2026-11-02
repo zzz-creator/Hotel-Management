@@ -178,7 +178,14 @@ def main():
     # to log into and the main menu would be a wall of failed logins. After this it never
     # runs again -- the marker is what stops it, not the state of the Users table.
     if not onboarding.onboarding_completed():
-        onboarding.run_first_run_onboarding()
+        try:
+            onboarding.run_first_run_onboarding()
+        except (KeyboardInterrupt, EOFError):
+            # Ctrl+C here is a request to stop, not a crash. The wizard is resumable: it
+            # marks nothing complete until the review is confirmed, so the next start
+            # picks up where this one left off.
+            logging.info("Setup interrupted. Run the app again to continue setup.")
+            return
 
     while True:
         ui.pause()
