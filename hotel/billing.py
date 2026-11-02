@@ -159,15 +159,15 @@ def post_room_charge(room_number, check_in, check_out):
             if conn is None:
                 return None
             cursor = conn.cursor()
-            # Guard on the exact Description this function writes, so a retried check-out
-            # cannot double-charge. Matching on RoomNumber + the full description also
-            # scopes the guard to the stay: a room re-let later gets a different check-in
-            # date, and therefore a different description.
-            cursor.execute(
-                "SELECT ID FROM Transactions WHERE RoomNumber = ? AND Description = ?",
-                (room_number, description),
+            # Claim the stay first: RoomChargePosted flips 0 -> 1 only for this caller.
+            # A concurrent or retried check-out gets rowcount 0 and must not charge again.
+            claimed = db.claim_row(
+                cursor,
+                "UPDATE Reservations SET RoomChargePosted = 1 "
+                "WHERE RoomNumber = ? AND CheckInDate = ? AND RoomChargePosted = 0",
+                (room_number, check_in),
             )
-            if cursor.fetchone():
+            if claimed != 1:
                 logging.info("Room charge already posted for this stay; not charging again.")
                 return None
             cursor.execute(

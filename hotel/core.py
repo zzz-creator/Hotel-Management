@@ -230,7 +230,7 @@ def require_master_override(prompt="Enter master override secret: "):
     return False
 
 
-def log_audit(action, entity_type, entity_id="", details="", old_value=None, new_value=None):
+def log_audit(action, entity_type, entity_id="", details="", old_value=None, new_value=None, user=None):
     """Record who changed what in dbo.AuditLog (migration 016).
 
     `old_value` / `new_value` (migration 026) record the before/after for value
@@ -253,7 +253,7 @@ def log_audit(action, entity_type, entity_id="", details="", old_value=None, new
             cursor.execute(
                 "INSERT INTO AuditLog (Username, Action, EntityType, EntityID, Details, OldValue, NewValue) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (str(session.CURRENT_USER or "system"), str(action or "UNKNOWN"),
+                (str(user if user is not None else (session.CURRENT_USER or "system")), str(action or "UNKNOWN"),
                  str(entity_type or "Unknown"), str(entity_id or ""), str(details or ""),
                  None if old_value is None else str(old_value),
                  None if new_value is None else str(new_value)),
