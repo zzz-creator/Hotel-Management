@@ -34,6 +34,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--ops", type=int, default=200)
+    parser.add_argument("--phase", choices=["1", "2", "all"], default="all")
     args = parser.parse_args()
 
     cfg = configparser.ConfigParser()
