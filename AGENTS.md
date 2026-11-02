@@ -131,6 +131,7 @@ re-runnable; it is not part of the runtime.
 `plans/PLAN-room-rates-and-folios.md` (room rates, split folio, availability, guest features,
 reports), `plans/PLAN-booking-system.md` (public booking desk), `plans/PLAN-loyalty-per-night.md`,
 `plans/PLAN-wire-up-rooms.md`, `plans/PLAN-test-plan.md`, `plans/PLAN-clearance-cards.md`,
+`plans/PLAN-concurrency.md` (concurrency: multi-terminal DB-level races, claims, IDENTITY),
 `plans/PLAN-split-main-py.md` (the completed split of `main.py` into domain modules — layout,
 rules and risks).
 Approved designs — read the relevant one before reworking a feature it covers.

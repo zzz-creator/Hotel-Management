@@ -115,7 +115,6 @@ def _parse_pricing_rule(raw):
 
 def add_item():
     try:
-        item_id = int(input("Enter item ID: ").strip())
         item_name = input("Enter item name: ").strip()
         item_price = float(input("Enter item price: ").strip())
         rule_raw = input("Enter pricing rule - (P)eak/(O)ffPeak/blank for standard: ").strip().lower()
@@ -124,7 +123,10 @@ def add_item():
             if conn is None:
                 return
             cursor = conn.cursor()
-            cursor.execute("INSERT INTO Items (ItemID, Name, Price, PricingRule) VALUES (?, ?, ?, ?)", (item_id, item_name, item_price, pricing_rule))
+            cursor.execute("INSERT INTO Items (Name, Price, PricingRule) VALUES (?, ?, ?)", (item_name, item_price, pricing_rule))
+            cursor.execute("SELECT SCOPE_IDENTITY()")
+            row = cursor.fetchone()
+            item_id = int(row[0]) if row and row[0] is not None else None
             conn.commit()
             core.log_audit("CREATE", "Item", item_id,
                       f"'{item_name}' @ {item_price}, rule {pricing_rule or 'standard'}")
@@ -494,16 +496,17 @@ DEFAULT_SEED_ITEMS = (
 )
 
 
-def _insert_item(cursor, item_id, name, price, pricing_rule):
+def _insert_item(cursor, name, price, pricing_rule):
     """One INSERT for Items, shared so the two onboarding paths cannot disagree on shape.
 
-    Takes an open cursor rather than opening its own connection so a whole catalogue can be
-    written in a single transaction. Never commits -- the caller decides, so a catalogue
-    that fails halfway does not leave half of it applied.
+    Items.ItemID is an IDENTITY column, so it is omitted here and assigned by the
+    database. Takes an open cursor rather than opening its own connection so a whole
+    catalogue can be written in a single transaction. Never commits -- the caller
+    decides, so a catalogue that fails halfway does not leave half of it applied.
     """
     cursor.execute(
-        "INSERT INTO Items (ItemID, Name, Price, PricingRule) VALUES (?, ?, ?, ?)",
-        (int(item_id), str(name), round(float(price), 2), pricing_rule))
+        "INSERT INTO Items (Name, Price, PricingRule) VALUES (?, ?, ?)",
+        (str(name), round(float(price), 2), pricing_rule))
 
 
 def seed_default_items():
@@ -522,15 +525,11 @@ def seed_default_items():
             cursor = conn.cursor()
             cursor.execute("SELECT Name FROM Items")
             existing_names = {str(r[0]).strip().lower() for r in cursor.fetchall() if r[0]}
-            cursor.execute("SELECT ISNULL(MAX(ItemID), 0) FROM Items")
-            row = cursor.fetchone()
-            next_id = (int(row[0]) if row and row[0] is not None else 0) + 1
             added = 0
             for _suggested_id, name, price, rule in DEFAULT_SEED_ITEMS:
                 if name.strip().lower() in existing_names:
                     continue
-                _insert_item(cursor, next_id, name, price, rule)
-                next_id += 1
+                _insert_item(cursor, name, price, rule)
                 added += 1
             if added:
                 conn.commit()
@@ -598,11 +597,10 @@ def _ask_item_price():
 def add_custom_item(existing_names=None):
     """Add one operator-defined item to the catalogue. Returns True if a row was written.
 
-    Assigns ItemID as MAX(ItemID)+1 rather than asking. Items.ItemID is a plain int PK, not
-    an identity column, so a typed id can collide with a row that already exists and the
-    operator gets a constraint-violation traceback instead of an item; auto-assigning makes
-    that failure mode unreachable and keeps ids contiguous. Someone who needs a deliberate
-    numbering scheme can still use Admin Panel -> 13, which does take an id.
+    Assigns ItemID via the database's IDENTITY column rather than asking. Items.ItemID is
+    now an IDENTITY(1,1) column, so collisions are impossible and ids stay contiguous.
+    Someone who needs a deliberate numbering scheme can still use Admin Panel -> 13, which
+    inserts and reads back the assigned id.
 
     One item per call, so the caller owns the loop and the "I am finished" decision.
     """
@@ -624,10 +622,10 @@ def add_custom_item(existing_names=None):
                 return False
             rule_raw = input("Pricing rule - (P)eak/(O)ffPeak/blank for standard: ")
             rule = _parse_pricing_rule(rule_raw)
-            cursor.execute("SELECT ISNULL(MAX(ItemID), 0) FROM Items")
+            _insert_item(cursor, name, price, rule)
+            cursor.execute("SELECT SCOPE_IDENTITY()")
             row = cursor.fetchone()
-            item_id = (int(row[0]) if row and row[0] is not None else 0) + 1
-            _insert_item(cursor, item_id, name, price, rule)
+            item_id = int(row[0]) if row and row[0] is not None else None
             conn.commit()
             core.log_audit("CREATE", "Item", item_id,
                       f"'{name}' @ {price}, rule {rule or 'standard'} (onboarding)")

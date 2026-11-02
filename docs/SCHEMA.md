@@ -49,7 +49,7 @@ install and is kept in sync by hand — a schema change lands in **both** places
 | 027 | `027_hotel_settings_keys.sql` | Seeds the `HotelSettings` rows the app reads directly (`hotel_name`, `loyalty_enabled`, `lockout_threshold`, `lockout_duration`, `customer_login_max_attempts`); data only, no DDL |
 | 028 | `028_invoice_voids.sql` | `Invoices.VoidedAt`/`VoidedBy`/`VoidReason`; voided invoices keep their snapshot but are excluded from revenue |
 | 029 | `029_drop_business_date.sql` | Deletes the legacy `business_date` `HotelSettings` row the app no longer reads |
-
+| 030 | `030_concurrency_claims.sql` | `Items.ItemID` becomes `IDENTITY(1,1)`; `Reservations.RoomChargePosted` (claim for `post_room_charge`); `Reservations.SettlementStatus` (tracks check-out step progress) |
 ### Fresh database
 
 Either run `database.sql` once, or apply `migrations/001` … `migrations/029` in order in

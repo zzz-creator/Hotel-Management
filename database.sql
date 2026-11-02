@@ -72,7 +72,7 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE TABLE [dbo].[Items](
-	[ItemID] [int] NOT NULL,
+	[ItemID] [int] IDENTITY(1,1) NOT NULL,
 	[Name] [nvarchar](100) NULL,
 	[Price] [decimal](10, 2) NULL,
 	[PricingRule] [nvarchar](50) NULL,
@@ -170,6 +170,8 @@ CREATE TABLE [dbo].[Reservations](
 	-- current category rate and say so; it is never 0, because 0 would be
 	-- indistinguishable from a genuinely free room.
 	[NightlyRate] [decimal](10, 2) NULL,
+	[RoomChargePosted] [bit] NOT NULL DEFAULT (0),
+	[SettlementStatus] [nvarchar](20) NULL,
 PRIMARY KEY CLUSTERED 
 (
 	[RoomNumber] ASC
