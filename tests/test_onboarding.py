@@ -278,23 +278,6 @@ class SeedItemsTests(unittest.TestCase):
         with run_with(log, answers, raises), patch_main("log_audit"):
             return app.seed_default_items()
 
-    def test_starts_past_the_highest_existing_id(self):
-        # A re-run on a hotel that hand-added items must not die on a duplicate key.
-        log = []
-        self.assertEqual(self._seed(log, max_id=500), len(app.DEFAULT_SEED_ITEMS))
-        self.assertEqual([p[0] for p in params_for(log, "INSERT INTO Items")],
-                         list(range(501, 501 + len(app.DEFAULT_SEED_ITEMS))))
-
-    def test_starts_at_one_on_an_empty_table(self):
-        log = []
-        self._seed(log, max_id=0)
-        self.assertEqual(params_for(log, "INSERT INTO Items")[0][0], 1)
-
-    def test_null_max_id_is_treated_as_an_empty_table(self):
-        log = []
-        self.assertEqual(self._seed(log, max_id=None), len(app.DEFAULT_SEED_ITEMS))
-        self.assertEqual(params_for(log, "INSERT INTO Items")[0][0], 1)
-
     def test_is_idempotent_by_name_not_by_id(self):
         # An item the operator already added is left exactly as it is even though our id
         # would have been free.
@@ -314,13 +297,6 @@ class SeedItemsTests(unittest.TestCase):
         self.assertEqual(self._seed(log, names=have, max_id=10),
                          len(app.DEFAULT_SEED_ITEMS) - 2)
 
-    def test_added_ids_stay_contiguous_after_a_skip(self):
-        have = {app.DEFAULT_SEED_ITEMS[0][1]}
-        log = []
-        self._seed(log, names=have, max_id=100)
-        ids = [p[0] for p in params_for(log, "INSERT INTO Items")]
-        self.assertEqual(ids, list(range(101, 101 + len(app.DEFAULT_SEED_ITEMS) - 1)))
-
     def test_never_sets_a_charge_group(self):
         # ChargeGroup lives on the Transactions row at billing time. Writing it here is how
         # loyalty points get counted twice.
@@ -333,7 +309,7 @@ class SeedItemsTests(unittest.TestCase):
         log = []
         self._seed(log)
         for sql, params in [(s, p) for s, p in log if "INSERT INTO Items" in s]:
-            self.assertIn(params[3], (None, "Peak", "OffPeak"), params)
+            self.assertIn(params[2], (None, "Peak", "OffPeak"), params)
 
     def test_database_error_returns_zero(self):
         log = []
@@ -396,59 +372,46 @@ class CustomItemEntryTests(unittest.TestCase):
                                side_effect=list(confirmations)):
             return app.add_custom_item()
 
-    def test_item_id_continues_from_the_highest_existing(self):
-        # Never asked for: ItemID is a plain int PK, so a typed id can collide and the
-        # operator gets a constraint violation instead of an item.
-        log = []
-        self.assertTrue(self._add(log, ["Espresso", "4.50", ""], names=["Old Fashioned"],
-                                  max_id=41))
-        self.assertEqual(params_for(log, "INSERT INTO Items")[0][0], 42)
-
-    def test_first_item_on_an_empty_catalogue_gets_id_one(self):
-        log = []
-        self._add(log, ["Espresso", "4.50", ""])
-        self.assertEqual(params_for(log, "INSERT INTO Items")[0][0], 1)
-
     def test_a_name_that_is_only_whitespace_is_refused_then_accepted(self):
         log = []
         self.assertTrue(self._add(log, ["   ", "Espresso", "4.50", ""]))
-        self.assertEqual(params_for(log, "INSERT INTO Items")[0][1], "Espresso")
+        self.assertEqual(params_for(log, "INSERT INTO Items")[0][0], "Espresso")
 
     def test_an_overlong_name_is_refused_rather_than_truncated_by_the_driver(self):
         # Name is nvarchar(100); longer raises "string or binary data would be truncated".
         log = []
         too_long = "x" * (app.ITEM_NAME_MAX_LENGTH + 1)
         self.assertTrue(self._add(log, [too_long, "Espresso", "4.50", ""]))
-        self.assertEqual(len(params_for(log, "INSERT INTO Items")[0][1]),
+        self.assertEqual(len(params_for(log, "INSERT INTO Items")[0][0]),
                          len("Espresso"))
 
     def test_a_name_of_exactly_the_limit_is_accepted(self):
         log = []
         at_limit = "x" * app.ITEM_NAME_MAX_LENGTH
         self.assertTrue(self._add(log, [at_limit, "1.00", ""]))
-        self.assertEqual(params_for(log, "INSERT INTO Items")[0][1], at_limit)
+        self.assertEqual(params_for(log, "INSERT INTO Items")[0][0], at_limit)
 
     def test_an_unparseable_price_re_asks_and_writes_nothing_yet(self):
         log = []
         self.assertTrue(self._add(log, ["Espresso", "four fifty", "4.50", ""]))
         inserts = statements(log, "INSERT INTO Items")
         self.assertEqual(len(inserts), 1)
-        self.assertEqual(params_for(log, "INSERT INTO Items")[0][2], 4.50)
+        self.assertEqual(params_for(log, "INSERT INTO Items")[0][1], 4.50)
 
     def test_a_negative_price_is_refused(self):
         log = []
         self._add(log, ["Espresso", "-5", "4.50", ""])
-        self.assertEqual(params_for(log, "INSERT INTO Items")[0][2], 4.50)
+        self.assertEqual(params_for(log, "INSERT INTO Items")[0][1], 4.50)
 
     def test_a_free_item_is_allowed(self):
         log = []
         self._add(log, ["Local Guide Map", "0", ""])
-        self.assertEqual(params_for(log, "INSERT INTO Items")[0][2], 0.0)
+        self.assertEqual(params_for(log, "INSERT INTO Items")[0][1], 0.0)
 
     def test_price_is_rounded_to_the_column_scale(self):
         log = []
         self._add(log, ["Espresso", "4.567", ""])
-        self.assertEqual(params_for(log, "INSERT INTO Items")[0][2], 4.57)
+        self.assertEqual(params_for(log, "INSERT INTO Items")[0][1], 4.57)
 
     def test_blank_price_abandons_the_item_rather_than_writing_a_free_one(self):
         log = []
@@ -462,19 +425,19 @@ class CustomItemEntryTests(unittest.TestCase):
             with self.subTest(raw=raw):
                 log = []
                 self._add(log, ["Item %s" % raw, "1.00", raw])
-                self.assertEqual(params_for(log, "INSERT INTO Items")[0][3], expected)
+                self.assertEqual(params_for(log, "INSERT INTO Items")[0][2], expected)
 
     def test_a_duplicate_name_warns_and_asks_before_writing(self):
         log = []
         self.assertTrue(self._add(log, ["Espresso", "4.50", ""], names=["espresso"],
                                   confirmations=(True,)))
-        self.assertEqual(params_for(log, "INSERT INTO Items")[0][1], "Espresso")
+        self.assertEqual(params_for(log, "INSERT INTO Items")[0][0], "Espresso")
 
     def test_declining_the_duplicate_name_re_prompts_for_a_different_one(self):
         log = []
         self.assertTrue(self._add(log, ["Espresso", "Espresso Large", "5.00", ""],
                                   names=["espresso"], confirmations=(False,)))
-        self.assertEqual(params_for(log, "INSERT INTO Items")[0][1], "Espresso Large")
+        self.assertEqual(params_for(log, "INSERT INTO Items")[0][0], "Espresso Large")
 
     def test_no_connection_returns_false(self):
         with patch_main("get_connection", return_value=None):
