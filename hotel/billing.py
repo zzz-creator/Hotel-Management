@@ -1074,6 +1074,17 @@ def check_out():
                 (room_number,),
             )
             matched_reservation = cursor.fetchone()
+            # Track settlement progress (migration 030) so a retried check-out can skip
+            # steps that already landed. NULL = not started.
+            try:
+                cursor.execute(
+                    "UPDATE Reservations SET SettlementStatus = 'in_progress' "
+                    "WHERE RoomNumber = ? AND (SettlementStatus IS NULL OR SettlementStatus <> 'complete')",
+                    (room_number,),
+                )
+                conn.commit()
+            except Exception as e:
+                logging.debug("SettlementStatus update skipped: %s", e)
         if matched_reservation is None:
             logging.info("We could not find a reservation for that room. Please ask the "
                          "front desk for assistance.")
@@ -1103,6 +1114,16 @@ def check_out():
             loyalty.award_stay_points(room_number, matched_reservation.CheckInDate,
                               matched_reservation.CheckOutDate,
                               customer_id=matched_reservation.CustomerID)
+            try:
+                with db.get_connection() as _c:
+                    if _c is not None:
+                        _c.cursor().execute(
+                            "UPDATE Reservations SET SettlementStatus = 'complete' WHERE RoomNumber = ?",
+                            (room_number,),
+                        )
+                        _c.commit()
+            except Exception as e:
+                logging.debug("SettlementStatus complete update skipped: %s", e)
             core.log_audit("UPDATE", "Reservation", room_number,
                       f"Check-out completed for {first_name} {matched_reservation.LastName}")
             logging.info(f"Check-out complete for room {room_number}. Thanks for visiting {core.get_hotel_name()}, {first_name.capitalize()}! We hope to see you again soon!")
