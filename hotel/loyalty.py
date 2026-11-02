@@ -169,10 +169,17 @@ def add_points_to_customer(customer_id, delta_points, reason='adjust', source_id
                 "UPDATE LoyaltyAccounts SET Points = Points + ?, RoomNumber = ?, LastUpdated = ? "
                 "WHERE CustomerID = ?",
                 (delta_points, room_number, datetime.now(), customer_id))
-            cursor.execute(
-                "INSERT INTO LoyaltyTransactions (CustomerID, RoomNumber, Delta, Reason, SourceID) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (customer_id, room_number, delta_points, reason, source_id))
+            try:
+                cursor.execute(
+                    "INSERT INTO LoyaltyTransactions (CustomerID, RoomNumber, Delta, Reason, SourceID) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (customer_id, room_number, delta_points, reason, source_id))
+            except Exception as e:
+                # Unique index on SourceID (migration 031) lost the race: someone else
+                # already wrote this ledger row. Roll back and report "already awarded".
+                conn.rollback()
+                logging.debug("Loyalty ledger row already exists (%s); skipping.", e)
+                return False
             conn.commit()
             recompute_tier_by_customer(customer_id)
             logging.info(f"Added {delta_points} points to customer {customer_id} ({reason}).")

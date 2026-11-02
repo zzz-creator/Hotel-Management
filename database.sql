@@ -129,6 +129,8 @@ PRIMARY KEY CLUSTERED
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
+CREATE UNIQUE INDEX [UX_LoyaltyTransactions_SourceID] ON [dbo].[LoyaltyTransactions] ([SourceID]) WHERE ([SourceID] IS NOT NULL)
+GO
 -- CustomerID is the account the points belong to; RoomNumber is the stay CONTEXT, i.e.
 -- where the points were earned. It is never rewritten when a guest moves rooms, because
 -- that would falsify their earning history.

@@ -123,6 +123,7 @@ re-runnable; it is not part of the runtime.
 | `tests/check_migration_sql.py` | Static T-SQL lint (a **script**, not a test) |
 | `tests/check_applied_migrations.py` | The **live** database vs `database.sql` (a **script**, not a test) |
 | `tests/verify_e2e.py` | Builds a **disposable** database, runs both install paths, exercises the booking code, drops it (a **script**, not a test) |
+| `tests/stress_concurrency.py` | Concurrency stress harness: N workers of book/check-in/check-out against a scratch DB (a **script**, not a test) |
 | `tests/seed_smoke_test.sql`, `tests/seed_smoke_test_cleanup.sql` | Throwaway populate/undo pair for manual runs |
 | `tests/check_docs_sync.py` | This file's staleness checker (a **script**, not a test) |
 
