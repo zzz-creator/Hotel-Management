@@ -75,13 +75,26 @@ class RoomChargeTests(unittest.TestCase):
             def execute(self, sql, params=()):
                 calls.append((sql, params))
                 self._is_insert = sql.lstrip().upper().startswith("INSERT")
+                self._is_update = sql.lstrip().upper().startswith("UPDATE")
+                # Claim UPDATE affects a row only when the stay is not already charged.
+                if self._is_update:
+                    self.rowcount = 0 if already_posted else 1
+                else:
+                    self.rowcount = 1
 
             def fetchone(self):
-                # The idempotency probe returns the pre-existing row, the INSERT
-                # returns the new identity value.
+                # The INSERT returns the new identity value.
                 if getattr(self, "_is_insert", False):
                     return (4242,)
-                return (99,) if already_posted else None
+                return None
+
+            @property
+            def rowcount(self):
+                return getattr(self, "_rowcount", 1)
+
+            @rowcount.setter
+            def rowcount(self, value):
+                self._rowcount = value
 
         class FakeConn:
             def __enter__(self):
@@ -123,10 +136,10 @@ class RoomChargeTests(unittest.TestCase):
     def test_is_idempotent_on_the_stay_marker(self):
         _, calls = self._post(nights=2, rate=189.0)
         probe = calls[0]
-        self.assertIn("SELECT ID FROM Transactions", probe[0])
+        self.assertIn("UPDATE Reservations SET RoomChargePosted", probe[0])
         # Both the probe and the stored description key off the same check-in value.
-        self.assertIn("9012", probe[1][0])
-        self.assertIn("2026-03-01", probe[1][1])
+        self.assertIn("9012", str(probe[1][0]))
+        self.assertIn("2026-03-01", str(probe[1][1]))
 
     def test_retried_checkout_does_not_double_charge(self):
         tx_id, calls = self._post(nights=2, rate=189.0, already_posted=True)
