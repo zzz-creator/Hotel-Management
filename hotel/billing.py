@@ -1091,7 +1091,9 @@ def check_out():
         # the rate captured on the reservation, not the current one.
         post_room_charge(room_number, matched_reservation.CheckInDate, matched_reservation.CheckOutDate)
         if bill_room_transactions(room_number):
-            rooms.set_room_status(room_number, "Dirty")
+            if not rooms.set_room_status(room_number, "Dirty"):
+                logging.info("Room %s could not be marked Dirty (it may have been changed "
+                             "by another operator).", room_number)
             keycards.revoke_active_key_cards(room_number, "stayed")
             # Pass the CustomerID we already matched rather than letting the
             # award re-resolve it from the room. The resolver works today because

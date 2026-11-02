@@ -827,7 +827,9 @@ def check_in():
                             )
                             return
             # A valid stay: now it is real state, mark the room occupied on check-in.
-            _mod_rooms.set_room_status(room_number, "Occupied")
+            if not _mod_rooms.set_room_status(room_number, "Occupied"):
+                logging.info("Room %s could not be marked Occupied (it may have been "
+                             "changed by another operator).", room_number)
         except Exception as e:
             logging.error(f"Error syncing room status on check-in: {e}")
         # Capture or refresh the guest's contact details in CustomerProfiles.

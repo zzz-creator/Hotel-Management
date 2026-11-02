@@ -114,8 +114,16 @@ def upsert_room_if_missing(room_number, room_type="Standard", description=""):
             return False
 
 
-def set_room_status(room_number, status):
-    """Set a room's status to one of ROOM_STATUSES. Returns True on success."""
+def set_room_status(room_number, status, expected_status=None):
+    """Set a room's status. Returns True on success, False if the room was not found,
+    the status is invalid, or another operator changed it in the meantime.
+
+    Under concurrency the update is compare-and-swap: it only lands when the row
+    still holds the status we read (or any status, when `expected_status` is None
+    and the caller is doing a plain set). A rowcount of zero means someone else
+    won the race; the caller re-reads and decides what to do rather than
+    silently overwriting.
+    """
     if not room_number or status not in ROOM_STATUSES:
         return False
     if get_room_status(room_number) is None:
@@ -128,10 +136,29 @@ def set_room_status(room_number, status):
             cursor.execute("SELECT Status FROM Rooms WHERE RoomNumber = ?", (room_number,))
             old_row = cursor.fetchone()
             old_status = old_row[0] if old_row is not None else None
-            cursor.execute("UPDATE Rooms SET Status = ? WHERE RoomNumber = ?", (status, room_number))
+            if old_status is None:
+                # Room vanished between the upsert and now; nothing to update.
+                return False
+            if expected_status is not None and old_status != expected_status:
+                logging.info("Room %s status changed to '%s' by another user "
+                             "(expected '%s').", room_number, old_status, expected_status)
+                return False
+            cursor.execute(
+                "UPDATE Rooms SET Status = ? WHERE RoomNumber = ? AND Status = ?",
+                (status, room_number, old_status),
+            )
+            if cursor.rowcount == 0:
+                # Re-read to report what actually happened.
+                cursor.execute("SELECT Status FROM Rooms WHERE RoomNumber = ?", (room_number,))
+                now_row = cursor.fetchone()
+                now_status = now_row[0] if now_row is not None else None
+                logging.info("Room %s was updated by another user (now '%s'); "
+                             "your change to '%s' was not applied.",
+                             room_number, now_status, status)
+                return False
             conn.commit()
             core.log_audit("UPDATE", "Room", room_number, f"Status -> {status}",
-                      old_value=old_status, new_value=status)
+                           old_value=old_status, new_value=status)
             return True
         except Exception as e:
             logging.error(f"Error setting room status: {e}")
@@ -598,6 +625,8 @@ def update_room_status():
         return
     if set_room_status(room_number, status):
         logging.info(f"Room {room_number} status updated to '{status}'.")
+    else:
+        logging.info(f"Room {room_number} status was not updated (see above).")
 
 
 def rooms_admin_menu(view_only=False):
