@@ -53,7 +53,7 @@ def add_reservation():
         if check_out <= check_in:
             logging.info("Check-out date must be after check-in date. Reservation not added.")
             return
-        with db.get_connection() as conn:
+        with db.get_connection(isolation="serializable") as conn:
             if conn is None:
                 return
             cursor = conn.cursor()
@@ -61,7 +61,7 @@ def add_reservation():
             # reservation row. A still-current stay (check-out in the future) blocks a
             # new booking; a completed past stay is overwritten so the room can be
             # re-booked for the next guest.
-            cursor.execute("SELECT CheckInDate, CheckOutDate, LastName, FirstName, Floor FROM Reservations WHERE RoomNumber = ?", (room_number,))
+            cursor.execute("SELECT CheckInDate, CheckOutDate, LastName, FirstName, Floor FROM Reservations WITH (UPDLOCK, HOLDLOCK) WHERE RoomNumber = ?", (room_number,))
             existing = cursor.fetchone()
             if existing is not None and existing.CheckOutDate > today:
                 logging.info(f"Room {room_number} is already reserved (check-out {existing.CheckOutDate}). New reservation refused.")
@@ -239,7 +239,7 @@ def _book_reservation_in_conn(conn, room_number, last_name, first_name, check_in
     rate = _mod_rooms._rate_or_none(_mod_rooms._nightly_rate_in_conn(cursor, actual_type or room_type))
     cursor.execute(
         "SELECT CheckInDate, CheckOutDate, LastName, FirstName, Floor FROM Reservations "
-        "WHERE RoomNumber = ?",
+        "WITH (UPDLOCK, HOLDLOCK) WHERE RoomNumber = ?",
         (room_number,),
     )
     existing = cursor.fetchone()

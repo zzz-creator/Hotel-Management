@@ -125,7 +125,7 @@ def book_room():
     booking_ref = booking_ledger.new_booking_ref()
     claimed = None
     reasons = []
-    with db.get_connection() as conn:
+    with db.get_connection(isolation="serializable") as conn:
         if conn is None:
             logging.info("Database connection failed. No booking was made.")
             return
@@ -234,7 +234,7 @@ def _find_booking(booking_ref, customer_id=None):
     # nested connection on top of a live cursor is an extra round trip that has no
     # business happening inside this query.
     today = core.business_date()
-    with db.get_connection() as conn:
+    with db.get_connection(isolation="serializable") as conn:
         if conn is None:
             return None
         try:
@@ -379,7 +379,7 @@ def cancel_booking():
         logging.info("Reference did not match. Booking left unchanged.")
         return
 
-    with db.get_connection() as conn:
+    with db.get_connection(isolation="serializable") as conn:
         if conn is None:
             logging.info("Database connection failed. The booking was not cancelled.")
             return
