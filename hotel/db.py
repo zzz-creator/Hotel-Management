@@ -24,30 +24,12 @@ def create_connection():
 
 
 @contextlib.contextmanager
-def get_connection():
+def get_connection(isolation="read_committed"):
     """Context manager that yields a DB connection and ensures it is closed.
 
-    Yields None if the connection could not be established, so callers can use the
-    `if conn is None: return` guard. A connection failure is reported by
-    create_connection() (which returns None); a failure *inside* the with-block is a
-    real error and is deliberately allowed to propagate with its original type and
-    message, so a missing migration surfaces as pyodbc's "Invalid column/object name"
-    rather than something generic. Callers that genuinely want to tolerate a failure
-    (e.g. a table from an unapplied migration) wrap their own body in try/except.
-
-    An exception from the body triggers an explicit `rollback()` before the close. Closing
-    an autocommit-off pyodbc connection already discards the open transaction, so this is
-    NOT a behaviour change -- it makes the guarantee stated here rather than inherited from
-    the driver's close semantics, and it stops anyone reasoning "close rolls back for us"
-    from being silently wrong if that ever changes.
-
-    It does NOT defend against autocommit. With `autocommit=True` every statement is
-    durable as it is issued and `rollback()` is a no-op, so the guarantee is gone before
-    this code runs. That is why `tests/verify_e2e.py` asserts connections open
-    autocommit-off, rather than this function trying to detect it per call.
-
-    Do NOT wrap this `yield` in `except Exception` and yield again: that is illegal in a
-    generator, and it was exactly the bug that lived in main.py until 3 October 2026.
+    `isolation` selects the transaction isolation level: "read_committed" (default)
+    or "serializable". A serializable connection issues
+    `SET TRANSACTION ISOLATION LEVEL SERIALIZABLE` on open. Autocommit stays off.
     """
     conn = None
     try:
@@ -55,6 +37,10 @@ def get_connection():
         if conn is None:
             yield None
             return
+        if isolation not in ("read_committed", "serializable"):
+            raise ValueError("Unknown isolation level: %r" % isolation)
+        if isolation == "serializable":
+            conn.execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
         yield conn
     except BaseException:
         if conn is not None:
@@ -69,3 +55,14 @@ def get_connection():
                 conn.close()
         except Exception:
             pass
+
+
+def claim_row(cursor, sql, params=()):
+    """Execute a claim-style statement and return the affected row count.
+
+    The caller supplies the full SQL (including any `WITH (UPDLOCK, HOLDLOCK)`
+    hint and the `WHERE <guard>` predicate) and the parameters. A return value
+    of 1 means this caller won the race; 0 means someone else already claimed it.
+    """
+    cursor.execute(sql, params)
+    return cursor.rowcount
