@@ -314,7 +314,7 @@ def revoke_key_card(card_number, reason=""):
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE KeyCards SET Status = 'Revoked', RevokedAt = ?, RevokeReason = ? "
-                "WHERE CardNumber = ?",
+                "WHERE CardNumber = ? AND Status = 'Active'",
                 (datetime.now(), reason or "Revoked by staff", card_number),
             )
             if not cursor.rowcount:

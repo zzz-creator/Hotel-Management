@@ -688,6 +688,8 @@ PRIMARY KEY CLUSTERED
 GO
 ALTER TABLE [dbo].[KeyCards] ADD CONSTRAINT [UQ_KeyCards_CardNumber] UNIQUE ([CardNumber])
 GO
+CREATE UNIQUE INDEX [UX_KeyCards_ActiveRoom] ON [dbo].[KeyCards] ([RoomNumber]) WHERE ([Status] = 'Active')
+GO
 CREATE INDEX [IX_KeyCards_RoomNumber] ON [dbo].[KeyCards] ([RoomNumber], [Status])
 GO
 /****** Object:  Table [dbo].[DoorEvents]    Script Date: 9/25/2026 ******/
