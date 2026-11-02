@@ -1219,9 +1219,9 @@ def _reset_settlement_fixture(room, last, first, check_in, check_out, nightly_ra
             "(?, ?, 1000, N'Stay award (prior visit)', DATEADD(DAY, -40, ?), ?), "
             "(?, ?, 900, N'Stay award (prior visit)', DATEADD(DAY, -20, ?), ?), "
             "(?, ?, 700, N'Room service spend', DATEADD(DAY, -1, ?), ?)",
-            (cid, room, check_in, 'fixture:stay:1',
-             cid, room, check_in, 'fixture:stay:2',
-             cid, room, check_in, 'fixture:order:1'))
+            (cid, room, check_in, 'fixture:%s:stay:1' % cid,
+             cid, room, check_in, 'fixture:%s:stay:2' % cid,
+             cid, room, check_in, 'fixture:%s:order:1' % cid))
     # Two unbilled F&B lines and one paid-at-order line, which is the shape
     # bill_room_transactions() looks for: the last is consolidated onto the check-out
     # invoice rather than billed again.
