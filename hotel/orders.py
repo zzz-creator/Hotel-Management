@@ -475,9 +475,12 @@ def advance_order(order_id):
             cursor.execute(
                 "UPDATE Orders SET Status = ?, UpdatedAt = ?, "
                 "CompletedAt = CASE WHEN ? IN ('Completed', 'Cancelled') THEN ? ELSE CompletedAt END "
-                "WHERE OrderID = ?",
-                (new_status, datetime.now(), new_status, datetime.now(), order_id),
+                "WHERE OrderID = ? AND Status = ?",
+                (new_status, datetime.now(), new_status, datetime.now(), order_id, current),
             )
+            if cursor.rowcount == 0:
+                logging.info("Order %s was changed by another operator; your update was not applied.", order_id)
+                return current
             conn.commit()
         core.log_audit("UPDATE", "Order", order_id, f"{current} -> {new_status} (room {room_number})")
         # Tell the guest in their room so the tracker reflects reality immediately.

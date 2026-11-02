@@ -51,6 +51,7 @@ install and is kept in sync by hand — a schema change lands in **both** places
 | 029 | `029_drop_business_date.sql` | Deletes the legacy `business_date` `HotelSettings` row the app no longer reads |
 | 030 | `030_concurrency_claims.sql` | `Items.ItemID` becomes `IDENTITY(1,1)`; `Reservations.RoomChargePosted` (claim for `post_room_charge`); `Reservations.SettlementStatus` (tracks check-out step progress) |
 | 031 | `031_loyalty_source_unique.sql` | Unique filtered index `UX_LoyaltyTransactions_SourceID` on `LoyaltyTransactions.SourceID` (non-NULL) for accrual/redemption idempotency |
+| 032 | `032_orders_billed.sql` | `Orders.Billed`/`BilledAt` for claim-based F&B charge posting |
 ### Fresh database
 
 Either run `database.sql` once, or apply `migrations/001` … `migrations/029` in order in

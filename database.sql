@@ -531,6 +531,8 @@ CREATE TABLE [dbo].[Orders](
 	[UpdatedAt] [datetime] NOT NULL DEFAULT (getdate()),
 	[CompletedAt] [datetime] NULL,
 	[Notes] [nvarchar](500) NULL,
+	[Billed] [bit] NOT NULL DEFAULT (0),
+	[BilledAt] [datetime] NULL,
 PRIMARY KEY CLUSTERED
 (
 	[OrderID] ASC
