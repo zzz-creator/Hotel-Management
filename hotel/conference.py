@@ -21,6 +21,10 @@ __all__ = [
     'remove_room_setup',
     'conference_room_admin_menu',
     'conference_rooms_panel',
+    'book_conference_room',
+    'conference_bookings_inbox',
+    'conference_guest_panel',
+    'view_my_conference_bookings',
 ]
 
 CONFERENCE_SETUP_TYPES = ("Theatre", "Classroom", "Banquet", "U-Shape", "Boardroom")
@@ -364,6 +368,377 @@ def conference_room_admin_menu():
             return
         else:
             logging.info("Invalid choice. Please try again.")
+
+
+def _hours_between(start, end):
+    try:
+        delta = end - start
+        return max(delta.total_seconds() / 3600.0, 0.0)
+    except Exception:
+        return 0.0
+
+
+def conference_booking_overlaps(room_id, start, end, exclude_id=None):
+    """Return True if any non-cancelled booking overlaps [start, end) for room_id."""
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return False
+            cursor = conn.cursor()
+            sql = ("SELECT COUNT(*) FROM ConferenceBookings "
+                   "WHERE RoomID = ? AND Status <> 'Cancelled' "
+                   "AND StartAt < ? AND EndAt > ?")
+            params = [room_id, end, start]
+            if exclude_id is not None:
+                sql += " AND BookingID <> ?"
+                params.append(exclude_id)
+            cursor.execute(sql, params)
+            row = cursor.fetchone()
+            return bool(row and row[0] and int(row[0]) > 0)
+    except Exception as e:
+        logging.debug(f"Overlap check failed ({type(e).__name__}: {e})")
+        return False
+
+
+def get_conference_bookings(room_number=None, status=None):
+    """Return list of booking rows (dicts as tuples)."""
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return []
+            cursor = conn.cursor()
+            sql = ("SELECT b.BookingID, r.RoomNumber, r.Name, b.StartAt, b.EndAt, "
+                   "b.AttendeeCount, b.SetupType, b.Status, b.BookedBy, b.CustomerID "
+                   "FROM ConferenceBookings b JOIN ConferenceRooms r ON r.RoomID = b.RoomID "
+                   "WHERE 1=1")
+            params = []
+            if room_number:
+                sql += " AND r.RoomNumber = ?"
+                params.append(room_number)
+            if status:
+                sql += " AND b.Status = ?"
+                params.append(status)
+            sql += " ORDER BY b.StartAt DESC"
+            cursor.execute(sql, params)
+            return [tuple(r) for r in cursor.fetchall()]
+    except Exception as e:
+        logging.debug(f"ConferenceBookings unreadable ({type(e).__name__}: {e})")
+        return []
+
+
+def create_conference_booking(room_number, start, end, attendee_count, setup_type,
+                             equipment=None, booked_by=None, customer_id=None,
+                             notes=None):
+    """Create a booking after an overlap + capacity check. Returns BookingID or None.
+
+    The caller is responsible for payment having succeeded before calling this, OR
+    for passing a pre-validated card. This function does not prompt for a card.
+    """
+    room = get_conference_room(room_number)
+    if room is None:
+        logging.info("Conference room not found.")
+        return None
+    room_id = room[0]
+    # capacity check against setup if provided
+    if setup_type:
+        setups = [s for s in get_room_setups(room_number) if s[1] == setup_type and s[3]]
+        if setups:
+            if attendee_count > setups[0][2] and setups[0][2] > 0:
+                logging.info("Attendee count exceeds setup capacity (%d).", setups[0][2])
+                return None
+    if attendee_count < 1:
+        logging.info("Attendee count must be at least 1.")
+        return None
+    if end <= start:
+        logging.info("End must be after start.")
+        return None
+    if conference_booking_overlaps(room_id, start, end):
+        logging.info("That slot overlaps an existing booking for this room.")
+        return None
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return None
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO ConferenceBookings (RoomID, StartAt, EndAt, CustomerID, "
+                "BookedBy, AttendeeCount, SetupType, Notes) "
+                "OUTPUT INSERTED.BookingID VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (room_id, start, end, customer_id, booked_by, attendee_count,
+                 setup_type, notes))
+            row = cursor.fetchone()
+            booking_id = int(row[0]) if row and row[0] is not None else None
+            if booking_id is not None and equipment:
+                for eq_type, qty in equipment.items():
+                    cursor.execute(
+                        "INSERT INTO ConferenceBookingEquipment (BookingID, EquipmentType, Quantity) "
+                        "VALUES (?, ?, ?)", (booking_id, eq_type, max(1, int(qty))))
+            conn.commit()
+        if booking_id is not None:
+            core.log_audit("CREATE", "ConferenceBooking", booking_id,
+                           f"{room_number} {start} -> {end} ({attendee_count} attendees)")
+        return booking_id
+    except Exception as e:
+        logging.error(f"Error creating conference booking: {e}")
+        return None
+
+
+def cancel_conference_booking(booking_id, cancelled_by=None):
+    """Cancel a booking. Returns True on success."""
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return False
+            cursor = conn.cursor()
+            cursor.execute("SELECT Status, StartAt FROM ConferenceBookings WHERE BookingID = ?",
+                           (booking_id,))
+            row = cursor.fetchone()
+            if not row:
+                logging.info("Booking not found.")
+                return False
+            if row[0] == 'Cancelled':
+                logging.info("Already cancelled.")
+                return False
+            cursor.execute(
+                "UPDATE ConferenceBookings SET Status='Cancelled', CancelledAt=GETDATE(), "
+                "CancelledBy=? WHERE BookingID = ?", (cancelled_by, booking_id))
+            conn.commit()
+        core.log_audit("CANCEL", "ConferenceBooking", booking_id,
+                       f"by {cancelled_by}")
+        return True
+    except Exception as e:
+        logging.error(f"Error cancelling conference booking: {e}")
+        return False
+
+
+def complete_conference_booking(booking_id):
+    """Mark a booking completed and issue a ConferenceInvoice. Returns invoice id or None."""
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return None
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT b.RoomID, b.StartAt, b.EndAt, r.HourlyRate "
+                "FROM ConferenceBookings b JOIN ConferenceRooms r ON r.RoomID = b.RoomID "
+                "WHERE b.BookingID = ?", (booking_id,))
+            row = cursor.fetchone()
+            if not row:
+                logging.info("Booking not found.")
+                return None
+            room_id, start, end, rate = row[0], row[1], row[2], float(row[3] or 0)
+            hours = _hours_between(start, end)
+            subtotal = round(hours * rate, 2)
+            tax_rate = core.get_tax_rate()
+            tax = round(subtotal * tax_rate, 2)
+            total = round(subtotal + tax, 2)
+            cursor.execute(
+                "UPDATE ConferenceBookings SET Status='Completed' WHERE BookingID = ?",
+                (booking_id,))
+            cursor.execute(
+                "INSERT INTO ConferenceInvoices (BookingID, Subtotal, TaxAmount, TotalAmount, AmountPaid) "
+                "OUTPUT INSERTED.ConferenceInvoiceID VALUES (?, ?, ?, ?, ?)",
+                (booking_id, subtotal, tax, total, total))
+            inv_row = cursor.fetchone()
+            inv_id = int(inv_row[0]) if inv_row and inv_row[0] is not None else None
+            conn.commit()
+        core.log_audit("COMPLETE", "ConferenceBooking", booking_id,
+                       f"invoice {inv_id} total {total:.2f}")
+        return inv_id
+    except Exception as e:
+        logging.error(f"Error completing conference booking: {e}")
+        return None
+
+
+def book_conference_room(customer_id=None):
+    """Interactive conference room booking wizard (staff or guest)."""
+    rooms = get_conference_rooms(active_only=True)
+    if not rooms:
+        ui.info("No conference rooms available.")
+        return
+    ui.show_table("Conference Rooms", ["#", "Room", "Name", "Capacity", "Rate/hr"],
+                  [(r[0], r[1], r[2], r[3], f"${r[4]:,.2f}") for r in rooms])
+    try:
+        choice = int(input("Select room number by index (1-based): ").strip())
+    except ValueError:
+        logging.info("Invalid selection.")
+        return
+    if choice < 1 or choice > len(rooms):
+        logging.info("Invalid selection.")
+        return
+    room = rooms[choice - 1]
+    room_number = room[1]
+    setups = [s for s in get_room_setups(room_number) if s[3]]
+    setup_type = None
+    if setups:
+        ui.show_table(f"Setups - {room_number}", ["#", "Setup", "Capacity"],
+                      [(i + 1, s[1], s[2]) for i, s in enumerate(setups)])
+        st = input("Select setup (blank = none): ").strip()
+        if st.isdigit() and 1 <= int(st) <= len(setups):
+            setup_type = setups[int(st) - 1][1]
+    try:
+        attendee_count = int(input("Attendee count: ").strip())
+    except ValueError:
+        logging.info("Invalid count.")
+        return
+    # capacity check
+    if setup_type:
+        cap = next((s[2] for s in setups if s[1] == setup_type), room[3])
+        if attendee_count > cap and cap > 0:
+            logging.info("Attendee count exceeds capacity (%d).", cap)
+            return
+    from datetime import datetime, timedelta
+    try:
+        start_str = input("Start (YYYY-MM-DD HH:MM): ").strip()
+        end_str = input("End (YYYY-MM-DD HH:MM): ").strip()
+        start = datetime.strptime(start_str, "%Y-%m-%d %H:%M")
+        end = datetime.strptime(end_str, "%Y-%m-%d %H:%M")
+    except ValueError:
+        logging.info("Invalid date/time format.")
+        return
+    if end <= start:
+        logging.info("End must be after start.")
+        return
+    if conference_booking_overlaps(room[0], start, end):
+        logging.info("That slot overlaps an existing booking.")
+        return
+    # equipment
+    equipment = {}
+    if ui.ask_confirmation("Add equipment?", default="n"):
+        while True:
+            eq = input("Equipment type (blank to finish): ").strip()
+            if not eq:
+                break
+            try:
+                q = int(input(f"Quantity for {eq}: ").strip() or "1")
+            except ValueError:
+                q = 1
+            equipment[eq] = q
+    booked_by = session.CURRENT_USER or (f"customer:{customer_id}" if customer_id else "guest")
+    # payment
+    hours = _hours_between(start, end)
+    total = round(hours * room[4], 2)
+    tax = round(total * core.get_tax_rate(), 2)
+    grand = round(total + tax, 2)
+    logging.info(f"Quote: {hours:.2f} hr x ${room[4]:,.2f} = ${total:,.2f} + tax ${tax:,.2f} = ${grand:,.2f}")
+    # card payment required
+    if not __import__("hotel.payments", fromlist=["process_credit_card"]).process_credit_card(grand):
+        logging.info("Payment declined. No booking created.")
+        return
+    booking_id = create_conference_booking(
+        room_number, start, end, attendee_count, setup_type,
+        equipment=equipment, booked_by=booked_by, customer_id=customer_id,
+        notes=None)
+    if booking_id is None:
+        logging.info("Booking could not be created.")
+        return
+    # record invoice
+    try:
+        with db.get_connection() as conn:
+            if conn is not None:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO ConferenceInvoices (BookingID, Subtotal, TaxAmount, TotalAmount, AmountPaid) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (booking_id, total, tax, grand, grand))
+                conn.commit()
+    except Exception as e:
+        logging.debug(f"Invoice write failed: {e}")
+    core.log_audit("CREATE", "ConferenceBooking", booking_id, f"paid {grand:.2f}")
+    # staff alert if guest self-service
+    if customer_id is not None:
+        try:
+            with db.get_connection() as conn:
+                if conn is not None:
+                    conn.cursor().execute(
+                        "INSERT INTO StaffAlerts (TargetRole, Message, Severity) VALUES (?, ?, ?)",
+                        ("admin", f"New conference booking #{booking_id} by guest customer {customer_id}", "Info"))
+                    conn.commit()
+        except Exception:
+            pass
+    ui.success(f"Conference booking #{booking_id} confirmed. Paid ${grand:,.2f}.")
+
+
+def conference_bookings_inbox():
+    """Staff inbox: list and action conference bookings."""
+    bookings = get_conference_bookings()
+    if not bookings:
+        ui.info("No conference bookings on record.")
+        return
+    ui.show_table("Conference Bookings",
+                  ["#", "Room", "Start", "End", "Attendees", "Setup", "Status", "Booked by"],
+                  [(b[0], b[1], str(b[3])[:16], str(b[4])[:16], b[5], b[6] or "-", b[7], b[8] or "-")
+                   for b in bookings])
+    raw = input("Enter a booking number to action (blank to skip): ").strip()
+    if not raw.isdigit():
+        return
+    bid = int(raw)
+    ui.show_menu("Action", ["1. Mark in progress", "2. Mark completed", "3. Cancel", "4. Back"])
+    act = input("Choice: ").strip()
+    if act == '1':
+        try:
+            with db.get_connection() as conn:
+                if conn is not None:
+                    conn.cursor().execute("UPDATE ConferenceBookings SET Status='InProgress' WHERE BookingID=?", (bid,))
+                    conn.commit()
+            ui.success("Marked in progress.")
+        except Exception as e:
+            logging.error(f"Error: {e}")
+    elif act == '2':
+        inv = complete_conference_booking(bid)
+        if inv is not None:
+            ui.success(f"Completed. Invoice #{inv} issued.")
+    elif act == '3':
+        if cancel_conference_booking(bid, session.CURRENT_USER):
+            ui.success("Cancelled.")
+    else:
+        return
+
+
+def view_my_conference_bookings(customer_id):
+    """Guest: view their conference bookings."""
+    bookings = get_conference_bookings()
+    mine = [b for b in bookings if b[9] == customer_id]
+    if not mine:
+        ui.info("No conference bookings on record.")
+        return
+    ui.show_table("My Conference Bookings",
+                  ["#", "Room", "Start", "End", "Attendees", "Setup", "Status"],
+                  [(b[0], b[1], str(b[3])[:16], str(b[4])[:16], b[5], b[6] or "-", b[7])
+                   for b in mine])
+
+
+def conference_guest_panel():
+    """Guest-facing conference room panel."""
+    from hotel import customer as _c
+    # reuse customer login gate
+    try:
+        _c.customer_login(allow_register=False)
+    except Exception:
+        pass
+    cid = session.CURRENT_CUSTOMER
+    if cid is None:
+        logging.info("Please sign in to book a conference room.")
+        return
+    while True:
+        ui.pause()
+        ui.show_menu("Conference Rooms", [
+            "1. Browse rooms",
+            "2. Book a conference room",
+            "3. My conference bookings",
+            "4. Back",
+        ])
+        choice = input("Enter your choice: ").strip()
+        if choice == '1':
+            conference_rooms_panel()
+        elif choice == '2':
+            book_conference_room(customer_id=cid)
+        elif choice == '3':
+            view_my_conference_bookings(cid)
+        elif choice == '4':
+            return
+        else:
+            logging.info("Invalid choice.")
 
 
 def conference_rooms_panel():

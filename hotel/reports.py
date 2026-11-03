@@ -130,6 +130,27 @@ def export_reservations(export_format="csv"):
     return [csv_path]
 
 
+def export_conference_bookings(export_format="csv"):
+    if export_format != "csv":
+        raise ValueError("Only csv export is supported.")
+    csv_path = _export_query(
+        "conference_bookings",
+        "SELECT * FROM ConferenceBookings",
+        "Conference Bookings Report"
+    )
+    return [csv_path]
+
+
+def export_conference_revenue(export_format="csv"):
+    if export_format != "csv":
+        raise ValueError("Only csv export is supported.")
+    csv_path = _export_query(
+        "conference_revenue",
+        "SELECT * FROM ConferenceInvoices",
+        "Conference Revenue Report"
+    )
+    return [csv_path]
+
 def export_loyalty_statements(export_format="csv", room_number=None, customer=None):
     """Loyalty balances and ledger, keyed on the GUEST (migration 019).
 
@@ -468,6 +489,8 @@ REPORTS = {
     "audit": export_audit_log,
     "guest_satisfaction": export_guest_satisfaction,
     "booking_ledger": export_booking_ledger,
+    "conference_bookings": export_conference_bookings,
+    "conference_revenue": export_conference_revenue,
 }
 
 

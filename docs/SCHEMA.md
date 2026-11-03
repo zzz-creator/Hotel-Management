@@ -54,6 +54,8 @@ install and is kept in sync by hand — a schema change lands in **both** places
 | 032 | `032_orders_billed.sql` | `Orders.Billed`/`BilledAt` for claim-based F&B charge posting |
 | 033 | `033_keycard_active_unique.sql` | Unique filtered index `UX_KeyCards_ActiveRoom` on `KeyCards.RoomNumber` (Status='Active') |
 | 034 | `034_conference_rooms.sql` | `ConferenceRooms` + `ConferenceRoomSetups` (Phase A of the conference room system) |
+| 035 | `035_conference_bookings.sql` | `ConferenceBookings`, `ConferenceBookingEquipment`, `ConferenceInvoices` (Phase B) |
+| 036 | `036_conference_catering.sql` | `ConferenceCateringOrders` (Phase D) |
 ### Fresh database
 
 Either run `database.sql` once, or apply `migrations/001` … `migrations/029` in order in

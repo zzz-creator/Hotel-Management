@@ -827,6 +827,80 @@ ALTER TABLE [dbo].[ConferenceRooms]  WITH CHECK ADD  CONSTRAINT [CK_ConferenceRo
 GO
 ALTER TABLE [dbo].[ConferenceRoomSetups]  WITH CHECK ADD  CONSTRAINT [CK_ConferenceRoomSetups_Capacity] CHECK  (([Capacity]>=(0)))
 GO
+/****** Migration 035: conference bookings (Phase B) ******/
+CREATE TABLE [dbo].[ConferenceBookings](
+	[BookingID] [int] IDENTITY(1,1) NOT NULL,
+	[RoomID] [int] NOT NULL,
+	[StartAt] [datetime] NOT NULL,
+	[EndAt] [datetime] NOT NULL,
+	[CustomerID] [int] NULL,
+	[BookedBy] [nvarchar](100) NULL,
+	[AttendeeCount] [int] NOT NULL CONSTRAINT [DF_ConfBook_Attendees] DEFAULT ((0)),
+	[SetupType] [nvarchar](50) NULL,
+	[Status] [nvarchar](20) NOT NULL CONSTRAINT [DF_ConfBook_Status] DEFAULT ('Confirmed'),
+	[Notes] [nvarchar](500) NULL,
+	[CreatedAt] [datetime] NOT NULL CONSTRAINT [DF_ConfBook_CreatedAt] DEFAULT (getdate()),
+	[CancelledAt] [datetime] NULL,
+	[CancelledBy] [nvarchar](100) NULL,
+PRIMARY KEY CLUSTERED ([BookingID] ASC) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[ConferenceBookings] WITH CHECK ADD CONSTRAINT [FK_ConfBook_Room] FOREIGN KEY([RoomID]) REFERENCES [dbo].[ConferenceRooms]([RoomID])
+GO
+ALTER TABLE [dbo].[ConferenceBookings] WITH CHECK ADD CONSTRAINT [FK_ConfBook_Customer] FOREIGN KEY([CustomerID]) REFERENCES [dbo].[CustomerProfiles]([CustomerID])
+GO
+ALTER TABLE [dbo].[ConferenceBookings] WITH CHECK ADD CONSTRAINT [CK_ConfBook_Status] CHECK ([Status] IN ('Confirmed','InProgress','Completed','Cancelled'))
+GO
+ALTER TABLE [dbo].[ConferenceBookings] WITH CHECK ADD CONSTRAINT [CK_ConfBook_Times] CHECK ([EndAt] > [StartAt])
+GO
+CREATE TABLE [dbo].[ConferenceBookingEquipment](
+	[BookingID] [int] NOT NULL,
+	[EquipmentType] [nvarchar](50) NOT NULL,
+	[Quantity] [int] NOT NULL CONSTRAINT [DF_ConfEquip_Qty] DEFAULT ((1)),
+PRIMARY KEY CLUSTERED ([BookingID] ASC, [EquipmentType] ASC) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[ConferenceBookingEquipment] WITH CHECK ADD CONSTRAINT [FK_ConfEquip_Booking] FOREIGN KEY([BookingID]) REFERENCES [dbo].[ConferenceBookings]([BookingID]) ON DELETE CASCADE
+GO
+CREATE TABLE [dbo].[ConferenceInvoices](
+	[ConferenceInvoiceID] [int] IDENTITY(1,1) NOT NULL,
+	[BookingID] [int] NOT NULL,
+	[InvoiceDate] [datetime] NOT NULL CONSTRAINT [DF_ConfInv_Date] DEFAULT (getdate()),
+	[Subtotal] [decimal](12,2) NOT NULL CONSTRAINT [DF_ConfInv_Sub] DEFAULT ((0)),
+	[TaxAmount] [decimal](12,2) NOT NULL CONSTRAINT [DF_ConfInv_Tax] DEFAULT ((0)),
+	[TotalAmount] [decimal](12,2) NOT NULL CONSTRAINT [DF_ConfInv_Total] DEFAULT ((0)),
+	[AmountPaid] [decimal](12,2) NOT NULL CONSTRAINT [DF_ConfInv_Paid] DEFAULT ((0)),
+	[VoidedAt] [datetime] NULL,
+	[VoidedBy] [nvarchar](100) NULL,
+	[VoidReason] [nvarchar](255) NULL,
+PRIMARY KEY CLUSTERED ([ConferenceInvoiceID] ASC) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[ConferenceInvoices] WITH CHECK ADD CONSTRAINT [FK_ConfInv_Booking] FOREIGN KEY([BookingID]) REFERENCES [dbo].[ConferenceBookings]([BookingID])
+GO
+CREATE INDEX [IX_ConfBook_Room_Times] ON [dbo].[ConferenceBookings] ([RoomID], [StartAt], [EndAt])
+GO
+CREATE INDEX [IX_ConfBook_Status] ON [dbo].[ConferenceBookings] ([Status], [StartAt])
+GO
+/****** Migration 036: conference catering (Phase D) ******/
+CREATE TABLE [dbo].[ConferenceCateringOrders](
+	[CateringOrderID] [int] IDENTITY(1,1) NOT NULL,
+	[BookingID] [int] NOT NULL,
+	[PackageType] [nvarchar](50) NOT NULL,
+	[Description] [nvarchar](255) NULL,
+	[HeadCount] [int] NOT NULL CONSTRAINT [DF_ConfCat_Head] DEFAULT ((0)),
+	[UnitPrice] [decimal](10,2) NOT NULL CONSTRAINT [DF_ConfCat_Unit] DEFAULT ((0)),
+	[TotalAmount] [decimal](12,2) NOT NULL CONSTRAINT [DF_ConfCat_Total] DEFAULT ((0)),
+	[Status] [nvarchar](20) NOT NULL CONSTRAINT [DF_ConfCat_Status] DEFAULT ('Requested'),
+	[PlacedAt] [datetime] NOT NULL CONSTRAINT [DF_ConfCat_Placed] DEFAULT (getdate()),
+	[DeliveredAt] [datetime] NULL,
+PRIMARY KEY CLUSTERED ([CateringOrderID] ASC) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[ConferenceCateringOrders] WITH CHECK ADD CONSTRAINT [FK_ConfCat_Booking] FOREIGN KEY([BookingID]) REFERENCES [dbo].[ConferenceBookings]([BookingID]) ON DELETE CASCADE
+GO
+ALTER TABLE [dbo].[ConferenceCateringOrders] WITH CHECK ADD CONSTRAINT [CK_ConfCat_Status] CHECK ([Status] IN ('Requested','Confirmed','Delivered','Cancelled'))
+GO
 /****** Structural parity with a migrated database ******/
 -- Everything below already exists on any database built by applying migrations/001-025,
 -- but was missing here, so a fresh install from this file shipped with weaker guarantees

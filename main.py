@@ -45,6 +45,7 @@ from hotel import customer
 from hotel import admin
 from hotel import bookings
 from hotel import conference
+from hotel import conference_catering
 
 # Importing core is also what reads config.ini and calls db.init(CONNECTION_STRING).
 from hotel.core import *            # noqa: F401,F403
@@ -64,6 +65,7 @@ from hotel.concierge import *       # noqa: F401,F403
 from hotel.admin import *           # noqa: F401,F403
 from hotel.onboarding import *      # noqa: F401,F403
 from hotel.conference import *      # noqa: F401,F403
+from hotel.conference_catering import *  # noqa: F401,F403
 
 # Set up logging
 #logging.basicConfig(filename='hotel_management.log', level=logging.DEBUG, format='%(asctime)s:%(levelname)s:%(message)s')
@@ -196,7 +198,8 @@ def main():
             "1. Customer",
             "2. Admin",
             "3. Bookings",
-            "4. Exit",
+            "4. Conference Rooms",
+            "5. Exit",
         ], subtitle=customer.customer_session_label())
         choice = input("Enter your choice: ").strip()
         if choice == '1':
@@ -206,6 +209,8 @@ def main():
         elif choice == '3':
             bookings.booking_panel()
         elif choice == '4':
+            conference.conference_guest_panel()
+        elif choice == '5':
             logging.info("Exiting Program")
             time.sleep(2)
             sys.exit(0)
