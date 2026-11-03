@@ -7,6 +7,7 @@ from hotel import db
 from hotel import ui
 from hotel import session
 from hotel import core
+from hotel import payments
 
 __all__ = [
     'CONFERENCE_SETUP_TYPES',
@@ -622,7 +623,7 @@ def book_conference_room(customer_id=None):
     grand = round(total + tax, 2)
     logging.info(f"Quote: {hours:.2f} hr x ${room[4]:,.2f} = ${total:,.2f} + tax ${tax:,.2f} = ${grand:,.2f}")
     # card payment required
-    if not __import__("hotel.payments", fromlist=["process_credit_card"]).process_credit_card(grand):
+    if not payments.process_credit_card(grand):
         logging.info("Payment declined. No booking created.")
         return
     booking_id = create_conference_booking(
