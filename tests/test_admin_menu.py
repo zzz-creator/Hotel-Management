@@ -57,6 +57,26 @@ _ADMIN_ONLY = {
     "reset_user_password",
 }
 
+# The admin menu's categories, in order. Pinned by name, not by count: a count
+# can only fail when someone ADDS a category -- which is a deliberate change --
+# and passes silently when one disappears, so it guards the wrong direction.
+# The exit-path tests derive their choice from the length of the live menu, so
+# they cannot drift when a category is added.
+_ADMIN_CATEGORIES = [
+    "Reservations Management",
+    "Guest Services",
+    "Items & Services",
+    "Rooms & Housekeeping",
+    "Conference Catering",
+    "Accounts",
+    "Loyalty",
+    "Discounts & Pricing",
+    "Invoices & Reports",
+    "Security & Access",
+    "Setup & Destructive",
+    "Exit Admin Panel",
+]
+
 
 def _entry_names(menu):
     names = set()
@@ -89,6 +109,9 @@ class AdminMenuParityTests(unittest.TestCase):
             menu = app._admin_menu(role)
             self.assertEqual(menu[-1], ("Exit Admin Panel", None))
             self.assertEqual([c for c, e in menu if e is None], ["Exit Admin Panel"])
+
+    def test_admin_categories_are_exactly_as_declared(self):
+        self.assertEqual([c for c, _e in app._admin_menu("admin")], _ADMIN_CATEGORIES)
 
     def test_every_entry_is_callable_and_binds_its_declared_kwargs(self):
         for role in ("staff", "manager", "admin"):
@@ -178,9 +201,10 @@ class AdminPanelTests(unittest.TestCase):
              patch_main("CURRENT_USER", "desk01"), \
              mock.patch.object(app.ui, "pause"), \
              mock.patch.object(app.ui, "show_menu") as menu, \
-             mock.patch("builtins.input", return_value="5"):
+             mock.patch("builtins.input",
+                        return_value=str(len(app._admin_menu("staff")))):
             app.admin_panel()
-        # Staff has 5 categories; 5 = Exit Admin Panel.
+        # The last staff entry is Exit Admin Panel; its index is the menu length.
         self.assertEqual(menu.call_count, 1)
         self.assertEqual(menu.call_args.kwargs.get("subtitle"), "Signed in as desk01 (staff)")
 
@@ -217,15 +241,17 @@ class AdminPanelTests(unittest.TestCase):
         # the inner session ended -- a second live session on the unlocked role with
         # no password entered for it. The tell is the number of menu renders: the
         # inner session draws exactly one, and a fallen-through outer frame draws a
-        # second. A third admin_login would also be a fall-through, but "11" exits
-        # the admin menu before one is needed, so the menu count is the real pin.
+        # second. A third admin_login would also be a fall-through, but the exit
+        # choice ends the admin menu before one is needed, so the menu count is the
+        # real pin.
         with patch_main("admin_login",
                                side_effect=[(False, "admin", True), (True, "admin", False)]) as login, \
              patch_main("CURRENT_USER", "desk01"), \
              mock.patch.object(app.ui, "pause"), \
              mock.patch.object(app.ui, "show_menu") as menu, \
-             mock.patch("builtins.input", return_value="12"):
+             mock.patch("builtins.input",
+                        return_value=str(len(app._admin_menu("admin")))):
             app.admin_panel()
-        # Admin has 12 categories; 12 = Exit Admin Panel.
+        # The last admin entry is Exit Admin Panel; its index is the menu length.
         self.assertEqual(login.call_count, 2)
         self.assertEqual(menu.call_count, 1)
