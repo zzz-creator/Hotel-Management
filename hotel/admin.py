@@ -24,6 +24,7 @@ from hotel import onboarding
 from hotel import orders
 from hotel import reservations as _mod_reservations
 from hotel import rooms
+from hotel import conference
 
 __all__ = [
     'clear_lockout',
@@ -428,7 +429,8 @@ def _admin_menu(role):
                 entry("Manage Amenities", orders.manage_amenities_menu),
                 entry("Manage Promotions", orders.manage_promotions_menu),
             ]),
-            ("Rooms & Housekeeping", [entry("Rooms & Housekeeping", rooms.rooms_admin_menu)]),
+            ("Rooms & Housekeeping", [entry("Rooms & Housekeeping", rooms.rooms_admin_menu),
+                                     entry("Conference Rooms", conference.conference_room_admin_menu)]),
             ("Accounts", [
                 entry("Add User", add_user),
                 entry("Delete User", delete_user),

@@ -8,6 +8,7 @@ from hotel import items
 from hotel import loyalty
 from hotel import rooms
 from hotel import orders
+from hotel import conference
 
 __all__ = [
     'ONBOARDING_SETTING',
@@ -164,6 +165,32 @@ def setup_status():
                        "empty -- the dashboard and housekeeping board have nothing to show"))
     else:
         checks.append(("Rooms", True, f"{rooms} room(s)"))
+
+    # Conference rooms are optional for a hotel with no meeting space, so an empty
+    # table is green-but-noted (like reference data), while an unapplied migration
+    # (034) is red because the table itself is unreachable.
+    conf_rooms = core._scalar_count("SELECT COUNT(*) FROM ConferenceRooms")
+    if conf_rooms is None:
+        checks.append(("Conference rooms", False,
+                       "ConferenceRooms is unreachable -- migration 034 applied?"))
+    elif conf_rooms == 0:
+        checks.append(("Conference rooms", True,
+                       "none configured (optional) -- add from Admin Panel -> Rooms & Housekeeping -> Conference Rooms"))
+    else:
+        unpriced = core._scalar_count(
+            "SELECT COUNT(*) FROM ConferenceRooms WHERE ISNULL(HourlyRate, 0) <= 0")
+        no_setup = core._scalar_count(
+            "SELECT COUNT(*) FROM ConferenceRooms c WHERE NOT EXISTS "
+            "(SELECT 1 FROM ConferenceRoomSetups s WHERE s.RoomID = c.RoomID)")
+        if unpriced:
+            checks.append(("Conference rooms", False,
+                           f"{unpriced} of {conf_rooms} room(s) have no hourly rate"))
+        elif no_setup:
+            checks.append(("Conference rooms", False,
+                           f"{no_setup} room(s) have no setup type"))
+        else:
+            checks.append(("Conference rooms", True,
+                           f"{conf_rooms} room(s), all priced with setups"))
 
     # A rate of 0 (or NULL) is as unusable as a missing row: check-out would post a
     # zero-dollar room charge. Only ACTIVE categories matter -- a retired category with no
@@ -530,6 +557,55 @@ def _offer_staff_accounts(wizard=False):
             logging.info("Answer 1 or 2.")
 
 
+def _offer_conference_rooms(wizard=False):
+    """Optional conference room setup during onboarding. Returns how many rooms were added."""
+    added = 0
+    existing = core._scalar_count("SELECT COUNT(*) FROM ConferenceRooms")
+    if existing is None:
+        logging.info("ConferenceRooms is unreachable -- migration 034 applied?")
+        return 0
+    if existing:
+        logging.info("Conference rooms already exist (%d). Skipping the seed -- manage "
+                     "them from Admin Panel -> Rooms & Housekeeping -> Conference Rooms.",
+                     existing)
+        return 0
+    if not ui.ask_confirmation("Configure conference rooms now? (optional)", default="n"):
+        logging.info("Skipped. Add them later from Admin Panel -> Rooms & Housekeeping "
+                     "-> Conference Rooms.")
+        return 0
+    while True:
+        room_number = input("Room number/label (e.g. CR-101, blank to finish): ").strip()
+        if not room_number:
+            break
+        name = input("Room name: ").strip() or room_number
+        try:
+            capacity = int(input("Capacity: ").strip())
+        except ValueError:
+            logging.info("Invalid capacity. Skipping this room.")
+            continue
+        try:
+            rate = float(input("Hourly rate: ").strip())
+        except ValueError:
+            logging.info("Invalid rate. Skipping this room.")
+            continue
+        new_id = conference.add_conference_room(room_number, name, capacity, rate)
+        if new_id is None:
+            logging.info("Could not add that room. Check the log and try again.")
+            continue
+        added += 1
+        # At least one setup type per room, so the room is actually bookable.
+        st = input("Setup type (" + ", ".join(conference.CONFERENCE_SETUP_TYPES)
+                   + ", blank to skip): ").strip()
+        if st:
+            try:
+                cap = int(input("Capacity for that setup (blank = room capacity): ").strip() or capacity)
+            except ValueError:
+                cap = capacity
+            conference.add_room_setup(room_number, st, cap)
+        logging.info("Added conference room %s.", room_number)
+    return added
+
+
 def _reference_data_counts():
     """(amenities, promotions, discounts) row counts, or None where the table is unreachable."""
     return (core._scalar_count("SELECT COUNT(*) FROM Amenities"),
@@ -600,6 +676,7 @@ def _setup_summary_rows():
         ("Active categories priced", f"{priced} of {len(active)}"),
         ("Sellable items", _fmt(core._scalar_count("SELECT COUNT(*) FROM Items"))),
         ("Rooms", _fmt(core._scalar_count("SELECT COUNT(*) FROM Rooms"))),
+        ("Conference rooms", _fmt(core._scalar_count("SELECT COUNT(*) FROM ConferenceRooms"))),
         ("Staff accounts", _fmt(core._scalar_count("SELECT COUNT(*) FROM Users"))),
         ("Amenities", _fmt(core._scalar_count("SELECT COUNT(*) FROM Amenities"))),
         ("Promotions", _fmt(core._scalar_count("SELECT COUNT(*) FROM Promotions"))),
@@ -617,7 +694,8 @@ def _wizard_step_menu():
             "4. Item catalogue",
             "5. Rooms",
             "6. Reference data",
-            "7. Back to the review",
+            "7. Conference rooms",
+            "8. Back to the review",
         ])
         try:
             choice = input("Enter your choice: ").strip()
@@ -636,9 +714,11 @@ def _wizard_step_menu():
         elif choice == "6":
             _offer_reference_data(wizard=True)
         elif choice == "7":
+            _offer_conference_rooms(wizard=True)
+        elif choice == "8":
             return
         else:
-            logging.info("Answer 1 to 7.")
+            logging.info("Answer 1 to 8.")
 
 
 def run_first_run_onboarding():
@@ -804,6 +884,10 @@ def run_first_run_onboarding():
                      "Skipping this is fine: the first booking registers its own room.")
         _offer_room_layout(wizard=True)
 
+    # --- 4b. Conference rooms (optional). ---
+    ui.info("\n-- Step 4b: conference rooms (optional) --")
+    _offer_conference_rooms(wizard=True)
+
     # --- 5. Optional reference data. ---
     ui.info("\n-- Step 5: reference data (optional) --")
     _offer_reference_data(wizard=True)
@@ -924,8 +1008,9 @@ def onboarding_checklist(role="admin"):
             "6. Edit hotel settings (tax, loyalty, lockout)",
             "7. Manage loyalty tiers",
             "8. Manage amenity, promotion and discount reference data",
-            "9. Re-check",
-            "10. Back to Admin Panel",
+            "9. Configure conference rooms",
+            "10. Re-check",
+            "11. Back to Admin Panel",
         ])
         try:
             choice = input("Enter your choice: ").strip()
@@ -965,8 +1050,10 @@ def onboarding_checklist(role="admin"):
         elif choice == '8':
             _offer_reference_data()
         elif choice == '9':
-            continue
+            _offer_conference_rooms()
         elif choice == '10':
+            continue
+        elif choice == '11':
             return
         else:
             logging.info("Invalid choice. Please try again.")

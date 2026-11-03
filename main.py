@@ -44,6 +44,7 @@ from hotel import onboarding
 from hotel import customer
 from hotel import admin
 from hotel import bookings
+from hotel import conference
 
 # Importing core is also what reads config.ini and calls db.init(CONNECTION_STRING).
 from hotel.core import *            # noqa: F401,F403
@@ -62,6 +63,7 @@ from hotel.customer import *        # noqa: F401,F403
 from hotel.concierge import *       # noqa: F401,F403
 from hotel.admin import *           # noqa: F401,F403
 from hotel.onboarding import *      # noqa: F401,F403
+from hotel.conference import *      # noqa: F401,F403
 
 # Set up logging
 #logging.basicConfig(filename='hotel_management.log', level=logging.DEBUG, format='%(asctime)s:%(levelname)s:%(message)s')

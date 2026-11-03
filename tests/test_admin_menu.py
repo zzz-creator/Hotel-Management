@@ -47,6 +47,7 @@ _ADMIN = _STAFF - {"comp_item_to_room"} | _GUEST_ACCOUNT_FUNCS | {
     "manage_pricing_rules", "loyalty_admin_menu", "export_reports_menu",
     "invoices_menu", "search_customer_profiles", "door_access_menu",
     "delete_all_reservations", "onboarding_checklist",
+    "conference_room_admin_menu",
 }
 
 _ADMIN_ONLY = {

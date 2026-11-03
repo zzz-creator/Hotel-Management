@@ -784,6 +784,49 @@ GO
 /****** Migration 018: booking deposits, prepayments and refunds ******/
 ALTER TABLE [dbo].[Invoices] ADD [PrepaidAmount] [decimal](12, 2) NOT NULL CONSTRAINT [DF_Invoices_PrepaidAmount] DEFAULT ((0))
 GO
+/****** Migration 034: conference room catalog (Phase A) ******/
+CREATE TABLE [dbo].[ConferenceRooms](
+	[RoomID] [int] IDENTITY(1,1) NOT NULL,
+	[RoomNumber] [nvarchar](50) NOT NULL,
+	[Name] [nvarchar](100) NOT NULL,
+	[Capacity] [int] NOT NULL CONSTRAINT [DF_ConferenceRooms_Capacity] DEFAULT ((0)),
+	[HourlyRate] [decimal](10, 2) NOT NULL CONSTRAINT [DF_ConferenceRooms_HourlyRate] DEFAULT ((0)),
+	[Description] [nvarchar](255) NULL,
+	[Active] [bit] NOT NULL CONSTRAINT [DF_ConferenceRooms_Active] DEFAULT ((1)),
+	[CreatedAt] [datetime] NOT NULL CONSTRAINT [DF_ConferenceRooms_CreatedAt] DEFAULT (getdate()),
+PRIMARY KEY CLUSTERED 
+(
+	[RoomID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+ CONSTRAINT [UQ_ConferenceRooms_RoomNumber] UNIQUE NONCLUSTERED 
+(
+	[RoomNumber] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+CREATE TABLE [dbo].[ConferenceRoomSetups](
+	[SetupID] [int] IDENTITY(1,1) NOT NULL,
+	[RoomID] [int] NOT NULL,
+	[SetupType] [nvarchar](50) NOT NULL,
+	[Capacity] [int] NOT NULL CONSTRAINT [DF_ConferenceRoomSetups_Capacity] DEFAULT ((0)),
+	[Active] [bit] NOT NULL CONSTRAINT [DF_ConferenceRoomSetups_Active] DEFAULT ((1)),
+PRIMARY KEY CLUSTERED 
+(
+	[SetupID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[ConferenceRoomSetups]  WITH CHECK ADD  CONSTRAINT [FK_ConferenceRoomSetups_Room] FOREIGN KEY([RoomID])
+REFERENCES [dbo].[ConferenceRooms] ([RoomID]) ON DELETE CASCADE
+GO
+CREATE UNIQUE INDEX [UX_ConferenceRoomSetups_Room_Setup] ON [dbo].[ConferenceRoomSetups] ([RoomID], [SetupType])
+GO
+ALTER TABLE [dbo].[ConferenceRooms]  WITH CHECK ADD  CONSTRAINT [CK_ConferenceRooms_Capacity] CHECK  (([Capacity]>=(0)))
+GO
+ALTER TABLE [dbo].[ConferenceRooms]  WITH CHECK ADD  CONSTRAINT [CK_ConferenceRooms_HourlyRate] CHECK  (([HourlyRate]>=(0)))
+GO
+ALTER TABLE [dbo].[ConferenceRoomSetups]  WITH CHECK ADD  CONSTRAINT [CK_ConferenceRoomSetups_Capacity] CHECK  (([Capacity]>=(0)))
+GO
 /****** Structural parity with a migrated database ******/
 -- Everything below already exists on any database built by applying migrations/001-025,
 -- but was missing here, so a fresh install from this file shipped with weaker guarantees

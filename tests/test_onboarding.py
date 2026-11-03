@@ -255,7 +255,7 @@ class CreateFirstUserTests(unittest.TestCase):
              patch_main("setup_status", return_value=ChecklistGatingTests.READY), \
              mock.patch.object(app.ui, "pause"):
             with mock.patch("builtins.input",
-                            ChecklistGatingTests()._scripted_input(["2", "10"])[0]):
+                            ChecklistGatingTests()._scripted_input(["2", "11"])[0]):
                 app.onboarding_checklist("admin")
         add_user.assert_called_once_with("master", "pw", "admin")
 
@@ -842,7 +842,7 @@ class ChecklistGatingTests(unittest.TestCase):
 
     def test_admin_is_offered_the_actions(self):
         with patch_main("setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["10"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["11"])[0]), \
              mock.patch.object(app.ui, "show_menu") as show_menu:
             app.onboarding_checklist("admin")
         self.assertEqual(show_menu.call_args[0][0], "Setup actions")
@@ -851,7 +851,7 @@ class ChecklistGatingTests(unittest.TestCase):
         # An admin with a partially-filled catalogue needs to add their own item, which the
         # bare seed_default_items() call could not do.
         with patch_main("setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["3", "10"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["3", "11"])[0]), \
              patch_main("_offer_item_catalogue", return_value=2) as offer_items, \
              patch_main("seed_default_items") as seed, \
              mock.patch.object(app.ui, "pause"):
@@ -863,7 +863,7 @@ class ChecklistGatingTests(unittest.TestCase):
         # wizard=True would label the exit "Skip for now", which reads wrong from a screen
         # an admin deliberately navigated to.
         with patch_main("setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["3", "10"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["3", "11"])[0]), \
              patch_main("_offer_item_catalogue", return_value=0) as offer_items, \
              mock.patch.object(app.ui, "pause"):
             app.onboarding_checklist("admin")
@@ -873,7 +873,7 @@ class ChecklistGatingTests(unittest.TestCase):
         # Not create_first_user(): that one refuses once any account exists, which is
         # right for an unauthenticated wizard and wrong for a logged-in admin.
         with patch_main("setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["1", "bob", "s", "10"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["1", "bob", "s", "11"])[0]), \
              patch_main("user_exists", return_value=False), \
              patch_main("_prompt_new_password", return_value="pw"), \
              patch_main("add_user_with_password") as add_user, \
@@ -888,7 +888,7 @@ class ChecklistGatingTests(unittest.TestCase):
             with self.subTest(role=expected):
                 with patch_main("setup_status", return_value=self.READY), \
                      mock.patch("builtins.input",
-                                self._scripted_input(["1", "bob", letter, "10"])[0]), \
+                                self._scripted_input(["1", "bob", letter, "11"])[0]), \
                      patch_main("user_exists", return_value=False), \
                      patch_main("_prompt_new_password", return_value="pw"), \
                      patch_main("add_user_with_password") as add_user, \
@@ -901,7 +901,7 @@ class ChecklistGatingTests(unittest.TestCase):
         # no branch would create an account nobody can sign in to.
         with patch_main("setup_status", return_value=self.READY), \
              patch_main("_prompt_role", return_value="manager") as prompt_role, \
-             mock.patch("builtins.input", self._scripted_input(["1", "bob", "m", "10"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["1", "bob", "m", "11"])[0]), \
              patch_main("user_exists", return_value=False), \
              patch_main("_prompt_new_password", return_value="pw"), \
              patch_main("add_user_with_password"), \
@@ -911,7 +911,7 @@ class ChecklistGatingTests(unittest.TestCase):
 
     def test_existing_username_is_not_re_inserted(self):
         with patch_main("setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["1", "bob", "a", "10"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["1", "bob", "a", "11"])[0]), \
              patch_main("user_exists", return_value=True), \
              patch_main("_prompt_new_password", return_value="pw"), \
              patch_main("add_user_with_password") as add_user, \
@@ -921,7 +921,7 @@ class ChecklistGatingTests(unittest.TestCase):
 
     def test_role_check_is_case_insensitive(self):
         with patch_main("setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["10"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["11"])[0]), \
              mock.patch.object(app.ui, "show_menu") as show_menu:
             app.onboarding_checklist("ADMIN")
         show_menu.assert_called_once()
@@ -929,7 +929,7 @@ class ChecklistGatingTests(unittest.TestCase):
     def test_seven_returns_rather_than_looping_forever(self):
         # The menu must have a way out that does not depend on the database.
         with patch_main("setup_status", return_value=self.READY), \
-             mock.patch("builtins.input", self._scripted_input(["10"])[0]), \
+             mock.patch("builtins.input", self._scripted_input(["11"])[0]), \
              mock.patch.object(app.ui, "show_menu") as show_menu:
             app.onboarding_checklist("admin")
         self.assertEqual(show_menu.call_count, 1)
@@ -949,29 +949,29 @@ class ChecklistActionTests(unittest.TestCase):
 
     def test_rate_action_opens_the_rate_editor(self):
         with patch_main("_offer_room_rates", return_value=0) as rates:
-            self._drive(["5", "10"])
+            self._drive(["5", "11"])
         rates.assert_called_once_with()
 
     def test_hotel_settings_action_opens_the_settings_prompts(self):
         with patch_main("_offer_hotel_settings") as settings:
-            self._drive(["6", "10"])
+            self._drive(["6", "11"])
         settings.assert_called_once_with()
 
     def test_loyalty_action_opens_the_loyalty_menu_when_enabled(self):
         with patch_main("get_loyalty_enabled", return_value=True), \
              patch_main("loyalty_admin_menu") as loyalty_menu:
-            self._drive(["7", "10"])
+            self._drive(["7", "11"])
         loyalty_menu.assert_called_once_with()
 
     def test_loyalty_action_refuses_when_the_programme_is_off(self):
         with patch_main("get_loyalty_enabled", return_value=False), \
              patch_main("loyalty_admin_menu") as loyalty_menu:
-            self._drive(["7", "10"])
+            self._drive(["7", "11"])
         loyalty_menu.assert_not_called()
 
     def test_reference_data_action_opens_the_reference_menu(self):
         with patch_main("_offer_reference_data") as reference:
-            self._drive(["8", "10"])
+            self._drive(["8", "11"])
         reference.assert_called_once_with()
 
 

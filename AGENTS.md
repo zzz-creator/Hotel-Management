@@ -88,6 +88,7 @@ re-runnable; it is not part of the runtime.
 | `hotel/bookings.py` | The public booking desk |
 | `hotel/customer.py` | Guest accounts, sign-in, the guest panel |
 | `hotel/concierge.py` | Concierge requests |
+| `hotel/conference.py` | Conference room catalog (Phase A): rooms, setups, rates, admin CRUD |
 | `hotel/admin.py` | The Admin Panel, users, the IT/valet panels |
 | `hotel/onboarding.py` | The first-run wizard and setup checklist |
 
