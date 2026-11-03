@@ -29,6 +29,7 @@ __all__ = [
     'onboarding_checklist',
     '_offer_item_catalogue',
     '_offer_room_layout',
+    '_offer_conference_rooms',
 ]
 
 

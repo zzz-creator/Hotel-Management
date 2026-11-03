@@ -1053,6 +1053,7 @@ class WizardStepGuardsTests(unittest.TestCase):
         self.rates = mock.MagicMock(return_value=0)
         self.staff = mock.MagicMock(return_value=0)
         self.reference = mock.MagicMock()
+        self.conference = mock.MagicMock()
         self.step_menu = mock.MagicMock()
         self.settings = mock.MagicMock()
         fake_ui = mock.MagicMock()
@@ -1077,7 +1078,8 @@ class WizardStepGuardsTests(unittest.TestCase):
              patch_main("_offer_room_rates", self.rates), \
              patch_main("_offer_staff_accounts", self.staff), \
              patch_main("_offer_reference_data", self.reference), \
-             patch_main("_wizard_step_menu", self.step_menu), \
+             patch_main("_offer_conference_rooms", self.conference), \
+              patch_main("_wizard_step_menu", self.step_menu), \
              mock.patch("builtins.input", fake_input), \
              patch_main("_prompt_new_password", return_value="pw"), \
              run_with([], answers):
