@@ -72,7 +72,14 @@ records every statement so a bad column name or a missing `?` fails in the test 
 against your data.
 
 ```powershell
-python -m unittest discover -s tests        # 360 tests
+python -m unittest discover -s tests -b < NUL   # 445 tests; -b buffers output (clean console), < NUL unblocks "Press any key"
+```
+
+For the full unbuffered stream (useful when debugging a hang), run the canonical runner, which
+writes everything to `exports/test-runs/test-*.log` and prints only the tail on failure:
+
+```powershell
+.\run_tests.ps1
 ```
 
 The static and live checks are separate, and each exits non-zero on failure:
