@@ -47,7 +47,7 @@ _ADMIN = _STAFF - {"comp_item_to_room"} | _GUEST_ACCOUNT_FUNCS | {
     "manage_pricing_rules", "loyalty_admin_menu", "export_reports_menu",
     "invoices_menu", "search_customer_profiles", "door_access_menu",
     "delete_all_reservations", "onboarding_checklist",
-    "conference_room_admin_menu",
+    "conference_room_admin_menu", "catering_admin_menu",
 }
 
 _ADMIN_ONLY = {
@@ -224,8 +224,8 @@ class AdminPanelTests(unittest.TestCase):
              patch_main("CURRENT_USER", "desk01"), \
              mock.patch.object(app.ui, "pause"), \
              mock.patch.object(app.ui, "show_menu") as menu, \
-             mock.patch("builtins.input", return_value="11"):
+             mock.patch("builtins.input", return_value="12"):
             app.admin_panel()
-        # Admin has 11 categories; 11 = Exit Admin Panel.
+        # Admin has 12 categories; 12 = Exit Admin Panel.
         self.assertEqual(login.call_count, 2)
         self.assertEqual(menu.call_count, 1)
