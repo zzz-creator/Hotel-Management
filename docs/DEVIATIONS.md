@@ -31,6 +31,22 @@ commit**, so a declined card cannot leave a room reserved. Replacing that as a s
 of a schema change, with no live-database test of the book → check out → cancel path, is
 how a working booking system stops booking.
 
+**Status:** deferred (card `hm-stayledger`). Not in progress. Reopen only when ALL of
+these tripwires are satisfied, in this order:
+
+1. Concurrency Phase 2 closed by measurement — `tests/stress_concurrency.py` (or its
+   successor) shows the claim/archive/write path holding under N concurrent workers on a
+   scratch database, not just in reasoning.
+2. A `RoomNumber` read-site inventory exists: every place that reads the live
+   `Reservations` row by room number is listed, with whether it needs the *current* stay
+   (fine to keep room-keyed) or *any* stay (needs the ledger). No migration starts
+   without that list.
+3. A `verify_e2e.py` proof on a scratch database: book → check in → order → check out →
+   cancel on the new schema, all green, twice (idempotent re-run). The first live run
+   of 019-021 died three times; do not repeat that.
+
+Until then the card stays planned and this entry stays as-is.
+
 ---
 
 ## 2. `AuditLog` records actions, not diffs — closed 6 October 2026
