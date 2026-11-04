@@ -7,10 +7,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Report output. The directory itself is not tracked because both reports.py and
-# maincopycopy.py create it with os.makedirs(exist_ok=True), so a fresh clone does
-# not need it to exist.
-exports/*.csv
+# Report, invoice and test-log output. The whole directory is ignored, not just
+# *.csv: hotel/reports.py writes the report CSVs, hotel/billing.py writes
+# invoice_<id>.txt, and run_tests.ps1 logs to exports/test-runs/. Every writer
+# creates the directory with os.makedirs(exist_ok=True), so a fresh clone does
+# not need it to exist. It holds guest data, so none of it is committed.
+exports/
 
 # One-off generated analysis of this codebase. Not read by the app and not a
 # dependency of anything; tests/check_docs_sync.py also lists these as
@@ -18,9 +20,9 @@ exports/*.csv
 council-report-*.html
 council-transcript-*.md
 
-# Interactive output is logging.info on the console (maincopycopy.py:116). The
-# file handler is commented out, so nothing writes a .log today -- this is here so
-# that turning it back on does not start committing one.
+# Interactive output is logging.info on the console (main.py:78); the file
+# handler is commented out (main.py:71), so nothing writes a .log today -- this
+# is here so that turning it back on does not start committing one.
 *.log
 
 # Per-developer editors and OS cruft
