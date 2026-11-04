@@ -109,7 +109,8 @@ def edit_user():
                 if new_password != user.Password:
                     changes.append("password reset")
                 core.log_audit("UPDATE", "User", new_username,
-                          "; ".join(changes) if changes else "no effective change")
+                          "; ".join(changes) if changes else "no effective change",
+                          old_value=username, new_value=new_username)
                 logging.info(f"User '{username}' updated successfully.")
             else:
                 logging.info("No user found with that username.")

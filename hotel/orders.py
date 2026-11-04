@@ -482,7 +482,8 @@ def advance_order(order_id):
                 logging.info("Order %s was changed by another operator; your update was not applied.", order_id)
                 return current
             conn.commit()
-        core.log_audit("UPDATE", "Order", order_id, f"{current} -> {new_status} (room {room_number})")
+        core.log_audit("UPDATE", "Order", order_id, f"{current} -> {new_status} (room {room_number})",
+                       old_value=current, new_value=new_status)
         # Tell the guest in their room so the tracker reflects reality immediately.
         if room_number:
             try:
@@ -565,7 +566,9 @@ def manage_amenities_menu():
                     (name, details or None, int(raw)),
                 )
                 conn.commit()
-            core.log_audit("UPDATE", "Amenity", int(raw), f"'{amenity[1]}' -> '{name}'")
+            core.log_audit("UPDATE", "Amenity", int(raw), f"'{amenity[1]}' -> '{name}'",
+                           old_value=f"{amenity[1]} | {amenity[2] or ''}",
+                           new_value=f"{name} | {details or ''}")
             ui.success("Amenity updated.")
         elif choice == '4':
             raw = input("Amenity number to toggle: ").strip()
@@ -584,7 +587,9 @@ def manage_amenities_menu():
                 cursor.execute("UPDATE Amenities SET Active = ? WHERE AmenityID = ?",
                                (new_active, int(raw)))
                 conn.commit()
-            core.log_audit("UPDATE", "Amenity", int(raw), "Active" if new_active else "Retired")
+            core.log_audit("UPDATE", "Amenity", int(raw), "Active" if new_active else "Retired",
+                           old_value="Active" if row[0] else "Retired",
+                           new_value="Active" if new_active else "Retired")
             ui.success(f"Amenity {'reactivated' if new_active else 'retired'}.")
         elif choice == '5':
             return
@@ -647,7 +652,8 @@ def manage_promotions_menu():
                         cursor.execute("UPDATE Promotions SET Active = 0 WHERE PromotionID = ?",
                                        (int(raw),))
                         conn.commit()
-                core.log_audit("UPDATE", "Promotion", int(raw), f"'{promotion[1]}' ended")
+                core.log_audit("UPDATE", "Promotion", int(raw), f"'{promotion[1]}' ended",
+                               old_value="Active", new_value="Ended")
                 ui.success("Promotion ended.")
             else:
                 title = input(f"Title (blank to keep '{promotion[1]}'): ").strip() or promotion[1]
@@ -663,7 +669,9 @@ def manage_promotions_menu():
                         (title, details or None, code or None, int(raw)),
                     )
                     conn.commit()
-                core.log_audit("UPDATE", "Promotion", int(raw), f"'{promotion[1]}' -> '{title}'")
+                core.log_audit("UPDATE", "Promotion", int(raw), f"'{promotion[1]}' -> '{title}'",
+                               old_value=f"{promotion[1]} | {promotion[2] or ''} | {promotion[3] or ''}",
+                               new_value=f"{title} | {details or ''} | {code or ''}")
                 ui.success("Promotion updated.")
         elif choice == '2':
             title = input("Promotion title: ").strip()

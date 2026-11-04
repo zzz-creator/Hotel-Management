@@ -233,7 +233,9 @@ def update_item():
             cursor.execute("UPDATE Items SET Name = ?, Price = ?, PricingRule = ? WHERE ItemID = ?", (new_name, new_price, new_rule, item_id))
             conn.commit()
             core.log_audit("UPDATE", "Item", item_id,
-                      f"'{new_name}' @ {new_price}, rule {new_rule or 'standard'}")
+                      f"'{new_name}' @ {new_price}, rule {new_rule or 'standard'}",
+                      old_value=f"{item.Name} @ {item.Price}, rule {item.PricingRule or 'standard'}",
+                      new_value=f"{new_name} @ {new_price}, rule {new_rule or 'standard'}")
             logging.info(f"Item with ID {item_id} updated successfully.")
     except Exception as e:
         logging.error(f"Error updating item: {e}")

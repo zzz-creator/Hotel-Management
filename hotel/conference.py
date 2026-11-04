@@ -173,7 +173,9 @@ def set_conference_room_active(room_number, active):
                 return False
             conn.commit()
         core.log_audit("UPDATE", "ConferenceRoom", room[0],
-                       f"Active -> {1 if active else 0}")
+                       f"Active -> {1 if active else 0}",
+                       old_value="1" if room[5] else "0",
+                       new_value="1" if active else "0")
         return True
     except Exception as e:
         logging.error(f"Error updating conference room active flag: {e}")

@@ -729,7 +729,8 @@ def admin_adjust_loyalty_points():
             return
         if delta > 0:
             add_points_to_customer(customer_id, delta, reason='admin_adjust')
-            core.log_audit("ADJUST", "LoyaltyAccount", f"customer:{customer_id}", f"+{delta} points (admin adjust)")
+            core.log_audit("ADJUST", "LoyaltyAccount", f"customer:{customer_id}", f"+{delta} points (admin adjust)",
+                           old_value=str(current), new_value=str(current + delta))
             logging.info(f"Added {delta} points to customer {customer_id}.")
         else:
             # Removing points - ensure we don't go negative
@@ -739,7 +740,8 @@ def admin_adjust_loyalty_points():
                 return
             success = redeem_points_by_customer(customer_id, remove, reason='admin_remove')
             if success:
-                core.log_audit("ADJUST", "LoyaltyAccount", f"customer:{customer_id}", f"-{remove} points (admin remove)")
+                core.log_audit("ADJUST", "LoyaltyAccount", f"customer:{customer_id}", f"-{remove} points (admin remove)",
+                           old_value=str(current), new_value=str(current - remove))
                 logging.info(f"Removed {remove} points from customer {customer_id}.")
             else:
                 logging.info("Failed to remove points.")

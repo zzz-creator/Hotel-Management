@@ -170,7 +170,8 @@ def revoke_active_key_cards(room_number, reason=""):
             )
             conn.commit()
             for card in cards:
-                core.log_audit("REVOKE", "KeyCard", card, f"Room {room_number}: {reason or 'revoked'}")
+                core.log_audit("REVOKE", "KeyCard", card, f"Room {room_number}: {reason or 'revoked'}",
+                               old_value="Active", new_value="Revoked")
             return cursor.rowcount or 0
     except Exception as e:
         logging.debug(f"Key card revoke skipped ({type(e).__name__}: {e})")
@@ -194,7 +195,8 @@ def move_key_cards(old_room_number, new_room_number):
             if moved:
                 conn.commit()
                 core.log_audit("UPDATE", "KeyCard", new_room_number,
-                          f"{moved} active card(s) moved from room {old_room_number}")
+                          f"{moved} active card(s) moved from room {old_room_number}",
+                          old_value=str(old_room_number), new_value=str(new_room_number))
             return moved
     except Exception as e:
         logging.debug(f"Key card move skipped ({type(e).__name__}: {e})")

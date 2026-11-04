@@ -699,7 +699,8 @@ def edit_reservation():
                     conn.commit()
                     core.log_audit("UPDATE", "Reservation", new_room_number,
                               f"Moved from room {old_room_number}; guest {new_last_name} {new_first_name}; "
-                              f"stay re-rated to the new room's category")
+                              f"stay re-rated to the new room's category",
+                              old_value=str(old_room_number), new_value=str(new_room_number))
                     logging.info(f"Reservation for room {old_room_number} updated successfully. \n New details: Room Number: {new_room_number}, Floor: {new_floor}, Last Name: {new_last_name}, First Name: {new_first_name}")
                 else:
                     # Same room: just update guest details / floor.
