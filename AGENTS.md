@@ -49,6 +49,7 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 | `hotel/__init__.py` | Package marker only — deliberately imports no submodule, so nothing runs at package import time and the tier order below cannot cycle |
 | `hotel/ui.py` | `rich`-based console helpers (menus, tables, prompts, `clear_screen`/`pause`) |
 | `hotel/reports.py` | CSV report exports, also a standalone CLI (`python -m hotel.reports`) |
+| `hotel/night_audit.py` | Night-audit snapshot writer: `run_night_audit()`, `is_audited()` (037) |
 | `hotel/db.py` | Connection string + `get_connection()` context manager |
 | `hotel/clearance.py` | Clearance-card catalog: SVG name extraction, tier×category guest matrix, role cards, room/username lookup, export. Reads its card assets from `assets/Clearance cards/` |
 | `hotel/clearance_ui.py` | Tkinter "tap your keycard" window: card image, extracted name, scan entry at the bottom |
@@ -92,6 +93,7 @@ re-runnable; it is not part of the runtime.
 | `hotel/conference_catering.py` | Conference catering module (Phase D) |
 | `hotel/admin.py` | The Admin Panel, users, the IT/valet panels |
 | `hotel/onboarding.py` | The first-run wizard and setup checklist |
+| `hotel/night_audit.py` | Night-audit snapshot writer (037): `run_night_audit()`, `is_audited()` |
 
 ### Schema
 

@@ -897,6 +897,13 @@ CREATE TABLE [dbo].[ConferenceCateringOrders](
 PRIMARY KEY CLUSTERED ([CateringOrderID] ASC) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
+CREATE TABLE [dbo].[NightAudit](
+	[AuditDate] [date] NOT NULL,
+	[CompletedAt] [datetime2](7) NOT NULL CONSTRAINT [DF_NightAudit_CompletedAt] DEFAULT (sysutcdatetime()),
+	[CompletedBy] [nvarchar](50) NULL,
+ CONSTRAINT [PK_NightAudit] PRIMARY KEY CLUSTERED ([AuditDate] ASC) ON [PRIMARY]
+) ON [PRIMARY]
+GO
 ALTER TABLE [dbo].[ConferenceCateringOrders] WITH CHECK ADD CONSTRAINT [FK_ConfCat_Booking] FOREIGN KEY([BookingID]) REFERENCES [dbo].[ConferenceBookings]([BookingID]) ON DELETE CASCADE
 GO
 ALTER TABLE [dbo].[ConferenceCateringOrders] WITH CHECK ADD CONSTRAINT [CK_ConfCat_Status] CHECK ([Status] IN ('Requested','Confirmed','Delivered','Cancelled'))

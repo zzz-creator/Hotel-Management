@@ -55,7 +55,7 @@ CODE_FILES = (
     'hotel/orders.py', 'hotel/notifications.py', 'hotel/bookings.py',
     'hotel/customer.py', 'hotel/concierge.py', 'hotel/admin.py', 'hotel/onboarding.py',
     'hotel/reports.py', 'hotel/ui.py', 'hotel/db.py',
-    'hotel/clearance.py', 'hotel/clearance_ui.py',
+    'hotel/clearance.py', 'hotel/clearance_ui.py', 'hotel/night_audit.py',
     'tests/patch_main.py',
 )
 DOC_FILES = ('AGENTS.md', 'docs/SCHEMA.md', 'docs/BOOKING.md', 'docs/DEVIATIONS.md',

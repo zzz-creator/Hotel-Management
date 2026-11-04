@@ -56,6 +56,7 @@ install and is kept in sync by hand — a schema change lands in **both** places
 | 034 | `034_conference_rooms.sql` | `ConferenceRooms` + `ConferenceRoomSetups` (Phase A of the conference room system) |
 | 035 | `035_conference_bookings.sql` | `ConferenceBookings`, `ConferenceBookingEquipment`, `ConferenceInvoices` (Phase B) |
 | 036 | `036_conference_catering.sql` | `ConferenceCateringOrders` (Phase D) |
+| 037 | `037_night_audit.sql` | `NightAudit` (one row per business date) |
 ### Fresh database
 
 Either run `database.sql` once, or apply `migrations/001` … `migrations/029` in order in
@@ -297,6 +298,8 @@ fresh number rather than failing the issue.
 **including denials**, which is what makes the log worth having.
 
 ### Audit
+
+**`NightAudit`** — `AuditDate` date PK, `CompletedAt` datetime2, `CompletedBy` nvarchar(50). One row per business date; written by `hotel/night_audit.py:run_night_audit()`. No reader yet (see DEVIATIONS.md §3).
 
 **`AuditLog`** — `AuditID` identity PK, `CreatedAt`, `Username`, `Action`, `EntityType`,
 `EntityID`, `Details`, `OldValue`, `NewValue` (026).
