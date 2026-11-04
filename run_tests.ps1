@@ -20,12 +20,20 @@
 #   .\run_tests.ps1                 # run the whole suite
 #   .\run_tests.ps1 -Pattern foo    # run tests matching 'foo'
 #   .\run_tests.ps1 -Timeout 120    # override the timeout (seconds)
+#   .\run_tests.ps1 -Db             # also run the DB/schema checks (opt-in)
+#
+# -Db runs check_schema_sync.py, check_migration_sql.py,
+# check_applied_migrations.py and verify_e2e.py after the suite. Opt-in because
+# verify_e2e.py creates and drops its own database and needs a login with
+# CREATE DATABASE authority. check_applied_migrations.py and verify_e2e.py also
+# need a live SQL Server reachable through config.ini.
 #
 # Do NOT replace this with "... | Select-Object -Last N". See AGENTS-python.md.
 
 param(
     [string]$Pattern = "",
-    [int]$Timeout = 300
+    [int]$Timeout = 300,
+    [switch]$Db
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,40 +46,70 @@ $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $log = Join-Path $logDir "test-$stamp.log"
 
 $python = "python"
+
+function Invoke-PythonStage {
+    param(
+        [string[]]$Args,
+        [int]$StageTimeout = $Timeout
+    )
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $python
+    $psi.Arguments = ($Args -join " ")
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.RedirectStandardInput = $true
+    $psi.UseShellExecute = $false
+    $psi.WorkingDirectory = $root
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    try { $proc.StandardInput.Close() } catch { }
+    $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+    $stderrTask = $proc.StandardError.ReadToEndAsync()
+    $finished = $proc.WaitForExit($StageTimeout * 1000)
+    if (-not $finished) {
+        try { $proc.Kill() } catch { }
+        $out = $stdoutTask.Result
+        $err = $stderrTask.Result
+        ($out + "`n" + $err) | Out-File -FilePath $log -Append -Encoding utf8
+        Write-Host "TIMED OUT after $StageTimeout s. Full output: $log" -ForegroundColor Red
+        return 124
+    }
+    $out = $stdoutTask.Result
+    $err = $stderrTask.Result
+    ($out + "`n" + $err) | Out-File -FilePath $log -Append -Encoding utf8
+    return $proc.ExitCode
+}
+
 $args = @("-u", "-m", "unittest", "discover", "-s", "tests")
 if ($Pattern) { $args += @("-k", $Pattern) }
 
-$psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = $python
-$psi.Arguments = ($args -join " ")
-$psi.RedirectStandardOutput = $true
-$psi.RedirectStandardError = $true
-$psi.UseShellExecute = $false
-$psi.WorkingDirectory = $root
-
-$proc = [System.Diagnostics.Process]::Start($psi)
-$stdoutTask = $proc.StandardOutput.ReadToEndAsync()
-$stderrTask = $proc.StandardError.ReadToEndAsync()
-
-$finished = $proc.WaitForExit($Timeout * 1000)
-if (-not $finished) {
-    try { $proc.Kill() } catch { }
-    $out = $stdoutTask.Result
-    $err = $stderrTask.Result
-    ($out + "`n" + $err) | Out-File -FilePath $log -Encoding utf8
-    Write-Host "TIMED OUT after $Timeout s. Full output: $log" -ForegroundColor Red
-    exit 124
-}
-
-$out = $stdoutTask.Result
-$err = $stderrTask.Result
-($out + "`n" + $err) | Out-File -FilePath $log -Encoding utf8
-$code = $proc.ExitCode
-
+"=== unit tests ===" | Out-File -FilePath $log -Encoding utf8
+$code = Invoke-PythonStage -Args $args
 Write-Host "Full output: $log"
-Write-Host "Exit code: $code"
+Write-Host "Unit tests exit code: $code"
 if ($code -ne 0) {
     Write-Host "--- tail ---"
     Get-Content $log -Tail 40
+    exit $code
 }
-exit $code
+
+if ($Db) {
+    $dbChecks = @(
+        @("-u", "tests/check_schema_sync.py"),
+        @("-u", "tests/check_migration_sql.py"),
+        @("-u", "tests/check_applied_migrations.py"),
+        @("-u", "tests/verify_e2e.py")
+    )
+    foreach ($check in $dbChecks) {
+        "`n=== $($check -join ' ') ===" | Out-File -FilePath $log -Append -Encoding utf8
+        Write-Host "Running $check ..."
+        $c = Invoke-PythonStage -Args $check -StageTimeout 600
+        Write-Host "$check exit code: $c"
+        if ($c -ne 0) {
+            Write-Host "--- tail ---"
+            Get-Content $log -Tail 40
+            exit $c
+        }
+    }
+}
+
+exit 0
