@@ -172,9 +172,9 @@ def _ensure_database_config():
                         "config.ini and fill in server, database, username and password.")
         return
     ui.info("No database connection is configured yet. Let's set one up.")
-    server = input("SQL Server host [localhost]: ").strip() or 'localhost'
-    database = input("Database name [hotelSystem]: ").strip() or 'hotelSystem'
-    username = input("Database user [admin]: ").strip() or 'admin'
+    server = ui.ask_text("SQL Server host [localhost]: ") or 'localhost'
+    database = ui.ask_text("Database name [hotelSystem]: ") or 'hotelSystem'
+    username = ui.ask_text("Database user [admin]: ") or 'admin'
     import getpass as _getpass
     password = _getpass.getpass("Database password: ")
     try:
@@ -456,9 +456,9 @@ def validate_room():
     """
     for _ in range(VALIDATE_ROOM_MAX_ATTEMPTS):
         try:
-            last_name = input("Please enter your last name: ").strip()
-            first_name = input("Please enter your first name: ").strip()
-            room_number = input("Please enter your room number (floor + 3-digit code): ").strip()
+            last_name = ui.ask_text("Please enter your last name: ")
+            first_name = ui.ask_text("Please enter your first name: ")
+            room_number = ui.ask_text("Please enter your room number (floor + 3-digit code): ")
             if not last_name or not first_name or not room_number:
                 logging.info("Please enter your last name, first name, and room number.")
                 continue
@@ -636,7 +636,7 @@ def _prompt_role(prompt="Enter the role (a)dmin/(s)taff/(m)anager: "):
     """
     try:
         while True:
-            choice = input(prompt).strip().lower()
+            choice = ui.ask_text(prompt).lower()
             if choice == 'a':
                 return 'admin'
             if choice == 's':
@@ -668,11 +668,11 @@ def _edit_general_settings():
                  f"{get_lockout_threshold()} attempt(s) for {get_lockout_duration()} min, "
                  f"guest logins capped at {get_customer_login_max_attempts()}.")
     try:
-        name = input(f"Hotel name [{get_hotel_name()}]: ").strip()
-        threshold = input(f"Failed admin logins before lockout [{get_lockout_threshold()}]: ").strip()
-        duration = input(f"Lockout length in minutes [{get_lockout_duration()}]: ").strip()
-        attempts = input(f"Guest login attempts before stop [{get_customer_login_max_attempts()}]: ").strip()
-        enabled = input(f"Loyalty programme on? (y/n) [{'y' if get_loyalty_enabled() else 'n'}]: ").strip().lower()
+        name = ui.ask_text(f"Hotel name [{get_hotel_name()}]: ")
+        threshold = ui.ask_text(f"Failed admin logins before lockout [{get_lockout_threshold()}]: ")
+        duration = ui.ask_text(f"Lockout length in minutes [{get_lockout_duration()}]: ")
+        attempts = ui.ask_text(f"Guest login attempts before stop [{get_customer_login_max_attempts()}]: ")
+        enabled = ui.ask_text(f"Loyalty programme on? (y/n) [{'y' if get_loyalty_enabled() else 'n'}]: ").lower()
     except (KeyboardInterrupt, EOFError):
         logging.info("Cancelled. Nothing was changed.")
         return
@@ -720,7 +720,7 @@ def reset_settings_to_defaults():
         return
     if not require_master_override():
         return
-    typed = input("Type RESET SETTINGS to confirm: ").strip()
+    typed = ui.ask_text("Type RESET SETTINGS to confirm: ")
     if typed != "RESET SETTINGS":
         logging.info("Confirmation text did not match. No settings were changed.")
         return
