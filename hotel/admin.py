@@ -761,6 +761,15 @@ def it_network_configuration():
 
 def it_user_accounts():
     """IT: the user-management actions, reusing the shared admin prompts."""
+    if hasattr(ui, "show_buttons"):
+        items = [
+            ("1. Add User", add_user),
+            ("2. Remove User", delete_user),
+            ("3. Reset Password", reset_user_password),
+            ("4. Update User", edit_user),
+        ]
+        ui.show_buttons("User Account Management", items)
+        return
     ui.show_menu("User Account Management", [
         "1. Add User",
         "2. Remove User",
