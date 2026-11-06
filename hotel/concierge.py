@@ -95,6 +95,13 @@ def view_my_concierge_requests():
 
 def guest_requests_menu():
     """Staff/management inbox: concierge requests and stay feedback."""
+    if hasattr(ui, "show_buttons"):
+        items = [
+            ("1. Concierge Requests", _concierge_inbox),
+            ("2. Guest Feedback", _feedback_inbox),
+        ]
+        ui.show_buttons("Guest Requests", items)
+        return
     while True:
         ui.pause()
         ui.show_menu("Guest Requests", [
