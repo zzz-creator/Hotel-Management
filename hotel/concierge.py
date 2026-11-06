@@ -37,7 +37,7 @@ def contact_concierge():
                     if row:
                         first_name = row[0] or first_name
                         last_name = row[1] or ""
-        message = ui.ask_text("Enter your message for our concierge: ")
+        message = ui.ask_text("Enter your message for our concierge: ").strip()
         if not message:
             logging.info("Empty message. Nothing was sent.")
             return
@@ -102,7 +102,7 @@ def guest_requests_menu():
             "2. Guest Feedback",
             "3. Back",
         ])
-        choice = ui.ask_text("Enter your choice: ")
+        choice = ui.ask_text("Enter your choice: ").strip()
         if choice == '1':
             _concierge_inbox()
         elif choice == '2':
@@ -143,7 +143,7 @@ def _concierge_inbox():
             if not request:
                 logging.info("Request not found.")
                 return
-            response = ui.ask_text("Enter your response to the guest: ")
+            response = ui.ask_text("Enter your response to the guest: ").strip()
             if not response:
                 logging.info("No response entered. Request left unchanged.")
                 return

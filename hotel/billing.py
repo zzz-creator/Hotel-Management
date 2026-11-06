@@ -189,7 +189,7 @@ def post_room_charge(room_number, check_in, check_out):
 
 def apply_discount(total_amount):
     try:
-        discount_code = ui.ask_text("Enter discount code: ")
+        discount_code = ui.ask_text("Enter discount code: ").strip()
 
         with db.get_connection() as conn:
             if conn is None:
@@ -222,7 +222,7 @@ def compute_and_apply_discounts(subtotal, room_number):
     lines = []
     discount_code_amount = 0.0
     tier_discount_amount = 0.0
-    if ui.ask_text("Do you have a discount code? (Y/N): ").lower() == 'y':
+    if ui.ask_text("Do you have a discount code? (Y/N): ").strip().lower() == 'y':
         discounted_subtotal = apply_discount(subtotal)
         discount_code_amount = subtotal - discounted_subtotal
         if discount_code_amount > 0:
@@ -356,13 +356,13 @@ def bill_room_transactions(room_number, require_payment=True):
                     points = loyalty.get_points_by_room(room_number)
                     if final_total > 0 and points > 0:
                         logging.info(f"You have {points} points available.")
-                        use = ui.ask_text("Redeem points for this bill? (Y/N): ").lower()
+                        use = ui.ask_text("Redeem points for this bill? (Y/N): ").strip().lower()
                         if use == 'y':
                             max_points_for_bill = int(min(points, int(final_total * core.get_loyalty_redemption_points_per_currency_unit())))
                             logging.info(f"Maximum points usable for this bill: {max_points_for_bill} points.")
                             while True:
                                 try:
-                                    pts = ui.ask_number(f"Enter number of points to redeem (0-{max_points_for_bill}): ")
+                                    pts = int(ui.ask_text(f"Enter number of points to redeem (0-{max_points_for_bill}): ").strip())
                                     if 0 <= pts <= max_points_for_bill:
                                         break
                                 except ValueError:
@@ -500,9 +500,9 @@ def bill_room_transactions(room_number, require_payment=True):
 def billing_creator():
     logging.info("\n--- Billing Creator ---")
     logging.info("Generate bill from (1) Transactions table or (2) Manual entry")
-    choice = ui.ask_text("Enter 1 or 2: ")
+    choice = ui.ask_text("Enter 1 or 2: ").strip()
     if choice == '1':
-        room_number = ui.ask_text("Enter room number to generate bill for: ")
+        room_number = ui.ask_text("Enter room number to generate bill for: ").strip()
         if bill_room_transactions(room_number):
             logging.info("Bill settled.")
         else:
@@ -513,11 +513,11 @@ def billing_creator():
         items = []
         total = 0.0
         while True:
-            description = ui.ask_text("Enter charge description (or 'done' to finish): ")
+            description = ui.ask_text("Enter charge description (or 'done' to finish): ").strip()
             if description.lower() == 'done' or description == '':
                 break
             try:
-                amount = ui.ask_float("Enter amount for this charge: ")
+                amount = float(ui.ask_text("Enter amount for this charge: ").strip())
             except ValueError:
                 logging.info("Invalid amount. Please try again.")
                 continue
@@ -757,15 +757,15 @@ def invoices_menu():
             "3. Void an Invoice",
             "4. Back to Admin Panel",
         ])
-        choice = ui.ask_text("Enter your choice: ")
+        choice = ui.ask_text("Enter your choice: ").strip()
         if choice == '1':
-            raw = ui.ask_text("Enter invoice number: ")
+            raw = ui.ask_text("Enter invoice number: ").strip()
             if raw.isdigit():
                 print_invoice(int(raw))
             else:
                 logging.info("Invalid invoice number.")
         elif choice == '2':
-            room_number = ui.ask_text("Enter room number (floor + 3-digit code): ")
+            room_number = ui.ask_text("Enter room number (floor + 3-digit code): ").strip()
             invoices = list_invoices_for_room(room_number)
             if not invoices:
                 logging.info("No invoices found for that room.")
@@ -776,11 +776,11 @@ def invoices_menu():
                 [(inv.InvoiceID, inv.RoomNumber, inv.InvoiceDate,
                   f"${float(inv.TotalAmount):.2f}", f"${float(inv.AmountPaid):.2f}") for inv in invoices],
             )
-            raw = ui.ask_text("Enter invoice number to print (blank to cancel): ")
+            raw = ui.ask_text("Enter invoice number to print (blank to cancel): ").strip()
             if raw.isdigit():
                 print_invoice(int(raw))
         elif choice == '3':
-            raw = ui.ask_text("Enter invoice number to void: ")
+            raw = ui.ask_text("Enter invoice number to void: ").strip()
             if raw.isdigit():
                 void_invoice(int(raw))
             else:
@@ -820,7 +820,7 @@ def void_invoice(invoice_id):
                 return
             logging.info(f"Invoice {inv.InvoiceID} -- room {inv.RoomNumber}, {inv.InvoiceDate}, "
                          f"total ${float(inv.TotalAmount):,.2f}, paid ${float(inv.AmountPaid):,.2f}.")
-            reason = ui.ask_text("Reason for voiding (required): ")
+            reason = ui.ask_text("Reason for voiding (required): ").strip()
             if not reason:
                 logging.info("A reason is required; nothing was voided.")
                 return
@@ -829,7 +829,7 @@ def void_invoice(invoice_id):
                 return
             if not core.require_master_override():
                 return
-            typed = ui.ask_text("Type VOID INVOICE to confirm: ")
+            typed = ui.ask_text("Type VOID INVOICE to confirm: ").strip()
             if typed != "VOID INVOICE":
                 logging.info("Confirmation text did not match. Nothing was voided.")
                 return
@@ -907,7 +907,7 @@ def refund_invoice(invoice_id, reason=None):
                 logging.info(f"Invoice {invoice_id} has already been fully refunded.")
                 return False
             if reason is None:
-                reason = ui.ask_text("Refund reason (required): ")
+                reason = ui.ask_text("Refund reason (required): ").strip()
             if not reason:
                 logging.info("A reason is required; no refund posted.")
                 return False

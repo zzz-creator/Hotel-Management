@@ -20,7 +20,7 @@ def send_notification_to_customer():
     """Record a notification for a guest, persisted so the guest can actually read it."""
     try:
         while True:
-            room_number = ui.ask_text("Enter customer's room number: ")
+            room_number = ui.ask_text("Enter customer's room number: ").strip()
             with db.get_connection() as conn:
                 if conn is None:
                     logging.info("Database connection failed.")
@@ -32,7 +32,7 @@ def send_notification_to_customer():
                 break
             else:
                 logging.info("Room number not reserved. Please try again.")
-        message = ui.ask_text("Enter notification message: ")
+        message = ui.ask_text("Enter notification message: ").strip()
         if not message:
             logging.info("Empty message. Notification not sent.")
             return
@@ -99,14 +99,14 @@ def send_alert_to_staff():
             ui.show_menu("Send Alert to Staff", [
                 f"{idx}. {role}" for idx, role in enumerate(core.STAFF_ROLES, 1)
             ] + ["0. Cancel"])
-            raw = ui.ask_text("Enter the number of the staff role: ")
+            raw = ui.ask_text("Enter the number of the staff role: ").strip()
             if raw == '0':
                 return
             if raw.isdigit() and 1 <= int(raw) <= len(core.STAFF_ROLES):
                 selected_role = core.STAFF_ROLES[int(raw) - 1]
                 break
             logging.info("Invalid choice. Please try again.")
-        message = ui.ask_text("Enter alert message: ")
+        message = ui.ask_text("Enter alert message: ").strip()
         if not message:
             logging.info("Empty message. Alert not sent.")
             return

@@ -569,7 +569,7 @@ def loyalty_admin_menu():
             "5. Recalculate All Tiers",
             "6. Back to Admin Panel",
         ])
-        sub = ui.ask_text("Enter your choice: ")
+        sub = ui.ask_text("Enter your choice: ").strip()
         if sub == '1':
             admin_view_loyalty_accounts()
         elif sub == '2':
@@ -596,7 +596,7 @@ def _pick_loyalty_customer(prompt="Enter the guest's name or email: "):
     if not core.get_loyalty_enabled():
         logging.info("Loyalty program is not enabled.")
         return None
-    query = ui.ask_text(prompt)
+    query = ui.ask_text(prompt).strip()
     if not query:
         logging.info("No guest specified.")
         return None
@@ -622,7 +622,7 @@ def _pick_loyalty_customer(prompt="Enter the guest's name or email: "):
                 rows = [(r.CustomerID, f"{r.LastName}, {r.FirstName}", r.Email or "") for r in matches]
                 ui.show_table("Matches", ["ID", "Guest", "Email"], rows)
                 try:
-                    chosen = ui.ask_number("Customer ID: ")
+                    chosen = int(ui.ask_text("Customer ID: ").strip())
                 except ValueError:
                     logging.info("Invalid selection.")
                     return None
@@ -720,7 +720,7 @@ def admin_adjust_loyalty_points():
         current = get_points_by_customer(customer_id)
         logging.info(f"Current points for customer {customer_id}: {current}")
         try:
-            delta = ui.ask_number("Enter points to add (positive) or remove (negative): ")
+            delta = int(ui.ask_text("Enter points to add (positive) or remove (negative): ").strip())
         except ValueError:
             logging.info("Invalid points value.")
             return
@@ -765,9 +765,9 @@ def admin_manage_loyalty_tiers():
             "3. Edit Tier Minimum Points",
             "4. Back to Loyalty Management",
         ])
-        choice = ui.ask_text("Enter your choice: ")
+        choice = ui.ask_text("Enter your choice: ").strip()
         if choice == '1':
-            name = ui.ask_text("Enter tier name to edit (e.g. Silver, Gold, Platinum): ")
+            name = ui.ask_text("Enter tier name to edit (e.g. Silver, Gold, Platinum): ").strip()
             match = None
             for t in tiers:
                 if t[0].lower() == name.lower():
@@ -777,7 +777,7 @@ def admin_manage_loyalty_tiers():
                 logging.info("Tier not found.")
                 continue
             try:
-                new_discount = ui.ask_float(f"New discount percent for {match[0]} (current {match[3]:.0f}%): ")
+                new_discount = float(ui.ask_text(f"New discount percent for {match[0]} (current {match[3]:.0f}%): ").strip())
             except ValueError:
                 logging.info("Invalid number.")
                 continue
@@ -793,7 +793,7 @@ def admin_manage_loyalty_tiers():
                 except Exception as e:
                     logging.error(f"Error updating tier discount: {e}")
         elif choice == '2':
-            name = ui.ask_text("Enter tier name to edit (e.g. Silver, Gold, Platinum): ")
+            name = ui.ask_text("Enter tier name to edit (e.g. Silver, Gold, Platinum): ").strip()
             match = None
             for t in tiers:
                 if t[0].lower() == name.lower():
@@ -803,7 +803,7 @@ def admin_manage_loyalty_tiers():
                 logging.info("Tier not found.")
                 continue
             try:
-                new_mult = ui.ask_float(f"New points multiplier for {match[0]} (current x{match[2]:.2f}): ")
+                new_mult = float(ui.ask_text(f"New points multiplier for {match[0]} (current x{match[2]:.2f}): ").strip())
             except ValueError:
                 logging.info("Invalid number.")
                 continue
@@ -819,7 +819,7 @@ def admin_manage_loyalty_tiers():
                 except Exception as e:
                     logging.error(f"Error updating tier multiplier: {e}")
         elif choice == '3':
-            name = ui.ask_text("Enter tier name to edit (e.g. Silver, Gold, Platinum): ")
+            name = ui.ask_text("Enter tier name to edit (e.g. Silver, Gold, Platinum): ").strip()
             match = None
             idx = None
             for i, t in enumerate(tiers):
@@ -831,7 +831,7 @@ def admin_manage_loyalty_tiers():
                 logging.info("Tier not found.")
                 continue
             try:
-                new_min = ui.ask_number(f"New minimum lifetime points for {match[0]} (current {match[1]}): ")
+                new_min = int(ui.ask_text(f"New minimum lifetime points for {match[0]} (current {match[1]}): ").strip())
             except ValueError:
                 logging.info("Invalid number.")
                 continue

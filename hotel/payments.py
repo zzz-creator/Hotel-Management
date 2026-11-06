@@ -1,9 +1,9 @@
-from hotel import ui
 # type: ignore
 """payments: split out of main.py. Cross-module calls are module-qualified so a test patching the owner module affects every caller (see plans/PLAN-split-main-py.md)."""
 import logging
 from datetime import datetime
 from hotel import session
+from hotel import ui
 
 __all__ = [
     'luhn_check',
@@ -51,7 +51,7 @@ def process_credit_card(amount):
     logging.info(f"Processing credit card payment of ${amount:.2f}...")
 
     # Get credit card details
-    card_number = ui.ask_text("Enter your credit card number: ")
+    card_number = ui.ask_text("Enter your credit card number: ").strip()
 
     # Validate credit card number using Luhn's algorithm
     if not luhn_check(card_number) or card_number == "":
@@ -59,7 +59,7 @@ def process_credit_card(amount):
         session.LAST_CARD_DIGITS = None
         return False
 
-    expiration_date = ui.ask_text("Enter your credit card expiration date (MM/YYYY): ")
+    expiration_date = ui.ask_text("Enter your credit card expiration date (MM/YYYY): ").strip()
 
     # Validate expiration date
     if not validate_expiration_date(expiration_date):
@@ -67,7 +67,7 @@ def process_credit_card(amount):
         session.LAST_CARD_DIGITS = None
         return False
 
-    cvv = ui.ask_text("Enter your credit card CVV: ")
+    cvv = ui.ask_text("Enter your credit card CVV: ").strip()
 
     # Validate CVV length
     if len(cvv) != 3:

@@ -203,7 +203,7 @@ def main():
             "4. Conference Rooms",
             "5. Exit",
         ], subtitle=customer.customer_session_label())
-        choice = input("Enter your choice: ").strip()
+        choice = ui.ask_text("Enter your choice: ").strip()
         if choice == '1':
             customer.customer_panel()
         elif choice == '2':

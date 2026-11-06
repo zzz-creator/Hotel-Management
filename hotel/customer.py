@@ -91,7 +91,7 @@ def customer_login(allow_register=True):
     if _mod_session.CURRENT_CUSTOMER is not None:
         return _mod_session.CURRENT_CUSTOMER
     for attempt in range(1, core.get_customer_login_max_attempts() + 1):
-        email = ui.ask_text("Email address: ")
+        email = ui.ask_text("Email address: ").strip()
         if not email:
             logging.info("Your email address is required to book a room.")
             continue
@@ -121,12 +121,12 @@ def customer_login(allow_register=True):
             # First visit. Create the account rather than sending the guest away: a guest
             # with no account cannot book, and a guest who cannot book has no way to be
             # remembered for their next stay.
-            last_name = ui.ask_text("New here -- enter your last name: ")
-            first_name = ui.ask_text("Enter your first name: ")
+            last_name = ui.ask_text("New here -- enter your last name: ").strip()
+            first_name = ui.ask_text("Enter your first name: ").strip()
             if not last_name or not first_name:
                 logging.info("Both first and last name are required to create an account.")
                 continue
-            password = ui.ask_text("Choose a password: ")
+            password = ui.ask_text("Choose a password: ").strip()
             if not password:
                 logging.info("A password is required to create an account.")
                 continue
@@ -142,7 +142,7 @@ def customer_login(allow_register=True):
         if not stored:
             logging.info("That account has no password yet. Please contact the front desk to set one.")
             return None
-        password = ui.ask_text("Password: ")
+        password = ui.ask_text("Password: ").strip()
         if password == stored:
             _mod_session.CURRENT_CUSTOMER = int(customer_id)
             core.log_audit("LOGIN", "CustomerProfile", email, "Booking desk sign-in")
@@ -214,7 +214,7 @@ def print_my_invoice():
         [(inv.InvoiceID, inv.RoomNumber, inv.InvoiceDate,
           f"${float(inv.TotalAmount):.2f}", f"${float(inv.AmountPaid):.2f}") for inv in invoices],
     )
-    raw = ui.ask_text("Enter invoice number to print (blank to cancel): ")
+    raw = ui.ask_text("Enter invoice number to print (blank to cancel): ").strip()
     if raw.isdigit():
         billing.print_invoice(int(raw))
 
@@ -394,7 +394,7 @@ def my_history():
 
 def search_customer_profiles():
     """Admin/manager: search CustomerProfiles and drill into a guest's history."""
-    term = ui.ask_text("Search by last name, first name, email, or phone: ")
+    term = ui.ask_text("Search by last name, first name, email, or phone: ").strip()
     if not term:
         logging.info("Search term required.")
         return
@@ -425,7 +425,7 @@ def search_customer_profiles():
         ["#", "Customer ID", "Last Name", "First Name", "Email", "Phone"],
         [(i + 1, r.CustomerID, r.LastName, r.FirstName, r.Email or "-", r.Phone or "-") for i, r in enumerate(rows)],
     )
-    raw = ui.ask_text("Enter the row number to view details and history (blank to cancel): ")
+    raw = ui.ask_text("Enter the row number to view details and history (blank to cancel): ").strip()
     if not raw.isdigit():
         return
     idx = int(raw)
@@ -453,7 +453,7 @@ def _pick_customer_account(prompt="Search guest account by full name or email: "
     because these actions change or delete a real account. Multiple matches are
     offered as a pick list, so a shared name cannot silently hit the first row.
     """
-    query = ui.ask_text(prompt)
+    query = ui.ask_text(prompt).strip()
     if not query:
         logging.info("No account specified.")
         return None
@@ -482,7 +482,7 @@ def _pick_customer_account(prompt="Search guest account by full name or email: "
         ui.show_table("Matching guest accounts", ["#", "ID", "Guest", "Email", "Phone"],
                       [(i + 1, r.CustomerID, f"{r.LastName}, {r.FirstName}",
                         r.Email or "-", r.Phone or "-") for i, r in enumerate(matches)])
-        raw = ui.ask_text("Enter the row number of the right account (blank to cancel): ")
+        raw = ui.ask_text("Enter the row number of the right account (blank to cancel): ").strip()
         if not raw.isdigit():
             return None
         idx = int(raw)
@@ -504,11 +504,11 @@ def create_guest_account():
     value is a pyodbc truncation error, and a mistyped prompt must produce a
     message, not a traceback.
     """
-    last_name = ui.ask_text("Last name: ")
-    first_name = ui.ask_text("First name: ")
-    email = ui.ask_text("Email address (the guest signs in with this): ")
-    phone = ui.ask_text("Phone number (optional): ")
-    password = ui.ask_text("Password: ")
+    last_name = ui.ask_text("Last name: ").strip()
+    first_name = ui.ask_text("First name: ").strip()
+    email = ui.ask_text("Email address (the guest signs in with this): ").strip()
+    phone = ui.ask_text("Phone number (optional): ").strip()
+    password = ui.ask_text("Password: ").strip()
     if not last_name or not first_name:
         logging.info("Both a last name and a first name are required.")
         return
@@ -538,7 +538,7 @@ def _update_account_field(account, field, limit):
     `field` is one of the literals "Email", "Phone", "Preferences" from
     edit_guest_account's menu, never user input, so it is safe to interpolate.
     """
-    value = ui.ask_text(f"New {field.lower()} (blank to cancel): ")
+    value = ui.ask_text(f"New {field.lower()} (blank to cancel): ").strip()
     if not value:
         logging.info("No change made.")
         return
@@ -594,7 +594,7 @@ def edit_guest_account():
             "3. Change preferences",
             "4. Back",
         ])
-        choice = ui.ask_text("Enter your choice: ")
+        choice = ui.ask_text("Enter your choice: ").strip()
         if choice == '1':
             _update_account_field(account, "Email", 100)
         elif choice == '2':
@@ -612,7 +612,7 @@ def reset_guest_password():
     account = _pick_customer_account()
     if not account:
         return
-    password = ui.ask_text(f"New password for {account.FirstName} {account.LastName}: ")
+    password = ui.ask_text(f"New password for {account.FirstName} {account.LastName}: ").strip()
     if not password:
         logging.info("A password is required.")
         return
@@ -682,7 +682,7 @@ def delete_guest_account():
     if not core.require_master_override(prompt="Master override required to delete a guest account: "):
         return
     confirm = account.Email or f"{account.LastName}, {account.FirstName}"
-    typed = ui.ask_text(f"Type '{confirm}' to confirm deletion: ")
+    typed = ui.ask_text(f"Type '{confirm}' to confirm deletion: ").strip()
     if typed != confirm:
         logging.info("Confirmation did not match. Nothing was deleted.")
         return
@@ -737,7 +737,7 @@ def link_stay_to_guest_account():
         [(i + 1, r.RoomNumber, f"{r.LastName or ''}, {r.FirstName or ''}".strip(", "),
           r.CheckInDate, r.CheckOutDate) for i, r in enumerate(unlinked)],
     )
-    raw = ui.ask_text("Enter the row number to link (blank to cancel): ")
+    raw = ui.ask_text("Enter the row number to link (blank to cancel): ").strip()
     if not raw.isdigit():
         return
     idx = int(raw)
@@ -749,7 +749,7 @@ def link_stay_to_guest_account():
     if ui.ask_text(
             f"Link room {stay.RoomNumber} ({guest_on_stay}) to "
             f"{account.FirstName} {account.LastName}? (y/n): "
-    ).lower() != 'y':
+    ).strip().lower() != 'y':
         logging.info("Not linked.")
         return
     if reservations.link_reservation_customer(stay.RoomNumber, int(account.CustomerID)):
@@ -797,7 +797,7 @@ def customer_panel():
             "15. My Notifications",
             "16. Sign Out",
         ], subtitle=session)
-        cust_choice = ui.ask_text("Enter your choice: ")
+        cust_choice = ui.ask_text("Enter your choice: ").strip()
 
         if cust_choice == '1':
             reservations.check_in()
@@ -815,7 +815,7 @@ def customer_panel():
             if not core.get_loyalty_enabled():
                 logging.info("Loyalty Program is not enabled. Contact administration to enable it.")
             else:
-                room_number = ui.ask_text("Enter your room number to join/verify loyalty account: ")
+                room_number = ui.ask_text("Enter your room number to join/verify loyalty account: ").strip()
                 if not room_number:
                     logging.info("Invalid room number.")
                 else:

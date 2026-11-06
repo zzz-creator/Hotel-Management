@@ -336,7 +336,7 @@ def _offer_hotel_settings(wizard=False):
                  "changed later from Admin Panel → Discounts & Pricing → Manage Pricing & Settings.")
 
     def _ask(key, label, current, parse, valid):
-        raw = input(f"{label} [{current}]: ").strip()
+        raw = ui.ask_text(f"{label} [{current}]: ").strip()
         if not raw:
             return current
         try:
@@ -361,7 +361,7 @@ def _offer_hotel_settings(wizard=False):
     old_accrual, old_per_night = (core.get_loyalty_accrual_points_per_unit(),
                                   core.get_loyalty_points_per_night())
     enabled_raw = core.get_loyalty_enabled()
-    raw_enabled = input(f"Loyalty programme enabled? (y/n) [{'y' if enabled_raw else 'n'}]: ").strip().lower()
+    raw_enabled = ui.ask_text(f"Loyalty programme enabled? (y/n) [{'y' if enabled_raw else 'n'}]: ").strip().lower()
     if raw_enabled in ('y', 'yes', '1', 'true', 'on', 'n', 'no', '0', 'false', 'off'):
         core.set_setting('loyalty_enabled', '1' if raw_enabled in ('y', 'yes', '1', 'true', 'on') else '0')
     new_per_night = _ask('loyalty_points_per_night', "Points per night stayed",
@@ -399,7 +399,7 @@ ROOM_TYPE_NAME_MAX_LENGTH = 50
 
 def _edit_one_room_rate(room_types):
     """Ask for one category's new rate. Returns 1 if it was changed, else 0."""
-    name = input("Room type to change (Enter to cancel): ").strip()
+    name = ui.ask_text("Room type to change (Enter to cancel): ").strip()
     if not name:
         return 0
     match = next((rt for rt, _rate, _active in room_types if rt.lower() == name.lower()), None)
@@ -408,7 +408,7 @@ def _edit_one_room_rate(room_types):
                      + ", ".join(rt for rt, _rate, _active in room_types))
         return 0
     current = next((rate for rt, rate, _active in room_types if rt == match), 0.0)
-    raw = input(f"New nightly rate for {match} [{current:,.2f}]: ").strip()
+    raw = ui.ask_text(f"New nightly rate for {match} [{current:,.2f}]: ").strip()
     if not raw:
         logging.info("Kept the current rate.")
         return 0
@@ -425,7 +425,7 @@ def _edit_one_room_rate(room_types):
 
 def _add_room_category(room_types):
     """Ask for a new category and its rate. Returns 1 if it was changed, else 0."""
-    name = input("New room type name (Enter to cancel): ").strip()
+    name = ui.ask_text("New room type name (Enter to cancel): ").strip()
     if not name:
         return 0
     if len(name) > ROOM_TYPE_NAME_MAX_LENGTH:
@@ -434,7 +434,7 @@ def _add_room_category(room_types):
     if any(rt.lower() == name.lower() for rt, _rate, _active in room_types):
         logging.info("Room type '%s' already exists -- change its rate instead.", name)
         return 0
-    raw = input(f"Nightly rate for {name}: ").strip()
+    raw = ui.ask_text(f"Nightly rate for {name}: ").strip()
     if not raw:
         logging.info("A rate is required to add a room type.")
         return 0
@@ -478,7 +478,7 @@ def _offer_room_rates(wizard=False):
             "3. %s" % ("Skip for now" if wizard else "Done -- back to setup"),
         ])
         try:
-            choice = input("Enter your choice: ").strip()
+            choice = ui.ask_text("Enter your choice: ").strip()
         except (KeyboardInterrupt, EOFError):
             logging.info("Finished configuring room rates.")
             return changed
@@ -508,7 +508,7 @@ def _create_staff_account():
     account exists, and create_first_user() deliberately refuses in that case.
     """
     try:
-        username = input("Enter new username: ").strip()
+        username = ui.ask_text("Enter new username: ").strip()
         if not username:
             logging.info("A username is required.")
             return False
@@ -545,7 +545,7 @@ def _offer_staff_accounts(wizard=False):
             "2. %s" % ("Skip for now" if wizard else "Done -- back to setup"),
         ])
         try:
-            choice = input("Enter your choice: ").strip()
+            choice = ui.ask_text("Enter your choice: ").strip()
         except (KeyboardInterrupt, EOFError):
             logging.info("Finished adding staff accounts.")
             return added
@@ -575,17 +575,17 @@ def _offer_conference_rooms(wizard=False):
                      "-> Conference Rooms.")
         return 0
     while True:
-        room_number = input("Room number/label (e.g. CR-101, blank to finish): ").strip()
+        room_number = ui.ask_text("Room number/label (e.g. CR-101, blank to finish): ").strip()
         if not room_number:
             break
-        name = input("Room name: ").strip() or room_number
+        name = ui.ask_text("Room name: ").strip() or room_number
         try:
-            capacity = int(input("Capacity: ").strip())
+            capacity = int(ui.ask_text("Capacity: ").strip())
         except ValueError:
             logging.info("Invalid capacity. Skipping this room.")
             continue
         try:
-            rate = float(input("Hourly rate: ").strip())
+            rate = float(ui.ask_text("Hourly rate: ").strip())
         except ValueError:
             logging.info("Invalid rate. Skipping this room.")
             continue
@@ -595,11 +595,11 @@ def _offer_conference_rooms(wizard=False):
             continue
         added += 1
         # At least one setup type per room, so the room is actually bookable.
-        st = input("Setup type (" + ", ".join(conference.CONFERENCE_SETUP_TYPES)
+        st = ui.ask_text("Setup type (" + ", ".join(conference.CONFERENCE_SETUP_TYPES)
                    + ", blank to skip): ").strip()
         if st:
             try:
-                cap = int(input("Capacity for that setup (blank = room capacity): ").strip() or capacity)
+                cap = int(ui.ask_text("Capacity for that setup (blank = room capacity): ").strip() or capacity)
             except ValueError:
                 cap = capacity
             conference.add_room_setup(room_number, st, cap)
@@ -638,7 +638,7 @@ def _offer_reference_data(wizard=False):
             "4. %s" % ("Skip for now" if wizard else "Done -- back to setup"),
         ])
         try:
-            choice = input("Enter your choice: ").strip()
+            choice = ui.ask_text("Enter your choice: ").strip()
         except (KeyboardInterrupt, EOFError):
             return
         if choice == "1":
@@ -699,7 +699,7 @@ def _wizard_step_menu():
             "8. Back to the review",
         ])
         try:
-            choice = input("Enter your choice: ").strip()
+            choice = ui.ask_text("Enter your choice: ").strip()
         except (KeyboardInterrupt, EOFError):
             return
         if choice == "1":
@@ -771,7 +771,7 @@ def run_first_run_onboarding():
         attempts = 0
         while True:
             try:
-                username = input("Administrator username [admin]: ").strip() or "admin"
+                username = ui.ask_text("Administrator username [admin]: ").strip() or "admin"
             except (KeyboardInterrupt, EOFError):
                 logging.info("Setup cancelled. The wizard will run again next time until "
                              "setup is complete or an account exists.")
@@ -791,7 +791,7 @@ def run_first_run_onboarding():
                 attempts += 1
             if attempts >= 3:
                 try:
-                    retry = input("Failed to create the first administrator. "
+                    retry = ui.ask_text("Failed to create the first administrator. "
                                   "Try again? (Y/n): ").strip().lower()
                 except (KeyboardInterrupt, EOFError):
                     logging.info("Setup cancelled. The wizard will run again next time.")
@@ -912,7 +912,7 @@ def run_first_run_onboarding():
             "3. Cancel setup (run wizard again next time)",
         ])
         try:
-            choice = input("Enter your choice: ").strip()
+            choice = ui.ask_text("Enter your choice: ").strip()
         except (KeyboardInterrupt, EOFError):
             logging.info("Setup cancelled. The wizard will run again next time until "
                          "setup is complete.")
@@ -1014,7 +1014,7 @@ def onboarding_checklist(role="admin"):
             "11. Back to Admin Panel",
         ])
         try:
-            choice = input("Enter your choice: ").strip()
+            choice = ui.ask_text("Enter your choice: ").strip()
         except (KeyboardInterrupt, EOFError):
             return
         if choice == '1':
@@ -1087,7 +1087,7 @@ def _offer_item_catalogue(wizard=False):
                 "2. Add an item of your own",
                 "3. %s" % ("Skip for now" if wizard else "Cancel -- done adding items"),
             ])
-            choice = input("Enter your choice: ").strip()
+            choice = ui.ask_text("Enter your choice: ").strip()
             if choice == "1":
                 added += items.seed_default_items()
             elif choice == "2":
@@ -1119,7 +1119,7 @@ def _offer_room_layout(wizard=False):
         "3. Custom floor count and rooms per floor",
         "4. %s" % ("Skip -- rooms appear as bookings are made" if wizard else "Cancel"),
     ])
-    choice = input("Enter your choice: ").strip()
+    choice = ui.ask_text("Enter your choice: ").strip()
     if choice == "1":
         if not ui.ask_confirmation(f"Seed {tower_rooms:,} rooms? This is a large insert.",
                                    default="n"):

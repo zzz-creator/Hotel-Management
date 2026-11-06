@@ -78,7 +78,7 @@ def clear_lockout(target_username: str) -> bool:
 def edit_user():
     """Edit an existing user."""
     try:
-        username = ui.ask_text("Enter the username of the user to edit: ")
+        username = ui.ask_text("Enter the username of the user to edit: ").strip()
         with db.get_connection() as conn:
             if conn is None:
                 return
@@ -89,8 +89,8 @@ def edit_user():
             if user:
                 logging.info(f"Current user details: Username: {user.Username}")
 
-                new_username = ui.ask_text("Enter new username (leave blank to keep current): ")
-                new_password = ui.ask_text("Enter new password (leave blank to keep current): ")
+                new_username = ui.ask_text("Enter new username (leave blank to keep current): ").strip()
+                new_password = ui.ask_text("Enter new password (leave blank to keep current): ").strip()
 
                 if new_username == "":
                     new_username = user.Username
@@ -122,7 +122,7 @@ def admin_login():
     """Handle admin login with a grace period for lockout, displaying a warning before the final lockout."""
     while True:
         try:
-            username = ui.ask_text("Enter admin username: ")
+            username = ui.ask_text("Enter admin username: ").strip()
             password = getpass.getpass("Enter admin password: ").strip()
 
             with db.get_connection() as conn:
@@ -195,8 +195,8 @@ def admin_login():
 
 def add_user():
     try:
-        new_username = ui.ask_text("Enter new username: ")
-        new_password = ui.ask_text("Enter new password: ")
+        new_username = ui.ask_text("Enter new username: ").strip()
+        new_password = ui.ask_text("Enter new password: ").strip()
         role = core._prompt_role()
         if not role:
             logging.info("No account was created.")
@@ -219,7 +219,7 @@ def add_user():
 
 def delete_user():
     try:
-        del_username = ui.ask_text("Enter username to delete: ")
+        del_username = ui.ask_text("Enter username to delete: ").strip()
         with db.get_connection() as conn:
             if conn is None:
                 return
@@ -244,7 +244,7 @@ def view_users():
             if conn is None:
                 return
             cursor = conn.cursor()
-            passwords = ui.ask_text("Would you like to see the passwords? (Y/N): ").upper()
+            passwords = ui.ask_text("Would you like to see the passwords? (Y/N): ").strip().upper()
             show_passwords = False
             if passwords == 'Y':
                 # Same check every other master-gated screen uses.
@@ -298,7 +298,7 @@ def export_reports_menu():
             "10. Export Booking Ledger",
             "11. Back to Admin Panel",
         ])
-        choice = ui.ask_text("Enter your choice: ")
+        choice = ui.ask_text("Enter your choice: ").strip()
         if choice == '1':
             _run_report("Transactions", reports.export_transactions)
         elif choice == '2':
@@ -309,12 +309,12 @@ def export_reports_menu():
             # then reports that guest's whole history rather than one room's fragment.
             # A room number and a CustomerID are both 4 digits, so the type is asked
             # for rather than guessed from the shape of the input.
-            who = ui.ask_text("Guest ID/email/name, or a room number (leave blank for all): ")
+            who = ui.ask_text("Guest ID/email/name, or a room number (leave blank for all): ").strip()
             if not who:
                 _run_report("Loyalty statements", reports.export_loyalty_statements)
             else:
                 ui.show_menu("Loyalty statement for", ["1. Guest (ID, email, or name)", "2. Room number"])
-                ref_type = ui.ask_text("Enter your choice: ")
+                ref_type = ui.ask_text("Enter your choice: ").strip()
                 if ref_type == '1':
                     _run_report("Loyalty statements", reports.export_loyalty_statements,
                                 customer=who)
@@ -332,7 +332,7 @@ def export_reports_menu():
             end = ui.ask_optional_date("To date (blank = the business date)")
             _run_report("Occupancy", reports.export_occupancy, start_date=start, end_date=end)
         elif choice == '7':
-            floor = ui.ask_text("Floor (blank for every floor): ")
+            floor = ui.ask_text("Floor (blank for every floor): ").strip()
             # Defaults to the business date, and takes an explicit one, so the board for
             # a day that has already closed can be re-run rather than only today's.
             on_date = ui.ask_optional_date(f"Board date (blank = business date, "
@@ -344,7 +344,7 @@ def export_reports_menu():
         elif choice == '9':
             _run_report("Audit log", reports.export_audit_log)
         elif choice == '10':
-            ref = ui.ask_text("Booking reference (blank for all): ")
+            ref = ui.ask_text("Booking reference (blank for all): ").strip()
             _run_report("Booking ledger", reports.export_booking_ledger,
                         booking_ref=ref or None)
         elif choice == '11':
@@ -485,7 +485,7 @@ def _run_admin_submenu(category, entries, session):
             + [f"{len(entries) + 1}. Back to Admin Panel"],
             subtitle=session,
         )
-        raw = ui.ask_text("Enter your choice: ")
+        raw = ui.ask_text("Enter your choice: ").strip()
         if not raw.isdigit() or not 1 <= int(raw) <= len(entries) + 1:
             logging.info("Invalid choice. Please try again.")
             ui.pause()
@@ -542,7 +542,7 @@ def admin_panel():
         ui.show_menu("Admin Panel",
                      [f"{i}. {label}" for i, (label, _entries) in enumerate(menu, 1)],
                      subtitle=session)
-        choice = ui.ask_text("Enter your choice: ")
+        choice = ui.ask_text("Enter your choice: ").strip()
         if not choice.isdigit() or not 1 <= int(choice) <= len(menu):
             logging.info("Invalid choice. Please try again.")
             continue
@@ -581,7 +581,7 @@ def manage_discount_codes():
                 "4. View Discount Codes",
                 "5. Exit Discount Management",
             ])
-            choice = ui.ask_text("Enter your choice: ")
+            choice = ui.ask_text("Enter your choice: ").strip()
             with db.get_connection() as conn:
                 if conn is None:
                     logging.info("Database connection failed.")
@@ -591,12 +591,12 @@ def manage_discount_codes():
                     cursor.execute("SELECT Code FROM Discounts")
                     last_code = cursor.fetchall()
                     logging.info(f"Last discount code: {(last_code[-1])[0] if last_code else 'None'}")
-                    code = ui.ask_text("Enter new discount code: ")
+                    code = ui.ask_text("Enter new discount code: ").strip()
                     if not code:
                         logging.info("Discount code cannot be blank.")
                         continue
                     try:
-                        discount_percentage = ui.ask_float("Enter discount percentage: ")
+                        discount_percentage = float(ui.ask_text("Enter discount percentage: ").strip())
                     except ValueError:
                         logging.info("Invalid discount percentage.")
                         continue
@@ -617,12 +617,12 @@ def manage_discount_codes():
                     logging.info(f"Discount code '{code}' added successfully.")
                 elif choice == "2":
                     view_discount_codes()
-                    code = ui.ask_text("Enter discount code to update: ")
+                    code = ui.ask_text("Enter discount code to update: ").strip()
                     cursor.execute("SELECT DiscountPercentage FROM Discounts WHERE Code = ?", (code,))
                     existing = cursor.fetchone()
                     if existing:
                         try:
-                            new_percentage = ui.ask_float("Enter new discount percentage: ")
+                            new_percentage = float(ui.ask_text("Enter new discount percentage: ").strip())
                         except ValueError:
                             logging.info("Invalid percentage.")
                             continue
@@ -643,7 +643,7 @@ def manage_discount_codes():
                         logging.info("Discount code not found.")
                 elif choice == "3":
                     view_discount_codes()
-                    code = ui.ask_text("Enter discount code to delete: ")
+                    code = ui.ask_text("Enter discount code to delete: ").strip()
                     cursor.execute("SELECT DiscountPercentage FROM Discounts WHERE Code = ?", (code,))
                     existing = cursor.fetchone()
                     if not existing:
@@ -671,10 +671,10 @@ def reset_user_password():
             return
         try:
             cursor = conn.cursor()
-            username = ui.ask_text("Enter the username to reset password: ")
+            username = ui.ask_text("Enter the username to reset password: ").strip()
             cursor.execute("SELECT Username FROM Users WHERE Username = ?", (username,))
             if cursor.fetchone():
-                new_password = ui.ask_text("Enter new password: ")
+                new_password = ui.ask_text("Enter new password: ").strip()
                 cursor.execute("UPDATE Users SET Password = ? WHERE Username = ?", (new_password, username))
                 conn.commit()
                 core.log_audit("UPDATE", "User", username, "Password reset by admin")
@@ -702,7 +702,7 @@ def _pick_from_list(title, options):
     """Show a numbered list and return the chosen option, or None if cancelled."""
     ui.show_table(title, ["#", "Option"], [(i + 1, name) for i, name in enumerate(options)])
     while True:
-        raw = ui.ask_text("Select an option (number, or blank to cancel): ")
+        raw = ui.ask_text("Select an option (number, or blank to cancel): ").strip()
         if raw == "":
             return None
         if raw.isdigit() and 1 <= int(raw) <= len(options):
@@ -712,10 +712,10 @@ def _pick_from_list(title, options):
 
 def it_network_configuration():
     """IT: record a network profile and optionally run simulated diagnostics."""
-    network_name = ui.ask_text("Enter network name: ")
-    ip_address = ui.ask_text("Enter IP address: ")
-    subnet_mask = ui.ask_text("Enter subnet mask: ")
-    gateway = ui.ask_text("Enter gateway: ")
+    network_name = ui.ask_text("Enter network name: ").strip()
+    ip_address = ui.ask_text("Enter IP address: ").strip()
+    subnet_mask = ui.ask_text("Enter subnet mask: ").strip()
+    gateway = ui.ask_text("Enter gateway: ").strip()
     ui.success(f"Network '{network_name}' configured with IP {ip_address}, "
                f"Subnet {subnet_mask}, Gateway {gateway}.")
     if not ui.ask_confirmation("Run diagnostics and test the network?", default="y"):
@@ -742,7 +742,7 @@ def it_user_accounts():
         "5. Back",
     ])
     actions = {'1': add_user, '2': delete_user, '3': reset_user_password, '4': edit_user}
-    action = actions.get(ui.ask_text("Enter your choice: "))
+    action = actions.get(ui.ask_text("Enter your choice: ").strip())
     if action:
         action()
     else:
@@ -808,7 +808,7 @@ def it_support_panel():
             "4. Software Installation",
             "5. Exit IT Support Panel",
         ])
-        choice = ui.ask_text("Enter your choice: ")
+        choice = ui.ask_text("Enter your choice: ").strip()
         if choice == '1':
             it_network_configuration()
         elif choice == '2':
@@ -833,7 +833,7 @@ def valet_vehicle_management():
             "3. View Parked Vehicles",
             "4. Exit",
         ])
-        choice = ui.ask_text("Enter your choice: ")
+        choice = ui.ask_text("Enter your choice: ").strip()
         if choice == '4':
             logging.info("Exiting Valet Vehicle Management.")
             return
@@ -844,8 +844,8 @@ def valet_vehicle_management():
             logging.info("Invalid choice.")
             continue
         action = 'ci' if choice == '1' else 'co'
-        license_plate = ui.ask_text("Enter vehicle license plate: ")
-        owner_name = ui.ask_text("Enter owner's name: ")
+        license_plate = ui.ask_text("Enter vehicle license plate: ").strip()
+        owner_name = ui.ask_text("Enter owner's name: ").strip()
         if not license_plate or not owner_name:
             logging.info("Both the license plate and the owner's name are required.")
             continue
@@ -856,7 +856,7 @@ def valet_vehicle_management():
                     return
                 cursor = conn.cursor()
                 if action == "ci":
-                    parking_spot = ui.ask_text("Enter assigned parking spot: ")
+                    parking_spot = ui.ask_text("Enter assigned parking spot: ").strip()
                     check_in_time = datetime.now()
                     cursor.execute(
                         "INSERT INTO ValetVehicles (LicensePlate, OwnerName, ParkingSpot, Status, CheckInTime) VALUES (?, ?, ?, ?, ?)",

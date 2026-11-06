@@ -38,15 +38,15 @@ __all__ = [
 
 def add_reservation():
     try:
-        room_number = ui.ask_text("Enter room number (floor + 3-digit code): ")
+        room_number = ui.ask_text("Enter room number (floor + 3-digit code): ").strip()
         # Parse room number like <floor><3-digit-code>, e.g. 10203 -> floor=10, code=203
         m = re.match(r'^(\d+)(\d{3})$', room_number)
         if not m:
             logging.info("Invalid room number format. Expected <floor><3-digit-code> (e.g. 10203).")
             return
         floor = int(m.group(1))
-        last_name = ui.ask_text("Enter last name: ")
-        first_name = ui.ask_text("Enter first name: ")
+        last_name = ui.ask_text("Enter last name: ").strip()
+        first_name = ui.ask_text("Enter first name: ").strip()
         today = core.business_date()
         check_in = ui.ask_date("Enter check-in date (YYYY-MM-DD)", default=str(today))
         check_out = ui.ask_date("Enter check-out date (YYYY-MM-DD)", default=str(today + timedelta(days=1)))
@@ -416,8 +416,8 @@ def show_availability_search():
     if check_out <= check_in:
         logging.info("Check-out date must be after check-in date.")
         return
-    room_type = ui.ask_text(f"Room type (blank for any of: {', '.join(rt for rt, _ in _mod_rooms.get_room_types())}): ")
-    floor_raw = ui.ask_text("Floor (blank for any): ")
+    room_type = ui.ask_text(f"Room type (blank for any of: {', '.join(rt for rt, _ in _mod_rooms.get_room_types())}): ").strip()
+    floor_raw = ui.ask_text("Floor (blank for any): ").strip()
     floor = None
     if floor_raw:
         if not floor_raw.isdigit():
@@ -437,7 +437,7 @@ def show_availability_search():
 
 def delete_reservation():
     try:
-        room_number = ui.ask_text("Enter room number (floor + 3-digit code) to delete: ")
+        room_number = ui.ask_text("Enter room number (floor + 3-digit code) to delete: ").strip()
         with db.get_connection() as conn:
             if conn is None:
                 return
@@ -493,7 +493,7 @@ def delete_all_reservations():
     ui.show_menu("Delete All Reservations (irreversible)", [
         f"{key}. {label}" for key, label, _ in RESERVATION_RESET_SCOPES
     ] + ["3. Cancel"])
-    choice = ui.ask_text("Enter your choice: ")
+    choice = ui.ask_text("Enter your choice: ").strip()
     scope = next((s for s in RESERVATION_RESET_SCOPES if s[0] == choice), None)
     if scope is None:
         logging.info("Cancelled. No reservations were deleted.")
@@ -539,7 +539,7 @@ def delete_all_reservations():
         return
     if not core.require_master_override():
         return
-    typed = ui.ask_text(f"Type {RESERVATION_RESET_CONFIRM} to confirm: ")
+    typed = ui.ask_text(f"Type {RESERVATION_RESET_CONFIRM} to confirm: ").strip()
     if typed != RESERVATION_RESET_CONFIRM:
         logging.info("Confirmation text did not match. No reservations were deleted.")
         return
@@ -582,7 +582,7 @@ def edit_reservation():
             return
         try:
             cursor = conn.cursor()
-            old_room_number = ui.ask_text("Enter the current room number (floor + 3-digit code) of the reservation to edit: ")
+            old_room_number = ui.ask_text("Enter the current room number (floor + 3-digit code) of the reservation to edit: ").strip()
 
             cursor.execute("SELECT * FROM Reservations WHERE RoomNumber = ?", (old_room_number,))
             reservation = cursor.fetchone()
@@ -590,9 +590,9 @@ def edit_reservation():
             if reservation:
                 logging.info(f"Current reservation details: Room Number: {reservation.RoomNumber}, Floor: {reservation.Floor}, Last Name: {reservation.LastName}, First Name: {reservation.FirstName}")
 
-                new_room_number = ui.ask_text("Enter new room number (floor + 3-digit code) (leave blank to keep current): ")
-                new_last_name = ui.ask_text("Enter new last name (leave blank to keep current): ")
-                new_first_name = ui.ask_text("Enter new first name (leave blank to keep current): ")
+                new_room_number = ui.ask_text("Enter new room number (floor + 3-digit code) (leave blank to keep current): ").strip()
+                new_last_name = ui.ask_text("Enter new last name (leave blank to keep current): ").strip()
+                new_first_name = ui.ask_text("Enter new first name (leave blank to keep current): ").strip()
 
                 if new_room_number == "":
                     new_room_number = old_room_number
@@ -734,16 +734,16 @@ def view_reservations():
 
 def search_reservations():
     try:
-        search_type = ui.ask_text("Search by room number (RN)/last name(LN): ").lower()
+        search_type = ui.ask_text("Search by room number (RN)/last name(LN): ").strip().lower()
         with db.get_connection() as conn:
             if conn is None:
                 return
             cursor = conn.cursor()
             if search_type == 'rn':
-                search_value = ui.ask_text(f"Enter the room number: ")
+                search_value = ui.ask_text(f"Enter the room number: ").strip()
                 cursor.execute("SELECT * FROM Reservations WHERE RoomNumber = ?", (search_value,))
             elif search_type == 'ln':
-                search_value = ui.ask_text(f"Enter the last name: ")
+                search_value = ui.ask_text(f"Enter the last name: ").strip()
                 cursor.execute("SELECT * FROM Reservations WHERE LastName = ?", (search_value,))
             else:
                 logging.info("Invalid search type.")
@@ -846,8 +846,8 @@ def check_in():
                     if res:
                         last_name = res.LastName or ""
                         guest_first = res.FirstName or first_name
-                        email = ui.ask_text("Please enter your email (optional, press Enter to skip): ") or None
-                        phone = ui.ask_text("Please enter your phone number (optional, press Enter to skip): ") or None
+                        email = ui.ask_text("Please enter your email (optional, press Enter to skip): ").strip() or None
+                        phone = ui.ask_text("Please enter your phone number (optional, press Enter to skip): ").strip() or None
                         customer_id = core.upsert_customer_profile(last_name, guest_first, email, phone)
                         if customer_id:
                             # A front-desk or pre-019 stay has no customer link yet. Now

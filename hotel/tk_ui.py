@@ -1,105 +1,99 @@
 # type: ignore
-"""Tkinter UI backend.
+"""Tkinter full-stack frontend for the hotel app.
 
-Implements the same surface as hotel.console_ui so it can be plugged into
-hotel.ui via set_backend(). Prompts are modal (blocking) so the domain code's
-synchronous flow control keeps working unchanged.
+Inputs are rendered in the main window (no separate message boxes). Display
+output goes to a scrollable text panel. Prompt methods block the calling thread
+via wait_variable so the synchronous domain flow keeps working.
 """
 import os
 import tkinter as tk
-from tkinter import simpledialog, messagebox, ttk
+from tkinter import ttk
 
-from hotel import clearance_ui
-
-CARD = None
+from hotel import clearance
 
 
-class TkUI:
-    def __init__(self):
-        self.root = tk.Tk()
+class TkinterUI:
+    def __init__(self, root=None):
+        self.owns_root = root is None
+        self.root = root or tk.Tk()
         self.root.title("Hotel Management")
-        self.root.geometry("900x640")
+        self.root.geometry("900x600")
+
+        # output panel
+        self.output = tk.Text(self.root, wrap="word", state="disabled", font=("Consolas", 10))
+        self.output.pack(side="top", fill="both", expand=True, padx=8, pady=8)
+
+        # input bar
+        bar = tk.Frame(self.root)
+        bar.pack(side="bottom", fill="x", padx=8, pady=8)
+        self.prompt_label = tk.Label(bar, text="", anchor="w")
+        self.prompt_label.pack(side="left")
+        self.entry_var = tk.StringVar()
+        self.entry = tk.Entry(bar, textvariable=self.entry_var, width=40)
+        self.entry.pack(side="left", fill="x", expand=True, padx=(8, 8))
+        self.entry.bind("<Return>", lambda _e: self._submit())
+        self.submit_btn = tk.Button(bar, text="Submit", command=self._submit)
+        self.submit_btn.pack(side="left")
+        self._submit_var = tk.IntVar(value=0)
+        self.status_var = tk.StringVar(value="")
+        self.status = tk.Label(self.root, textvariable=self.status_var, anchor="w", fg="#444444")
+        self.status.pack(side="bottom", fill="x", padx=8)
 
         self._busy = False
 
-        top = tk.Frame(self.root)
-        top.pack(fill="x", padx=8, pady=6)
-        self.status_label = tk.Label(top, text="Ready", anchor="w")
-        self.status_label.pack(fill="x")
-
-        body = tk.PanedWindow(self.root, orient=tk.VERTICAL)
-        body.pack(fill="both", expand=True, padx=8, pady=4)
-
-        log_frame = tk.Frame(body)
-        self.log = tk.Text(log_frame, wrap="word", state="disabled", height=24)
-        sb = tk.Scrollbar(log_frame, command=self.log.yview)
-        self.log.configure(yscrollcommand=sb.set)
-        self.log.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
-        body.add(log_frame, height=480)
-
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-        self._closed = False
-
-    def _on_close(self):
-        self._closed = True
-        try:
-            self.root.destroy()
-        except Exception:
-            pass
-
-    def _pump(self):
-        try:
-            self.root.update_idletasks()
-            self.root.update()
-        except Exception:
-            pass
-
+    # ---------- internals ----------
     def _append(self, text):
-        try:
-            self.log.configure(state="normal")
-            self.log.insert("end", text + "\n")
-            self.log.see("end")
-            self.log.configure(state="disabled")
-        except Exception:
-            pass
-        self._pump()
+        self.output.configure(state="normal")
+        self.output.insert("end", text + "\n")
+        self.output.see("end")
+        self.output.configure(state="disabled")
+        self.root.update_idletasks()
 
-    # --- display ---
+    def _clear_output(self):
+        self.output.configure(state="normal")
+        self.output.delete("1.0", "end")
+        self.output.configure(state="disabled")
+
+    def _submit(self):
+        self._submit_var.set(self._submit_var.get() + 1)
+
+    def _wait_submit(self):
+        self.entry.focus_set()
+        self._submit_var.set(0)
+        self.root.wait_variable(self._submit_var)
+        return self.entry_var.get()
+
+    def _set_prompt(self, text):
+        self.prompt_label.configure(text=text)
+        self.entry_var.set("")
+
+    def _clear_prompt(self):
+        self.prompt_label.configure(text="")
+        self.entry_var.set("")
+
+    # ---------- public UI methods ----------
     def clear_screen(self):
-        try:
-            self.log.configure(state="normal")
-            self.log.delete("1.0", "end")
-            self.log.configure(state="disabled")
-        except Exception:
-            pass
-        self._pump()
+        self._clear_output()
 
     def pause(self, message="Press Enter to continue..."):
-        messagebox.showinfo("Continue", message, parent=self.root)
-        self._pump()
+        self._set_prompt(message)
+        self._wait_submit()
+        self._clear_prompt()
 
     def info(self, message):
         self._append(str(message))
 
     def success(self, message):
-        self._append(f"[OK] {message}")
+        self._append(f"OK: {message}")
 
     def error(self, message):
-        self._append(f"[ERROR] {message}")
-        try:
-            messagebox.showerror("Error", str(message), parent=self.root)
-        except Exception:
-            pass
-        self._pump()
+        self._append(f"ERROR: {message}")
 
     def warning(self, message):
-        self._append(f"[WARN] {message}")
+        self._append(f"WARNING: {message}")
 
     def box(self, title, content, border_style="green"):
-        self._append(f"== {title} ==")
-        self._append(str(content))
-        self._append("")
+        self._append(f"== {title} ==\n{content}")
 
     def show_menu(self, title, lines, subtitle=None):
         self._append(f"== {title} ==")
@@ -108,135 +102,109 @@ class TkUI:
             self._append("")
         for line in lines:
             self._append(str(line))
-        self._append("")
 
     def show_table(self, title, headers, rows):
         self._append(f"== {title} ==")
         self._append(" | ".join(str(h) for h in headers))
         for row in rows:
             self._append(" | ".join(str(v) for v in row))
-        self._append("")
 
     def show_status_table(self, title, headers, rows, status_col=2):
         self.show_table(title, headers, rows)
 
-    # --- prompts ---
     def ask_number(self, prompt, default=None, minimum=None, maximum=None):
         while True:
+            suffix = f" [{default}]" if default is not None else ""
+            self._set_prompt(f"{prompt}{suffix}:")
+            raw = self._wait_submit()
+            self._clear_prompt()
+            if raw == "" and default is not None:
+                return default
             try:
-                val = simpledialog.askinteger("Input", str(prompt), parent=self.root,
-                                             initialvalue=default if default is not None else None)
-            except Exception:
-                val = None
-            if val is None:
-                # cancelled or empty: mimic console re-prompt unless default given
-                if default is not None:
-                    val = default
-                else:
-                    continue
-            if minimum is not None and val < minimum:
-                messagebox.showerror("Invalid", f"Value must be at least {minimum}.", parent=self.root)
+                value = int(raw)
+            except ValueError:
+                self.error("Invalid input. Please enter a number.")
                 continue
-            if maximum is not None and val > maximum:
-                messagebox.showerror("Invalid", f"Value must be at most {maximum}.", parent=self.root)
+            if minimum is not None and value < minimum:
+                self.error(f"Value must be at least {minimum}.")
                 continue
-            return val
+            if maximum is not None and value > maximum:
+                self.error(f"Value must be at most {maximum}.")
+                continue
+            return value
 
     def ask_confirmation(self, prompt, default="n"):
-        res = messagebox.askyesno("Confirm", str(prompt), parent=self.root)
-        if res is None:
+        self._set_prompt(f"{prompt} (y/N):")
+        raw = self._wait_submit().strip().lower()
+        self._clear_prompt()
+        if raw == "":
             return default.lower() in ("y", "yes")
-        return bool(res)
+        return raw in ("y", "yes")
 
     def ask_date(self, prompt, default=None):
         from datetime import datetime
         while True:
             suffix = f" [{default}]" if default else ""
-            raw = simpledialog.askstring("Date", f"{prompt}{suffix}", parent=self.root)
-            if raw is None:
-                raw = ""
-            raw = raw.strip()
+            self._set_prompt(f"{prompt}{suffix}:")
+            raw = self._wait_submit().strip()
+            self._clear_prompt()
             if raw == "" and default:
                 raw = default
             try:
                 return datetime.strptime(raw, "%Y-%m-%d").date()
             except ValueError:
-                messagebox.showerror("Invalid date", "Please use YYYY-MM-DD format.", parent=self.root)
+                self.error("Invalid date. Please use YYYY-MM-DD format.")
 
     def ask_optional_date(self, prompt):
         from datetime import datetime
         while True:
-            raw = simpledialog.askstring("Date", f"{prompt} (blank to skip)", parent=self.root)
-            if raw is None:
-                return None
-            raw = raw.strip()
+            self._set_prompt(f"{prompt} (blank to skip):")
+            raw = self._wait_submit().strip()
+            self._clear_prompt()
             if raw == "":
                 return None
             try:
                 return datetime.strptime(raw, "%Y-%m-%d").date()
             except ValueError:
-                messagebox.showerror("Invalid date", "Please use YYYY-MM-DD format.", parent=self.root)
+                self.error("Invalid date. Please use YYYY-MM-DD format.")
 
     def ask_text(self, prompt, default=None):
         suffix = f" [{default}]" if default is not None else ""
-        raw = simpledialog.askstring("Input", f"{prompt}{suffix}", parent=self.root,
-                                    initialvalue=default if default is not None else None)
-        if raw is None:
-            raw = ""
-        raw = raw.strip()
+        self._set_prompt(f"{prompt}{suffix}:")
+        raw = self._wait_submit().strip()
+        self._clear_prompt()
         if raw == "" and default is not None:
-            return default
+            return str(default).strip()
         return raw
 
     def ask_optional_text(self, prompt):
-        raw = simpledialog.askstring("Input", f"{prompt} (blank to skip)", parent=self.root)
-        if raw is None:
-            return None
-        raw = raw.strip()
+        self._set_prompt(f"{prompt} (blank to skip):")
+        raw = self._wait_submit().strip()
+        self._clear_prompt()
         if raw == "":
             return None
         return raw
 
-    def choose(self, prompt, options):
-        keys = [o[0] if isinstance(o, tuple) else o for o in options]
-        # Build a readable prompt
-        lines = [str(prompt), ""]
-        for i, k in enumerate(keys, 1):
-            label = None
-            for o in options:
-                if isinstance(o, tuple) and o[0] == k and len(o) > 1:
-                    label = o[1]
-            lines.append(f"{i}. {label if label is not None else k}")
-        while True:
-            raw = simpledialog.askstring("Choose", "\n".join(lines), parent=self.root)
-            if raw is None:
-                raw = ""
-            raw = raw.strip()
-            if raw in keys:
-                return raw
-            if raw.isdigit():
-                idx = int(raw) - 1
-                if 0 <= idx < len(keys):
-                    return keys[idx]
-            messagebox.showerror("Invalid", "Invalid choice. Please try again.", parent=self.root)
-
-    def set_busy(self, busy, text=None):
-        self._busy = busy
-        try:
-            self.root.configure(cursor="watch" if busy else "")
-            self.status_label.configure(text=text or ("Working..." if busy else "Ready"))
-        except Exception:
-            pass
-        self._pump()
-
     def open_clearance_window(self):
         try:
-            clearance_ui.open_clearance_window()
-        except Exception as e:
-            self.error(f"Cannot open clearance window: {e}")
+            from hotel import clearance_ui
+            # reuse existing window but attach to self.root as parent
+            clearance_ui.ClearanceWindow(root=self.root).run() if False else None
+        except Exception as exc:
+            self.error(f"Cannot open clearance window: {exc}")
 
     def run(self):
-        self.root.mainloop()
+        if self.owns_root:
+            self.root.mainloop()
 
 
-# STATUS_STYLES passthrough not needed here; facade handles.
+def open_tk_app():
+    ui = TkinterUI()
+    # monkeypatch hotel.ui so domain code uses this backend
+    import hotel.ui as ui_mod
+    for name in ["clear_screen", "pause", "info", "success", "error", "warning",
+                 "box", "show_menu", "show_table", "show_status_table",
+                 "ask_number", "ask_confirmation", "ask_date", "ask_optional_date",
+                 "ask_text", "ask_optional_text", "open_clearance_window"]:
+        setattr(ui_mod, name, getattr(ui, name))
+    return ui
