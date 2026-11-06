@@ -832,8 +832,52 @@ def it_support_panel():
             logging.info("Invalid choice. Please try again.")
         ui.pause()
 
+def _valet_handle(action):
+    license_plate = ui.ask_text("Enter vehicle license plate: ").strip()
+    owner_name = ui.ask_text("Enter owner's name: ").strip()
+    if not license_plate or not owner_name:
+        logging.info("Both the license plate and the owner's name are required.")
+        return
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                logging.info("Database connection failed.")
+                return
+            cursor = conn.cursor()
+            if action == "ci":
+                parking_spot = ui.ask_text("Enter assigned parking spot: ").strip()
+                check_in_time = datetime.now()
+                cursor.execute(
+                    "INSERT INTO ValetVehicles (LicensePlate, OwnerName, ParkingSpot, Status, CheckInTime) VALUES (?, ?, ?, ?, ?)",
+                    (license_plate, owner_name, parking_spot, "Checked-In", check_in_time)
+                )
+                conn.commit()
+                logging.info(f"Vehicle {license_plate} checked in for {owner_name} at spot {parking_spot}.")
+            else:
+                check_out_time = datetime.now()
+                cursor.execute(
+                    "UPDATE ValetVehicles SET Status = ?, CheckOutTime = ? WHERE LicensePlate = ? AND OwnerName = ? AND Status = 'Checked-In'",
+                    ("Checked-Out", check_out_time, license_plate, owner_name)
+                )
+                conn.commit()
+                if cursor.rowcount:
+                    logging.info(f"Vehicle {license_plate} checked out for {owner_name}.")
+                else:
+                    logging.info(f"No checked-in vehicle matches {license_plate} / {owner_name}.")
+    except Exception as e:
+        logging.error(f"Error managing valet vehicle: {e}")
+
+
 def valet_vehicle_management():
     """Valet: manage vehicle check-in/check-out and see what's parked."""
+    if hasattr(ui, "show_buttons"):
+        items = [
+            ("1. Check In a Vehicle", lambda: _valet_handle("ci")),
+            ("2. Check Out a Vehicle", lambda: _valet_handle("co")),
+            ("3. View Parked Vehicles", _valet_list_parked),
+        ]
+        ui.show_buttons("Valet: Vehicle Management", items)
+        return
     while True:
         ui.pause()
         ui.show_menu("Valet: Vehicle Management", [
@@ -853,39 +897,7 @@ def valet_vehicle_management():
             logging.info("Invalid choice.")
             continue
         action = 'ci' if choice == '1' else 'co'
-        license_plate = ui.ask_text("Enter vehicle license plate: ").strip()
-        owner_name = ui.ask_text("Enter owner's name: ").strip()
-        if not license_plate or not owner_name:
-            logging.info("Both the license plate and the owner's name are required.")
-            continue
-        try:
-            with db.get_connection() as conn:
-                if conn is None:
-                    logging.info("Database connection failed.")
-                    return
-                cursor = conn.cursor()
-                if action == "ci":
-                    parking_spot = ui.ask_text("Enter assigned parking spot: ").strip()
-                    check_in_time = datetime.now()
-                    cursor.execute(
-                        "INSERT INTO ValetVehicles (LicensePlate, OwnerName, ParkingSpot, Status, CheckInTime) VALUES (?, ?, ?, ?, ?)",
-                        (license_plate, owner_name, parking_spot, "Checked-In", check_in_time)
-                    )
-                    conn.commit()
-                    logging.info(f"Vehicle {license_plate} checked in for {owner_name} at spot {parking_spot}.")
-                else:
-                    check_out_time = datetime.now()
-                    cursor.execute(
-                        "UPDATE ValetVehicles SET Status = ?, CheckOutTime = ? WHERE LicensePlate = ? AND OwnerName = ? AND Status = 'Checked-In'",
-                        ("Checked-Out", check_out_time, license_plate, owner_name)
-                    )
-                    conn.commit()
-                    if cursor.rowcount:
-                        logging.info(f"Vehicle {license_plate} checked out for {owner_name}.")
-                    else:
-                        logging.info(f"No checked-in vehicle matches {license_plate} / {owner_name}.")
-        except Exception as e:
-            logging.error(f"Error managing valet vehicle: {e}")
+        _valet_handle(action)
 
 
 def _valet_list_parked():
