@@ -281,8 +281,66 @@ def _run_report(label, fn, **kwargs):
         return False
 
 
+def _export_loyalty_statements():
+    who = ui.ask_text("Guest ID/email/name, or a room number (leave blank for all): ").strip()
+    if not who:
+        _run_report("Loyalty statements", reports.export_loyalty_statements)
+        return
+    if hasattr(ui, "show_buttons"):
+        items = [
+            ("1. Guest (ID, email, or name)", lambda: _run_report("Loyalty statements", reports.export_loyalty_statements, customer=who)),
+            ("2. Room number", lambda: _run_report("Loyalty statements", reports.export_loyalty_statements, room_number=who)),
+        ]
+        ui.show_buttons("Loyalty statement for", items)
+        return
+    ui.show_menu("Loyalty statement for", ["1. Guest (ID, email, or name)", "2. Room number"])
+    ref_type = ui.ask_text("Enter your choice: ").strip()
+    if ref_type == '1':
+        _run_report("Loyalty statements", reports.export_loyalty_statements, customer=who)
+    else:
+        _run_report("Loyalty statements", reports.export_loyalty_statements, room_number=who)
+
+
+def _export_revenue():
+    start = ui.ask_optional_date("From date")
+    end = ui.ask_optional_date("To date")
+    _run_report("Revenue", reports.export_revenue, start_date=start, end_date=end)
+
+
+def _export_occupancy():
+    start = ui.ask_optional_date("From date (blank = first night on record)")
+    end = ui.ask_optional_date("To date (blank = the business date)")
+    _run_report("Occupancy", reports.export_occupancy, start_date=start, end_date=end)
+
+
+def _export_housekeeping():
+    floor = ui.ask_text("Floor (blank for every floor): ").strip()
+    on_date = ui.ask_optional_date(f"Board date (blank = business date, {core.business_date()})")
+    _run_report("Housekeeping", reports.export_housekeeping, floor=floor or None, on_date=on_date)
+
+
+def _export_booking_ledger():
+    ref = ui.ask_text("Booking reference (blank for all): ").strip()
+    _run_report("Booking ledger", reports.export_booking_ledger, booking_ref=ref or None)
+
+
 def export_reports_menu():
     """Interactive admin submenu for report exports."""
+    if hasattr(ui, "show_buttons"):
+        items = [
+            ("1. Export Transactions", lambda: _run_report("Transactions", reports.export_transactions)),
+            ("2. Export Reservations", lambda: _run_report("Reservations", reports.export_reservations)),
+            ("3. Export Loyalty Statements", _export_loyalty_statements),
+            ("4. Export Invoices (split folio)", lambda: _run_report("Invoices", reports.export_invoices)),
+            ("5. Export Revenue (room vs F&B)", _export_revenue),
+            ("6. Export Occupancy", _export_occupancy),
+            ("7. Export Housekeeping Board", _export_housekeeping),
+            ("8. Export Guest Satisfaction", lambda: _run_report("Guest satisfaction", reports.export_guest_satisfaction)),
+            ("9. Export Audit Log", lambda: _run_report("Audit log", reports.export_audit_log)),
+            ("10. Export Booking Ledger", _export_booking_ledger),
+        ]
+        ui.show_buttons("Report Export Menu", items)
+        return
     while True:
         ui.pause()
         ui.show_menu("Report Export Menu", [
@@ -304,49 +362,21 @@ def export_reports_menu():
         elif choice == '2':
             _run_report("Reservations", reports.export_reservations)
         elif choice == '3':
-            # A loyalty statement is the history of a GUEST. Both references resolve to
-            # one person; a room is accepted because staff mostly know the room, and it
-            # then reports that guest's whole history rather than one room's fragment.
-            # A room number and a CustomerID are both 4 digits, so the type is asked
-            # for rather than guessed from the shape of the input.
-            who = ui.ask_text("Guest ID/email/name, or a room number (leave blank for all): ").strip()
-            if not who:
-                _run_report("Loyalty statements", reports.export_loyalty_statements)
-            else:
-                ui.show_menu("Loyalty statement for", ["1. Guest (ID, email, or name)", "2. Room number"])
-                ref_type = ui.ask_text("Enter your choice: ").strip()
-                if ref_type == '1':
-                    _run_report("Loyalty statements", reports.export_loyalty_statements,
-                                customer=who)
-                else:
-                    _run_report("Loyalty statements", reports.export_loyalty_statements,
-                                room_number=who)
+            _export_loyalty_statements()
         elif choice == '4':
             _run_report("Invoices", reports.export_invoices)
         elif choice == '5':
-            start = ui.ask_optional_date("From date")
-            end = ui.ask_optional_date("To date")
-            _run_report("Revenue", reports.export_revenue, start_date=start, end_date=end)
+            _export_revenue()
         elif choice == '6':
-            start = ui.ask_optional_date("From date (blank = first night on record)")
-            end = ui.ask_optional_date("To date (blank = the business date)")
-            _run_report("Occupancy", reports.export_occupancy, start_date=start, end_date=end)
+            _export_occupancy()
         elif choice == '7':
-            floor = ui.ask_text("Floor (blank for every floor): ").strip()
-            # Defaults to the business date, and takes an explicit one, so the board for
-            # a day that has already closed can be re-run rather than only today's.
-            on_date = ui.ask_optional_date(f"Board date (blank = business date, "
-                                           f"{core.business_date()})")
-            _run_report("Housekeeping", reports.export_housekeeping, floor=floor or None,
-                        on_date=on_date)
+            _export_housekeeping()
         elif choice == '8':
             _run_report("Guest satisfaction", reports.export_guest_satisfaction)
         elif choice == '9':
             _run_report("Audit log", reports.export_audit_log)
         elif choice == '10':
-            ref = ui.ask_text("Booking reference (blank for all): ").strip()
-            _run_report("Booking ledger", reports.export_booking_ledger,
-                        booking_ref=ref or None)
+            _export_booking_ledger()
         elif choice == '11':
             break
         else:
