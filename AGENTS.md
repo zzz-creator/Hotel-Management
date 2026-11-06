@@ -49,6 +49,7 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 | `tk_main.py` | Tkinter launcher: opens the full-stack Tkinter frontend (inputs rendered in the main window) by patching `hotel.ui` to `hotel/tk_ui.TkinterUI` and reusing `main()`'s bootstrap |
 | `hotel/__init__.py` | Package marker only — deliberately imports no submodule, so nothing runs at package import time and the tier order below cannot cycle |
 | `hotel/ui.py` | `rich`-based console helpers (menus, tables, prompts, `clear_screen`/`pause`) |
+| `hotel/console_ui.py` | Console UI helpers (rich-based) kept as a separate module |
 | `hotel/tk_ui.py` | Tkinter full-stack frontend: main window with inline input bar, scrollable output panel; implements the same prompt/display API as `hotel/ui.py` |
 | `hotel/ui_backend.py` | UI backend selector: `set_backend`/`get_backend` used to switch between console and Tkinter |
 | `hotel/reports.py` | CSV report exports, also a standalone CLI (`python -m hotel.reports`) |
@@ -64,6 +65,7 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 | `README.md` | What the project is, requirements, setup, tests, and the "not production software" warnings. The first thing anyone landing on the repo reads |
 | `LICENSE` | AGPLv3, verbatim from gnu.org. §13 is why this is AGPL and not GPL — a modified copy served over a network must offer its source |
 | `plans/` | The approved design documents (`PLAN-*.md`) — see "Design docs" below |
+| `plans/INVENTORY-ui-inputs.md` | UI input inventory (Phase 0 decoupling counts) |
 | `assets/Clearance cards/` | The clearance-card SVG assets, `sprite.json` and `rename_sprite_assets.py` |
 
 New interactive output goes through `ui.py`, never inline `rich`.
@@ -119,6 +121,7 @@ re-runnable; it is not part of the runtime.
 | `tests/test_audit_diffs.py` | The OldValue/NewValue columns `log_audit()` writes (026) |
 | `tests/test_validate_room.py` | The guest identity check |
 | `tests/test_ui.py` | The menu renderer: the `show_menu` subtitle ("Signed in as …") and its markup escaping |
+| `tests/test_tk_ui.py` | Tkinter frontend smoke tests (instantiation, prompts, validation) |
 | `tests/test_admin_menu.py` | The split Admin Panel: role-capability parity, submenu dispatch, the guest-account entries |
 | `tests/test_onboarding.py` | First-run wizard: the completion marker, the first-account guard, item/room seeding idempotency, room-layout bounds |
 | `tests/test_schema_sync.py` | The schema checker itself — a checker that parses nothing must fail |

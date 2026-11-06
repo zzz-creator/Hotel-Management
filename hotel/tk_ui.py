@@ -110,7 +110,26 @@ class TkinterUI:
             self._append(" | ".join(str(v) for v in row))
 
     def show_status_table(self, title, headers, rows, status_col=2):
-        self.show_table(title, headers, rows)
+        self._append(f"== {title} ==")
+        self._append(" | ".join(str(h) for h in headers))
+        colors = {"Available": "green", "Occupied": "cyan", "Cleaning": "orange",
+                  "Dirty": "red", "Maintenance": "magenta"}
+        for row in rows:
+            parts = [str(v) for v in row]
+            status = parts[status_col].strip() if status_col < len(parts) else ""
+            color = colors.get(status)
+            line = " | ".join(parts)
+            if color:
+                # append with a tag for color by inserting a marked segment
+                self.output.configure(state="normal")
+                # color only the status token: simpler: append whole line in color
+                tag = f"status_{status}"
+                self.output.tag_configure(tag, foreground=color)
+                self.output.insert("end", line + "\n", (tag,))
+                self.output.see("end")
+                self.output.configure(state="disabled")
+            else:
+                self._append(line)
 
     def ask_number(self, prompt, default=None, minimum=None, maximum=None):
         while True:
@@ -188,8 +207,9 @@ class TkinterUI:
     def open_clearance_window(self):
         try:
             from hotel import clearance_ui
-            # reuse existing window but attach to self.root as parent
-            clearance_ui.ClearanceWindow(root=self.root).run() if False else None
+            top = tk.Toplevel(self.root)
+            top.title("Clearance Card Desk")
+            clearance_ui.ClearanceWindow(root=top)
         except Exception as exc:
             self.error(f"Cannot open clearance window: {exc}")
 

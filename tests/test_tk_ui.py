@@ -1,56 +1,46 @@
+import tkinter as tk
 import unittest
 
-try:
-    import tkinter as tk
-    from tkinter import simpledialog
-    _root = tk.Tk()
-    _root.withdraw()
-    _root.destroy()
-    _TK_AVAILABLE = True
-except Exception:
-    _TK_AVAILABLE = False
 
-
-@unittest.skipUnless(_TK_AVAILABLE, "Tkinter display not available")
-class TestTkUI(unittest.TestCase):
+class TkSmokeTests(unittest.TestCase):
     def setUp(self):
-        from hotel import tk_ui
-        self.ui = tk_ui.TkUI()
-        self.ui.root.withdraw()
+        self.root = tk.Tk()
+        self.root.withdraw()
 
     def tearDown(self):
-        try:
-            self.ui.root.destroy()
-        except Exception:
-            pass
+        self.root.destroy()
 
-    def test_instantiate_hidden_root(self):
-        self.assertIsNotNone(self.ui.root)
-        self.ui.info("hello")
-        self.ui.success("ok")
-        self.ui.warning("w")
+    def test_instantiate_and_display(self):
+        from hotel import tk_ui
+        ui = tk_ui.TkinterUI(root=self.root)
+        ui.info("hello")
+        ui.success("ok")
+        ui.error("err")
+        ui.warning("warn")
+        ui.box("title", "content")
+        ui.show_menu("m", ["1. a", "2. b"], subtitle="sub")
+        ui.show_table("t", ["h1", "h2"], [[1, 2]])
+        ui.show_status_table("s", ["h"], [["Available"]], status_col=0)
+        ui.clear_screen()
 
-    def test_ask_text_queued_answer(self):
-        from tkinter import simpledialog
-        simpledialog.askstring = lambda *a, **k: "queued answer"
-        result = self.ui.ask_text("prompt", default="d")
-        self.assertEqual(result, "queued answer")
+    def test_ask_text_returns_submitted_value(self):
+        from hotel import tk_ui
+        ui = tk_ui.TkinterUI(root=self.root)
+        self.root.after(50, lambda: (ui.entry_var.set("typed"), ui._submit()))
+        val = ui.ask_text("prompt:")
+        self.assertEqual(val, "typed")
 
-    def test_ask_confirmation_queued(self):
-        from tkinter import messagebox
-        messagebox.askyesno = lambda *a, **k: True
-        self.assertTrue(self.ui.ask_confirmation("sure?"))
-
-    def test_show_menu_and_table(self):
-        self.ui.show_menu("Title", ["1. A", "2. B"], subtitle="sub")
-        self.ui.show_table("T", ["h1", "h2"], [["a", "b"]])
-        self.ui.show_status_table("S", ["h"], [["x"]])
-        self.ui.box("B", "content")
-        self.ui.clear_screen()
-
-    def test_busy_toggle(self):
-        self.ui.set_busy(True, "Working")
-        self.ui.set_busy(False)
+    def test_ask_number_validates(self):
+        from hotel import tk_ui
+        ui = tk_ui.TkinterUI(root=self.root)
+        # first submit invalid, then valid
+        def seq():
+            ui.entry_var.set("abc")
+            ui._submit()
+            self.root.after(50, lambda: (ui.entry_var.set("5"), ui._submit()))
+        self.root.after(50, seq)
+        val = ui.ask_number("num:", minimum=1, maximum=10)
+        self.assertEqual(val, 5)
 
 
 if __name__ == "__main__":
