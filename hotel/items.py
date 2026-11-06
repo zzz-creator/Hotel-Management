@@ -55,7 +55,7 @@ def display_items():
     while True:
         try:
             display_items()
-            choice = int(input("Which service/item do you want? "))
+            choice = ui.ask_number("Which service/item do you want? ")
             conn = create_connection()
             if conn is None:
                 return None
@@ -79,7 +79,7 @@ def display_items():
 def get_quantity():
     while True:
         try:
-            quantity = int(input("How many? "))
+            quantity = ui.ask_number("How many? ")
             if quantity > 0:
                 return quantity
             else:
@@ -91,7 +91,7 @@ def get_quantity():
 
 def get_another_item():
     while True:
-        again = input("Would you like to order another service/item? (Yes/No) ").strip().lower()
+        again = ui.ask_text("Would you like to order another service/item? (Yes/No) ").lower()
         if again in ['yes', 'no']:
             return again == 'yes'
         else:
@@ -115,9 +115,9 @@ def _parse_pricing_rule(raw):
 
 def add_item():
     try:
-        item_name = input("Enter item name: ").strip()
-        item_price = float(input("Enter item price: ").strip())
-        rule_raw = input("Enter pricing rule - (P)eak/(O)ffPeak/blank for standard: ").strip().lower()
+        item_name = ui.ask_text("Enter item name: ")
+        item_price = ui.ask_float("Enter item price: ")
+        rule_raw = ui.ask_text("Enter pricing rule - (P)eak/(O)ffPeak/blank for standard: ").lower()
         pricing_rule = _parse_pricing_rule(rule_raw)
         with db.get_connection() as conn:
             if conn is None:
@@ -137,7 +137,7 @@ def add_item():
 
 def delete_item():
     try:
-        item_id = int(input("Enter item ID to delete: ").strip())
+        item_id = ui.ask_number("Enter item ID to delete: ")
         with db.get_connection() as conn:
             if conn is None:
                 return
@@ -182,7 +182,7 @@ def get_item_choice():
     while True:
         try:
             display_items()
-            choice = int(input("Which service/item do you want? "))
+            choice = ui.ask_number("Which service/item do you want? ")
             price = get_dynamic_price(choice)
             if price is not None:
                 return choice, price
@@ -195,7 +195,7 @@ def get_item_choice():
 
 def update_item():
     try:
-        item_id = int(input("Enter the item ID to update: ").strip())
+        item_id = ui.ask_number("Enter the item ID to update: ")
         with db.get_connection() as conn:
             if conn is None:
                 return
@@ -205,16 +205,16 @@ def update_item():
         if not item:
             logging.info("Item not found.")
             return
-        new_name = input(f"Enter the new item name (blank to keep '{item.Name}'): ").strip()
+        new_name = ui.ask_text(f"Enter the new item name (blank to keep '{item.Name}'): ")
         if new_name == "":
             new_name = item.Name
-        price_raw = input(f"Enter the new item price (blank to keep {item.Price}): ").strip()
+        price_raw = ui.ask_text(f"Enter the new item price (blank to keep {item.Price}): ")
         if price_raw == "":
             new_price = item.Price
         else:
             new_price = float(price_raw)
         current_rule = item.PricingRule if item.PricingRule else 'standard'
-        rule_raw = input(f"Enter pricing rule - (P)eak/(O)ffPeak/(S)tandard (blank to keep '{current_rule}'): ").strip().lower()
+        rule_raw = ui.ask_text(f"Enter pricing rule - (P)eak/(O)ffPeak/(S)tandard (blank to keep '{current_rule}'): ").lower()
         if rule_raw == "":
             new_rule = item.PricingRule
         elif rule_raw in ('p', 'peak'):
@@ -271,7 +271,7 @@ def manage_pricing_rules():
             "9. Reset All Settings To Seeded Defaults",
             "10. Back to Admin Panel",
         ])
-        choice = input("Enter your choice: ").strip()
+        choice = ui.ask_text("Enter your choice: ")
         if choice == '1':
             order_rate, room_rate = loyalty.points_per_dollar_order_vs_room(
                 core.get_loyalty_accrual_points_per_unit(), core.get_loyalty_points_per_night())
@@ -302,8 +302,8 @@ def manage_pricing_rules():
             logging.info(f"Current peak factor: {core.get_peak_factor():.2f} (sale price = base x factor)")
             logging.info(f"Current off-peak factor: {core.get_offpeak_factor():.2f} (sale price = base x factor)")
             try:
-                peak = float(input("Enter new peak factor (e.g. 1.20): ").strip())
-                offpeak = float(input("Enter new off-peak factor (e.g. 0.90): ").strip())
+                peak = ui.ask_float("Enter new peak factor (e.g. 1.20): ")
+                offpeak = ui.ask_float("Enter new off-peak factor (e.g. 0.90): ")
             except ValueError:
                 logging.info("Invalid factor. Please enter a number.")
                 continue
@@ -315,7 +315,7 @@ def manage_pricing_rules():
         elif choice == '3':
             logging.info(f"Current tax rate: {core.get_tax_rate()} ({core.get_tax_rate()*100:.0f}% tax on purchases).")
             try:
-                tax = float(input("Enter new tax rate as a decimal (e.g. 0.13 for 13%): ").strip())
+                tax = ui.ask_float("Enter new tax rate as a decimal (e.g. 0.13 for 13%): ")
             except ValueError:
                 logging.info("Invalid tax rate. Please enter a number.")
                 continue
@@ -334,9 +334,9 @@ def manage_pricing_rules():
                          f"billed more per dollar for a drink than for the room they slept in "
                          f"is a setting that has been mis-tuned.")
             try:
-                per_night = int(input("Enter base points awarded per night (e.g. 100): ").strip())
-                accrual = float(input("Enter points per $1 spent on orders (e.g. 0.5): ").strip())
-                redemption = int(input("Enter points needed per $1 discount (e.g. 100): ").strip())
+                per_night = ui.ask_number("Enter base points awarded per night (e.g. 100): ")
+                accrual = ui.ask_float("Enter points per $1 spent on orders (e.g. 0.5): ")
+                redemption = ui.ask_number("Enter points needed per $1 discount (e.g. 100): ")
             except ValueError:
                 logging.info("Invalid value. The per-night and redemption rates must be "
                              "whole numbers; the order accrual may be a fraction (e.g. 0.5).")
@@ -355,14 +355,14 @@ def manage_pricing_rules():
         elif choice == '5':
             ui.show_table("Room-Type Points Multipliers", ["Room Type", "Multiplier"],
                           [(rt, f"x{mult:.2f}") for rt, mult in rooms.get_all_room_type_multipliers()])
-            room_type = input("Enter the room type to edit (blank to cancel): ").strip()
+            room_type = ui.ask_text("Enter the room type to edit (blank to cancel): ")
             if not room_type:
                 continue
             if room_type not in core.DEFAULT_ROOM_TYPE_MULTIPLIERS:
                 logging.info("Unknown room type. Use one of: " + ", ".join(core.DEFAULT_ROOM_TYPE_MULTIPLIERS.keys()))
                 continue
             try:
-                new_mult = float(input(f"New multiplier for {room_type} (current x{rooms.get_room_type_multiplier(room_type):.2f}): ").strip())
+                new_mult = ui.ask_float(f"New multiplier for {room_type} (current x{rooms.get_room_type_multiplier(room_type):.2f}): ")
             except ValueError:
                 logging.info("Invalid multiplier. Please enter a number.")
                 continue
@@ -377,7 +377,7 @@ def manage_pricing_rules():
             logging.info(f"Guests can cancel free up to {current} day(s) before check-in. "
                          f"Cancelling later keeps the deposit as a fee. 0 = no free window.")
             try:
-                days = int(input("Enter the free-cancellation window in days: ").strip())
+                days = ui.ask_number("Enter the free-cancellation window in days: ")
             except ValueError:
                 logging.info("Invalid value. Please enter a whole number of days.")
                 continue
@@ -425,11 +425,11 @@ def comp_item_to_room():
         return
     logging.info("Comped perk(s) this stay qualifies for: " + ", ".join(comped))
     try:
-        item_choice = input("ItemID of the complimentary item (blank to cancel): ").strip()
+        item_choice = ui.ask_text("ItemID of the complimentary item (blank to cancel): ")
         if not item_choice:
             return
         item_id = int(item_choice)
-        quantity = int(input("Quantity: ").strip() or "1")
+        quantity = int(ui.ask_text("Quantity: ") or "1")
     except ValueError:
         logging.info("Invalid item or quantity.")
         return
@@ -556,7 +556,7 @@ def _ask_item_name(existing_names):
     "Espresso" / "Espresso (large)" is a legitimate pair, so this asks rather than refuses.
     """
     while True:
-        raw = input("Item name: ").strip()
+        raw = ui.ask_text("Item name: ")
         if not raw:
             logging.info("An item needs a name -- it is what shows up on the guest's folio.")
             continue
@@ -579,7 +579,7 @@ def _ask_item_price():
     reason as the name.
     """
     while True:
-        raw = input("Price (blank to stop adding items): ").strip()
+        raw = ui.ask_text("Price (blank to stop adding items): ")
         if not raw:
             return None
         try:
@@ -622,7 +622,7 @@ def add_custom_item(existing_names=None):
             if price is None:
                 logging.info("No price given, so no item was added.")
                 return False
-            rule_raw = input("Pricing rule - (P)eak/(O)ffPeak/blank for standard: ")
+            rule_raw = ui.ask_text("Pricing rule - (P)eak/(O)ffPeak/blank for standard: ")
             rule = _parse_pricing_rule(rule_raw)
             _insert_item(cursor, name, price, rule)
             cursor.execute("SELECT SCOPE_IDENTITY()")
