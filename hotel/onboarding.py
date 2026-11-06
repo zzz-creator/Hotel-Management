@@ -999,6 +999,43 @@ def onboarding_checklist(role="admin"):
             ui.info("\nSetup actions need the admin role. This view is read-only.")
             return
 
+        if hasattr(ui, "show_buttons"):
+            def _do_1():
+                if _create_staff_account():
+                    logging.info("Account created. It can sign in immediately.")
+            def _do_2():
+                if core.user_exists("master"):
+                    logging.info("A 'master' account already exists. Leaving it alone.")
+                else:
+                    master_password = core._prompt_new_password("Master password: ")
+                    core.add_user_with_password("master", master_password, "admin")
+            def _do_3():
+                added = _offer_item_catalogue()
+                if added:
+                    logging.info("Added %d item(s). Admin Panel → Items & Services → "
+                                 "View Items to check them.", added)
+                else:
+                    logging.info("Nothing added -- either you finished without adding anything, "
+                                 "the names already exist, or the write failed. Check the log.")
+            def _do_7():
+                if core.get_loyalty_enabled():
+                    loyalty.loyalty_admin_menu()
+                else:
+                    logging.info("The loyalty programme is off. Turn it on under "
+                                 "Setup actions → 6 (hotel settings), then manage tiers here.")
+            items = [
+                ("1. Add a staff account", _do_1),
+                ("2. Create the 'master' override account", _do_2),
+                ("3. Add items (starter catalogue, or your own)", _do_3),
+                ("4. Seed rooms", _offer_room_layout),
+                ("5. Set nightly rates", _offer_room_rates),
+                ("6. Edit hotel settings (tax, loyalty, lockout)", _offer_hotel_settings),
+                ("7. Manage loyalty tiers", _do_7),
+                ("8. Manage amenity, promotion and discount reference data", _offer_reference_data),
+                ("9. Configure conference rooms", _offer_conference_rooms),
+            ]
+            ui.show_buttons("Setup actions", items)
+            return
         ui.pause()
         ui.show_menu("Setup actions", [
             "1. Add a staff account",
@@ -1025,8 +1062,6 @@ def onboarding_checklist(role="admin"):
                 logging.info("A 'master' account already exists. Leaving it alone.")
             else:
                 master_password = core._prompt_new_password("Master password: ")
-                # Role 'admin' for the same reason as in the wizard: the override matches on
-                # the username, and no login path accepts a 'master' role.
                 core.add_user_with_password("master", master_password, "admin")
         elif choice == '3':
             added = _offer_item_catalogue()
