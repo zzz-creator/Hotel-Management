@@ -120,13 +120,45 @@ class Shell:
             self.log_append(str(line))
 
     def show_table(self, title, headers, rows):
-        self.log_append(f"== {title} ==")
-        self.log_append(" | ".join(str(h) for h in headers))
+        import tkinter as tk
+        from tkinter import ttk
+        self.clear_content()
+        tk.Label(self.content, text=title, font=("Segoe UI", 12, "bold")).pack(pady=4)
+        tree = ttk.Treeview(self.content, columns=[str(h) for h in headers], show="headings")
+        for h in headers:
+            tree.heading(str(h), text=str(h))
+            tree.column(str(h), width=120)
         for row in rows:
-            self.log_append(" | ".join(str(v) for v in row))
+            tree.insert("", "end", values=[str(v) for v in row])
+        vsb = ttk.Scrollbar(self.content, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
 
     def show_status_table(self, title, headers, rows, status_col=2):
-        self.show_table(title, headers, rows)
+        import tkinter as tk
+        from tkinter import ttk
+        self.clear_content()
+        tk.Label(self.content, text=title, font=("Segoe UI", 12, "bold")).pack(pady=4)
+        tree = ttk.Treeview(self.content, columns=[str(h) for h in headers], show="headings")
+        for h in headers:
+            tree.heading(str(h), text=str(h))
+            tree.column(str(h), width=120)
+        colors = {"Available": "green", "Occupied": "cyan", "Cleaning": "orange", "Dirty": "red", "Maintenance": "magenta"}
+        for row in rows:
+            tag = None
+            try:
+                status = str(row[status_col]).strip()
+                if status in colors:
+                    tag = status
+                    tree.tag_configure(tag, foreground=colors[status])
+            except Exception:
+                pass
+            tree.insert("", "end", values=[str(v) for v in row], tags=(tag,) if tag else ())
+        vsb = ttk.Scrollbar(self.content, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
 
     def ask_number(self, prompt, default=None, minimum=None, maximum=None):
         while True:

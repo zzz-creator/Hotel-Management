@@ -51,6 +51,7 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 | `hotel/ui.py` | `rich`-based console helpers (menus, tables, prompts, `clear_screen`/`pause`) |
 | `hotel/console_ui.py` | Console UI helpers (rich-based) kept as a separate module |
 | `hotel/tk_ui.py` | Tkinter full-stack frontend: main window with inline input bar, scrollable output panel; implements the same prompt/display API as `hotel/ui.py` |
+| `hotel/tk_forms.py` | Inline form helpers (labeled fields, submit/cancel) for the Tkinter shell |
 | `hotel/tk_shell.py` | Button-driven Tkinter shell: sidebar navigation, content area, log panel |
 | `hotel/tk_admin.py` | Button-driven admin panel built from `_admin_menu` |
 | `hotel/tk_customer.py` | Button-driven customer panel |
