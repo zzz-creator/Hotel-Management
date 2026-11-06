@@ -119,6 +119,7 @@ re-runnable; it is not part of the runtime.
 | `tests/test_audit_diffs.py` | The OldValue/NewValue columns `log_audit()` writes (026) |
 | `tests/test_validate_room.py` | The guest identity check |
 | `tests/test_ui.py` | The menu renderer: the `show_menu` subtitle ("Signed in as …") and its markup escaping |
+| `tests/test_tk_ui.py` | Smoke tests for the Tkinter backend (instantiate with hidden root, modal prompts) |
 | `tests/test_admin_menu.py` | The split Admin Panel: role-capability parity, submenu dispatch, the guest-account entries |
 | `tests/test_onboarding.py` | First-run wizard: the completion marker, the first-account guard, item/room seeding idempotency, room-layout bounds |
 | `tests/test_schema_sync.py` | The schema checker itself — a checker that parses nothing must fail |

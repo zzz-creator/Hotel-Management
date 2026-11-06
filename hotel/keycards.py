@@ -355,7 +355,7 @@ def door_access_menu(view_only=False):
             ]
         ui.pause()
         ui.show_menu("Door Access Control", options)
-        choice = input("Enter your choice: ").strip()
+        choice = ui.ask_text("Enter your choice")
         if view_only:
             view_choice = {'1': '4', '2': '6', '3': '7'}.get(choice)
             if not view_choice:
@@ -363,7 +363,7 @@ def door_access_menu(view_only=False):
                 continue
             choice = view_choice
         if choice == '1':
-            room_number = input("Enter room number (floor + 3-digit code): ").strip()
+            room_number = ui.ask_text("Enter room number (floor + 3-digit code): ").strip()
             if not room_number:
                 continue
             with db.get_connection() as conn:
@@ -389,10 +389,10 @@ def door_access_menu(view_only=False):
                     "and migration 017 must be applied."
                 )
         elif choice == '2':
-            card_number = input("Enter card number to revoke: ").strip()
+            card_number = ui.ask_text("Enter card number to revoke: ")
             revoke_key_card(card_number, "Revoked at front desk")
         elif choice == '3':
-            card_number = input("Enter card number reported lost: ").strip()
+            card_number = ui.ask_text("Enter card number reported lost: ")
             try:
                 with db.get_connection() as conn:
                     if conn is None:
@@ -412,7 +412,7 @@ def door_access_menu(view_only=False):
             except Exception as e:
                 logging.error(f"Error reporting key card lost: {e}")
         elif choice == '4':
-            room_number = input("Enter room number: ").strip()
+            room_number = ui.ask_text("Enter room number: ")
             cards = get_key_cards_for_room(room_number)
             if not cards:
                 logging.info(f"No key cards on record for room {room_number}.")
@@ -427,7 +427,7 @@ def door_access_menu(view_only=False):
                 )
         elif choice == '5':
             # Stands in for the physical reader: validates a card and logs the attempt.
-            card_number = input("Enter the card number to test: ").strip()
+            card_number = ui.ask_text("Enter the card number to test: ")
             granted, detail = try_open_door(card_number)
             (ui.success if granted else ui.error)(detail)
             if not granted:
