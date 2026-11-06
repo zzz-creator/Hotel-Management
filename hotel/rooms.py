@@ -631,6 +631,12 @@ def update_room_status():
 
 def rooms_admin_menu(view_only=False):
     """Rooms & housekeeping submenu: dashboard + drill-down explorer."""
+    if hasattr(ui, "show_buttons"):
+        items = [("1. Room Dashboard", rooms_dashboard), ("2. Explore Floor", view_rooms)]
+        if not view_only:
+            items.append(("3. Update Room Status", update_room_status))
+        ui.show_buttons("Rooms & Housekeeping", items)
+        return
     while True:
         if view_only:
             ui.pause()
