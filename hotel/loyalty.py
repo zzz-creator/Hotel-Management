@@ -559,6 +559,16 @@ def award_billed_order_points(room_number, tx_ids, customer_id=None):
 
 def loyalty_admin_menu():
     """Admin: loyalty management submenu."""
+    if hasattr(ui, "show_buttons"):
+        items = [
+            ("1. View Loyalty Accounts", admin_view_loyalty_accounts),
+            ("2. Adjust Points for a Room", admin_adjust_loyalty_points),
+            ("3. View Loyalty Transactions", admin_view_loyalty_transactions),
+            ("4. Manage Loyalty Tiers", admin_manage_loyalty_tiers),
+            ("5. Recalculate All Tiers", admin_recompute_all_tiers),
+        ]
+        ui.show_buttons("Loyalty Management", items)
+        return
     while True:
         ui.pause()
         ui.show_menu("Loyalty Management", [
