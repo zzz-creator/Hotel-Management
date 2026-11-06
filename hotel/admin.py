@@ -799,6 +799,15 @@ def it_software_installation():
 
 def it_support_panel():
     """IT Support: network config, user accounts, diagnostics, and software installs."""
+    if hasattr(ui, "show_buttons"):
+        items = [
+            ("1. Network Configuration", it_network_configuration),
+            ("2. User Account Management", it_user_accounts),
+            ("3. System Diagnostics", it_system_diagnostics),
+            ("4. Software Installation", it_software_installation),
+        ]
+        ui.show_buttons("IT Support Panel", items)
+        return
     while True:
         ui.pause()
         ui.show_menu("IT Support Panel", [
