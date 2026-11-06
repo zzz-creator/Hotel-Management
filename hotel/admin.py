@@ -569,9 +569,98 @@ def view_discount_codes():
         logging.error(f"Error viewing discount codes: {e}")
 
 
+def _discount_add():
+    with db.get_connection() as conn:
+        if conn is None:
+            logging.info("Database connection failed.")
+            return
+        cursor = conn.cursor()
+        cursor.execute("SELECT Code FROM Discounts")
+        last_code = cursor.fetchall()
+        logging.info(f"Last discount code: {(last_code[-1])[0] if last_code else 'None'}")
+        code = ui.ask_text("Enter new discount code: ").strip()
+        if not code:
+            logging.info("Discount code cannot be blank.")
+            return
+        try:
+            discount_percentage = float(ui.ask_text("Enter discount percentage: ").strip())
+        except ValueError:
+            logging.info("Invalid discount percentage.")
+            return
+        if discount_percentage <= 0 or discount_percentage > 100:
+            logging.info("Discount percentage must be greater than 0 and at most 100.")
+            return
+        cursor.execute("SELECT 1 FROM Discounts WHERE Code = ?", (code,))
+        if cursor.fetchone():
+            logging.info(f"Discount code '{code}' already exists. Update it instead.")
+            return
+        cursor.execute("INSERT INTO Discounts (Code, DiscountPercentage) VALUES (?, ?)", (code, discount_percentage))
+        conn.commit()
+        core.log_audit("CREATE", "Discount", code, f"{discount_percentage}%")
+        logging.info(f"Discount code '{code}' added successfully.")
+
+
+def _discount_update():
+    view_discount_codes()
+    code = ui.ask_text("Enter discount code to update: ").strip()
+    with db.get_connection() as conn:
+        if conn is None:
+            logging.info("Database connection failed.")
+            return
+        cursor = conn.cursor()
+        cursor.execute("SELECT DiscountPercentage FROM Discounts WHERE Code = ?", (code,))
+        existing = cursor.fetchone()
+        if not existing:
+            logging.info("Discount code not found.")
+            return
+        try:
+            new_percentage = float(ui.ask_text("Enter new discount percentage: ").strip())
+        except ValueError:
+            logging.info("Invalid percentage.")
+            return
+        if new_percentage <= 0 or new_percentage > 100:
+            logging.info("Discount percentage must be greater than 0 and at most 100.")
+            return
+        cursor.execute("UPDATE Discounts SET DiscountPercentage = ? WHERE Code = ?", (new_percentage, code))
+        conn.commit()
+        core.log_audit("UPDATE", "Discount", code, f"{float(existing[0])}% -> {new_percentage}%",
+                      old_value=f"{float(existing[0])}%", new_value=f"{new_percentage}%")
+        logging.info(f"Discount code '{code}' updated successfully.")
+
+
+def _discount_delete():
+    view_discount_codes()
+    code = ui.ask_text("Enter discount code to delete: ").strip()
+    with db.get_connection() as conn:
+        if conn is None:
+            logging.info("Database connection failed.")
+            return
+        cursor = conn.cursor()
+        cursor.execute("SELECT DiscountPercentage FROM Discounts WHERE Code = ?", (code,))
+        existing = cursor.fetchone()
+        if not existing:
+            logging.info("Discount code not found.")
+            return
+        if not ui.ask_confirmation(f"Delete discount code '{code}' ({float(existing[0])}%)?"):
+            return
+        cursor.execute("DELETE FROM Discounts WHERE Code = ?", (code,))
+        conn.commit()
+        core.log_audit("DELETE", "Discount", code, f"Deleted {float(existing[0])}% code")
+        logging.info(f"Discount code '{code}' deleted successfully.")
+
+
 def manage_discount_codes():
     """Provides a sub-menu for discount code management."""
     try:
+        if hasattr(ui, "show_buttons"):
+            items = [
+                ("1. Add Discount Code", _discount_add),
+                ("2. Update Discount Code", _discount_update),
+                ("3. Delete Discount Code", _discount_delete),
+                ("4. View Discount Codes", view_discount_codes),
+            ]
+            ui.show_buttons("Discount Code Management", items)
+            return
         while True:
             ui.pause()
             ui.show_menu("Discount Code Management", [
@@ -588,73 +677,11 @@ def manage_discount_codes():
                     return
                 cursor = conn.cursor()
                 if choice == "1":
-                    cursor.execute("SELECT Code FROM Discounts")
-                    last_code = cursor.fetchall()
-                    logging.info(f"Last discount code: {(last_code[-1])[0] if last_code else 'None'}")
-                    code = ui.ask_text("Enter new discount code: ").strip()
-                    if not code:
-                        logging.info("Discount code cannot be blank.")
-                        continue
-                    try:
-                        discount_percentage = float(ui.ask_text("Enter discount percentage: ").strip())
-                    except ValueError:
-                        logging.info("Invalid discount percentage.")
-                        continue
-                    if discount_percentage <= 0 or discount_percentage > 100:
-                        logging.info("Discount percentage must be greater than 0 and at most 100.")
-                        continue
-                    # Duplicate codes silently overwrote the first one (the PK is Code).
-                    cursor.execute("SELECT 1 FROM Discounts WHERE Code = ?", (code,))
-                    if cursor.fetchone():
-                        logging.info(f"Discount code '{code}' already exists. Update it instead.")
-                        continue
-                    cursor.execute(
-                        "INSERT INTO Discounts (Code, DiscountPercentage) VALUES (?, ?)",
-                        (code, discount_percentage)
-                    )
-                    conn.commit()
-                    core.log_audit("CREATE", "Discount", code, f"{discount_percentage}%")
-                    logging.info(f"Discount code '{code}' added successfully.")
+                    _discount_add()
                 elif choice == "2":
-                    view_discount_codes()
-                    code = ui.ask_text("Enter discount code to update: ").strip()
-                    cursor.execute("SELECT DiscountPercentage FROM Discounts WHERE Code = ?", (code,))
-                    existing = cursor.fetchone()
-                    if existing:
-                        try:
-                            new_percentage = float(ui.ask_text("Enter new discount percentage: ").strip())
-                        except ValueError:
-                            logging.info("Invalid percentage.")
-                            continue
-                        if new_percentage <= 0 or new_percentage > 100:
-                            logging.info("Discount percentage must be greater than 0 and at most 100.")
-                            continue
-                        cursor.execute(
-                            "UPDATE Discounts SET DiscountPercentage = ? WHERE Code = ?",
-                            (new_percentage, code)
-                        )
-                        conn.commit()
-                        core.log_audit("UPDATE", "Discount", code,
-                                  f"{float(existing[0])}% -> {new_percentage}%",
-                                  old_value=f"{float(existing[0])}%",
-                                  new_value=f"{new_percentage}%")
-                        logging.info(f"Discount code '{code}' updated successfully.")
-                    else:
-                        logging.info("Discount code not found.")
+                    _discount_update()
                 elif choice == "3":
-                    view_discount_codes()
-                    code = ui.ask_text("Enter discount code to delete: ").strip()
-                    cursor.execute("SELECT DiscountPercentage FROM Discounts WHERE Code = ?", (code,))
-                    existing = cursor.fetchone()
-                    if not existing:
-                        logging.info("Discount code not found.")
-                        continue
-                    if not ui.ask_confirmation(f"Delete discount code '{code}' ({float(existing[0])}%)?"):
-                        continue
-                    cursor.execute("DELETE FROM Discounts WHERE Code = ?", (code,))
-                    conn.commit()
-                    core.log_audit("DELETE", "Discount", code, f"Deleted {float(existing[0])}% code")
-                    logging.info(f"Discount code '{code}' deleted successfully.")
+                    _discount_delete()
                 elif choice == "4":
                     view_discount_codes()
                 elif choice == "5":
