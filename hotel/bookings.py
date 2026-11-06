@@ -84,8 +84,8 @@ def book_room():
         logging.info(f"Booking as {first_name} {last_name}"
                      + (f" <{profile[2]}>." if profile[2] else "."))
     else:
-        last_name = input("Enter your last name: ").strip()
-        first_name = input("Enter your first name: ").strip()
+        last_name = ui.ask_text("Enter your last name: ")
+        first_name = ui.ask_text("Enter your first name: ")
         if not last_name or not first_name:
             logging.info("Both first and last name are required to hold a reservation.")
             return
@@ -298,8 +298,7 @@ def view_my_booking():
     customer_id = customer.customer_login()
     if not customer_id:
         return
-    booking_ref = input(f"Enter your booking reference (the code starting with "
-                        f"'{booking_ledger.BOOKING_REF_PREFIX}-', NOT the room number): ").strip().upper()
+    booking_ref = ui.ask_text(f"Enter your booking reference (the code starting with '{booking_ledger.BOOKING_REF_PREFIX}-', NOT the room number): ").upper()
     if not booking_ref:
         return
     found = _own_booking(booking_ref, customer_id)
@@ -345,8 +344,7 @@ def cancel_booking():
     customer_id = customer.customer_login()
     if not customer_id:
         return
-    booking_ref = input(f"Enter your booking reference (the code starting with "
-                        f"'{booking_ledger.BOOKING_REF_PREFIX}-', NOT the room number): ").strip().upper()
+    booking_ref = ui.ask_text(f"Enter your booking reference (the code starting with '{booking_ledger.BOOKING_REF_PREFIX}-', NOT the room number): ").upper()
     if not booking_ref:
         return
     found = _own_booking(booking_ref, customer_id)
@@ -374,7 +372,7 @@ def cancel_booking():
     if not ui.ask_confirmation("Cancel this booking?"):
         logging.info("Booking left unchanged.")
         return
-    confirm = input(f"Type {booking_ref} to confirm cancellation: ").strip().upper()
+    confirm = ui.ask_text(f"Type {booking_ref} to confirm cancellation: ").upper()
     if confirm != booking_ref:
         logging.info("Reference did not match. Booking left unchanged.")
         return
@@ -432,7 +430,7 @@ def booking_panel():
             "3. Cancel My Booking",
             "4. Sign Out",
         ], subtitle=customer.customer_session_label())
-        choice = input("Enter your choice: ").strip()
+        choice = ui.ask_text("Enter your choice")
         if choice == '1':
             book_room()
         elif choice == '2':

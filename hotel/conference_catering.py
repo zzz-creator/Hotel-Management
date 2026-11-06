@@ -103,7 +103,7 @@ def catering_admin_menu():
             "3. Mark delivered",
             "4. Back",
         ])
-        choice = input("Enter your choice: ").strip()
+        choice = ui.ask_text("Enter your choice: ")
         if choice == '1':
             orders = list_catering_orders()
             if not orders:
@@ -114,14 +114,14 @@ def catering_admin_menu():
                               [(o[0], o[1], o[2], o[3], f"${o[4]:,.2f}", f"${o[5]:,.2f}", o[6]) for o in orders])
         elif choice == '2':
             try:
-                bid = int(input("Booking ID: ").strip())
+                bid = ui.ask_number("Booking ID: ")
             except ValueError:
                 logging.info("Invalid id.")
                 continue
             ui.show_table("Packages", ["Package", "Per head"], [(k, f"${v:,.2f}") for k, v in CATERING_PACKAGES.items()])
-            pkg = input("Package: ").strip()
+            pkg = ui.ask_text("Package: ")
             try:
-                heads = int(input("Head count: ").strip())
+                heads = ui.ask_number("Head count: ")
             except ValueError:
                 logging.info("Invalid count.")
                 continue
@@ -130,7 +130,7 @@ def catering_admin_menu():
                 ui.success(f"Catering order #{oid} placed.")
         elif choice == '3':
             try:
-                oid = int(input("Order ID: ").strip())
+                oid = ui.ask_number("Order ID: ")
             except ValueError:
                 logging.info("Invalid id.")
                 continue
