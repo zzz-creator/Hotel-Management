@@ -187,13 +187,16 @@ class Shell:
             return value
 
     def ask_confirmation(self, prompt, default="n"):
-        self.prompt_label.configure(text=f"{prompt} (y/N):")
-        raw = self._wait_submit().strip().lower()
-        self.prompt_label.configure(text="")
-        self.entry_var.set("")
+        from hotel import tk_forms
+        for w in self.prompt_area.winfo_children():
+            w.destroy()
+        form = tk_forms.Form(self.prompt_area, [("value", "text", None)], title=f"{prompt} (y/N)")
+        ok = form.wait()
+        raw = form.collect().get("value", "") if ok else ""
+        form.destroy()
         if raw == "":
             return default.lower() in ("y", "yes")
-        return raw in ("y", "yes")
+        return raw.lower() in ("y", "yes")
 
     def ask_date(self, prompt, default=None):
         from datetime import datetime
@@ -216,10 +219,13 @@ class Shell:
     def ask_optional_date(self, prompt):
         from datetime import datetime
         while True:
-            self.prompt_label.configure(text=f"{prompt} (blank to skip):")
-            raw = self._wait_submit().strip()
-            self.prompt_label.configure(text="")
-            self.entry_var.set("")
+            from hotel import tk_forms
+            for w in self.prompt_area.winfo_children():
+                w.destroy()
+            form = tk_forms.Form(self.prompt_area, [("value", "date", None)], title=f"{prompt} (blank to skip)")
+            ok = form.wait()
+            raw = form.collect().get("value", "") if ok else ""
+            form.destroy()
             if raw == "":
                 return None
             try:
@@ -240,10 +246,13 @@ class Shell:
         return val
 
     def ask_optional_text(self, prompt):
-        self.prompt_label.configure(text=f"{prompt} (blank to skip):")
-        raw = self._wait_submit().strip()
-        self.prompt_label.configure(text="")
-        self.entry_var.set("")
+        from hotel import tk_forms
+        for w in self.prompt_area.winfo_children():
+            w.destroy()
+        form = tk_forms.Form(self.prompt_area, [("value", "text", None)], title=f"{prompt} (blank to skip)")
+        ok = form.wait()
+        raw = form.collect().get("value", "") if ok else ""
+        form.destroy()
         if raw == "":
             return None
         return raw
