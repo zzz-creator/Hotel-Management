@@ -27,6 +27,8 @@ class Shell:
         right.pack(side="right", fill="both", expand=True)
         self.content = tk.Frame(right)
         self.content.pack(side="top", fill="both", expand=True)
+        self.prompt_area = tk.Frame(right)
+        self.prompt_area.pack(side="top", fill="x")
         self.log = tk.Text(right, height=8, wrap="word", state="disabled", font=("Consolas", 9))
         self.log.pack(side="bottom", fill="x")
 
@@ -161,12 +163,14 @@ class Shell:
         vsb.pack(side="right", fill="y")
 
     def ask_number(self, prompt, default=None, minimum=None, maximum=None):
+        from hotel import tk_forms
         while True:
-            suffix = f" [{default}]" if default is not None else ""
-            self.prompt_label.configure(text=f"{prompt}{suffix}:")
-            raw = self._wait_submit().strip()
-            self.prompt_label.configure(text="")
-            self.entry_var.set("")
+            for w in self.prompt_area.winfo_children():
+                w.destroy()
+            form = tk_forms.Form(self.prompt_area, [("value", "number", default)], title=prompt)
+            ok = form.wait()
+            raw = form.collect().get("value", "") if ok else ""
+            form.destroy()
             if raw == "" and default is not None:
                 return default
             try:
@@ -194,11 +198,14 @@ class Shell:
     def ask_date(self, prompt, default=None):
         from datetime import datetime
         while True:
-            suffix = f" [{default}]" if default else ""
-            self.prompt_label.configure(text=f"{prompt}{suffix}:")
-            raw = self._wait_submit().strip()
-            self.prompt_label.configure(text="")
-            self.entry_var.set("")
+            for w in self.prompt_area.winfo_children():
+                w.destroy()
+            form = None
+            from hotel import tk_forms
+            form = tk_forms.Form(self.prompt_area, [("value", "date", default)], title=prompt)
+            ok = form.wait()
+            raw = form.collect().get("value", "") if ok else ""
+            form.destroy()
             if raw == "" and default:
                 raw = default
             try:
@@ -221,14 +228,16 @@ class Shell:
                 self.error("Invalid date. Please use YYYY-MM-DD format.")
 
     def ask_text(self, prompt, default=None):
-        suffix = f" [{default}]" if default is not None else ""
-        self.prompt_label.configure(text=f"{prompt}{suffix}:")
-        raw = self._wait_submit().strip()
-        self.prompt_label.configure(text="")
-        self.entry_var.set("")
-        if raw == "" and default is not None:
+        from hotel import tk_forms
+        for w in self.prompt_area.winfo_children():
+            w.destroy()
+        form = tk_forms.Form(self.prompt_area, [("value", "text", default)], title=prompt)
+        ok = form.wait()
+        val = form.collect().get("value", "") if ok else ""
+        form.destroy()
+        if val == "" and default is not None:
             return str(default).strip()
-        return raw
+        return val
 
     def ask_optional_text(self, prompt):
         self.prompt_label.configure(text=f"{prompt} (blank to skip):")
