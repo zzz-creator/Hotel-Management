@@ -83,3 +83,136 @@ class Shell:
 
     def run(self):
         self.root.mainloop()
+
+    # --- ui-compatible methods (so domain code using ui.* works) ---
+    def clear_screen(self):
+        self.log.configure(state="normal")
+        self.log.delete("1.0", "end")
+        self.log.configure(state="disabled")
+
+    def pause(self, message="Press Enter to continue..."):
+        self.prompt_label.configure(text=message)
+        self._wait_submit()
+        self.prompt_label.configure(text="")
+        self.entry_var.set("")
+
+    def info(self, message):
+        self.log_append(str(message))
+
+    def success(self, message):
+        self.log_append(f"OK: {message}")
+
+    def error(self, message):
+        self.log_append(f"ERROR: {message}")
+
+    def warning(self, message):
+        self.log_append(f"WARNING: {message}")
+
+    def box(self, title, content, border_style="green"):
+        self.log_append(f"== {title} ==\n{content}")
+
+    def show_menu(self, title, lines, subtitle=None):
+        # fallback text menu (used by not-yet-converted panels)
+        self.log_append(f"== {title} ==")
+        if subtitle:
+            self.log_append(str(subtitle))
+        for line in lines:
+            self.log_append(str(line))
+
+    def show_table(self, title, headers, rows):
+        self.log_append(f"== {title} ==")
+        self.log_append(" | ".join(str(h) for h in headers))
+        for row in rows:
+            self.log_append(" | ".join(str(v) for v in row))
+
+    def show_status_table(self, title, headers, rows, status_col=2):
+        self.show_table(title, headers, rows)
+
+    def ask_number(self, prompt, default=None, minimum=None, maximum=None):
+        while True:
+            suffix = f" [{default}]" if default is not None else ""
+            self.prompt_label.configure(text=f"{prompt}{suffix}:")
+            raw = self._wait_submit().strip()
+            self.prompt_label.configure(text="")
+            self.entry_var.set("")
+            if raw == "" and default is not None:
+                return default
+            try:
+                value = int(raw)
+            except ValueError:
+                self.error("Invalid input. Please enter a number.")
+                continue
+            if minimum is not None and value < minimum:
+                self.error(f"Value must be at least {minimum}.")
+                continue
+            if maximum is not None and value > maximum:
+                self.error(f"Value must be at most {maximum}.")
+                continue
+            return value
+
+    def ask_confirmation(self, prompt, default="n"):
+        self.prompt_label.configure(text=f"{prompt} (y/N):")
+        raw = self._wait_submit().strip().lower()
+        self.prompt_label.configure(text="")
+        self.entry_var.set("")
+        if raw == "":
+            return default.lower() in ("y", "yes")
+        return raw in ("y", "yes")
+
+    def ask_date(self, prompt, default=None):
+        from datetime import datetime
+        while True:
+            suffix = f" [{default}]" if default else ""
+            self.prompt_label.configure(text=f"{prompt}{suffix}:")
+            raw = self._wait_submit().strip()
+            self.prompt_label.configure(text="")
+            self.entry_var.set("")
+            if raw == "" and default:
+                raw = default
+            try:
+                return datetime.strptime(raw, "%Y-%m-%d").date()
+            except ValueError:
+                self.error("Invalid date. Please use YYYY-MM-DD format.")
+
+    def ask_optional_date(self, prompt):
+        from datetime import datetime
+        while True:
+            self.prompt_label.configure(text=f"{prompt} (blank to skip):")
+            raw = self._wait_submit().strip()
+            self.prompt_label.configure(text="")
+            self.entry_var.set("")
+            if raw == "":
+                return None
+            try:
+                return datetime.strptime(raw, "%Y-%m-%d").date()
+            except ValueError:
+                self.error("Invalid date. Please use YYYY-MM-DD format.")
+
+    def ask_text(self, prompt, default=None):
+        suffix = f" [{default}]" if default is not None else ""
+        self.prompt_label.configure(text=f"{prompt}{suffix}:")
+        raw = self._wait_submit().strip()
+        self.prompt_label.configure(text="")
+        self.entry_var.set("")
+        if raw == "" and default is not None:
+            return str(default).strip()
+        return raw
+
+    def ask_optional_text(self, prompt):
+        self.prompt_label.configure(text=f"{prompt} (blank to skip):")
+        raw = self._wait_submit().strip()
+        self.prompt_label.configure(text="")
+        self.entry_var.set("")
+        if raw == "":
+            return None
+        return raw
+
+    def open_clearance_window(self):
+        try:
+            from hotel import clearance_ui
+            import tkinter as tk
+            top = tk.Toplevel(self.root)
+            top.title("Clearance Card Desk")
+            clearance_ui.ClearanceWindow(root=top)
+        except Exception as exc:
+            self.error(f"Cannot open clearance window: {exc}")

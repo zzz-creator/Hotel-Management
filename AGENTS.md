@@ -51,6 +51,11 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 | `hotel/ui.py` | `rich`-based console helpers (menus, tables, prompts, `clear_screen`/`pause`) |
 | `hotel/console_ui.py` | Console UI helpers (rich-based) kept as a separate module |
 | `hotel/tk_ui.py` | Tkinter full-stack frontend: main window with inline input bar, scrollable output panel; implements the same prompt/display API as `hotel/ui.py` |
+| `hotel/tk_shell.py` | Button-driven Tkinter shell: sidebar navigation, content area, log panel |
+| `hotel/tk_admin.py` | Button-driven admin panel built from `_admin_menu` |
+| `hotel/tk_customer.py` | Button-driven customer panel |
+| `hotel/tk_bookings.py` | Button-driven bookings panel |
+| `hotel/tk_conference.py` | Button-driven conference panel |
 | `hotel/ui_backend.py` | UI backend selector: `set_backend`/`get_backend` used to switch between console and Tkinter |
 | `hotel/reports.py` | CSV report exports, also a standalone CLI (`python -m hotel.reports`) |
 | `hotel/night_audit.py` | Night-audit snapshot writer: `run_night_audit()`, `is_audited()` (037) |
