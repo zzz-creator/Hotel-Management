@@ -164,7 +164,7 @@ def order_item():
 
     try:
         while True:
-            pay_mode = input("How would you like to pay? (1 = Pay now, 2 = Add to room bill): ").strip()
+            pay_mode = ui.ask_text("How would you like to pay? (1 = Pay now, 2 = Add to room bill): ")
             if pay_mode in ("1", "2"):
                 break
             logging.info("Invalid choice. Enter 1 to pay now or 2 to add to your room bill.")
@@ -199,7 +199,7 @@ def order_item():
                 else:
                     logging.info("Payment received. Your order is confirmed.")
             else:
-                add_later = input("Payment declined. Add this order to your room bill instead? (Y/N): ").strip().lower()
+                add_later = ui.ask_text("Payment declined. Add this order to your room bill instead? (Y/N): ").lower()
                 if add_later == 'y':
                     # Added to the room bill: record at full list price (the discount is
                     # applied again at check-out when the bill is settled).
@@ -257,12 +257,12 @@ def provide_feedback():
                         last_name = row[1] or ""
         rating = None
         while rating is None:
-            raw = input("Please rate our service on a scale of 1-5: ").strip()
+            raw = ui.ask_text("Please rate our service on a scale of 1-5: ")
             if raw.isdigit() and 1 <= int(raw) <= 5:
                 rating = int(raw)
             else:
                 logging.info("Invalid rating. Please enter a number between 1 and 5.")
-        comment = input("Please provide any additional comments: ").strip()
+        comment = ui.ask_text("Please provide any additional comments: ")
         with db.get_connection() as conn:
             if conn is None:
                 logging.info("Could not save your feedback. Please tell the front desk.")
@@ -329,7 +329,7 @@ def track_order_status():
         [(o[0], o[1], o[2].strftime("%Y-%m-%d %H:%M"),
           o[3].strftime("%Y-%m-%d %H:%M"), o[4] or "-") for o in orders],
     )
-    raw = input("Enter an order number for detail (blank to skip): ").strip()
+    raw = ui.ask_text("Enter an order number for detail (blank to skip): ")
     if not raw.isdigit():
         return
     order = next((o for o in orders if o[0] == int(raw)), None)
@@ -413,7 +413,7 @@ def manage_orders_menu():
                 [(r[0], r[1], r[2], r[3].strftime("%Y-%m-%d %H:%M"),
                   r[4].strftime("%Y-%m-%d %H:%M"), r[5] or "-") for r in rows],
             )
-            raw = input("Enter an order number to update (blank to refresh): ").strip()
+            raw = ui.ask_text("Enter an order number to update (blank to refresh): ")
             if not raw:
                 ui.pause()
                 continue
@@ -422,7 +422,7 @@ def manage_orders_menu():
                 ui.pause()
                 continue
             advance_order(int(raw))
-        action = input("Press Enter to refresh, or 'q' to exit: ").strip().lower()
+        action = ui.ask_text("Press Enter to refresh, or 'q' to exit: ").lower()
         if action == 'q':
             return
         ui.pause()
@@ -459,12 +459,12 @@ def advance_order(order_id):
             if not following:
                 logging.info(f"Order {order_id} is '{current}' and cannot be advanced further.")
                 return current
-            choice = input(
+            choice = ui.ask_text(
                 f"Order {order_id} is '{current}'.\n"
                 f"  1. Advance to '{following}'\n"
                 f"  2. Cancel the order\n"
                 f"Choose: "
-            ).strip()
+            )
             if choice == "2":
                 new_status = "Cancelled"
             elif choice == "1":
@@ -517,7 +517,7 @@ def manage_amenities_menu():
             "4. Retire / Reactivate Amenity",
             "5. Back",
         ])
-        choice = input("Enter your choice: ").strip()
+        choice = ui.ask_text("Enter your choice: ")
         if choice == '1':
             rows = core.get_amenities(active_only=False)
             if not rows:
@@ -526,11 +526,11 @@ def manage_amenities_menu():
                 ui.show_table("All Amenities", ["#", "Name", "Details"],
                               [(r[0], r[1], r[2] or "") for r in rows])
         elif choice == '2':
-            name = input("Amenity name: ").strip()
+            name = ui.ask_text("Amenity name: ")
             if not name:
                 logging.info("Amenity name cannot be blank.")
                 continue
-            details = input("Details (optional): ").strip()
+            details = ui.ask_text("Details (optional): ")
             with db.get_connection() as conn:
                 if conn is None:
                     return
@@ -548,15 +548,15 @@ def manage_amenities_menu():
             if not rows:
                 logging.info("No amenities on record.")
                 continue
-            raw = input("Amenity number to edit: ").strip()
+            raw = ui.ask_text("Amenity number to edit: ")
             if not raw.isdigit():
                 continue
             amenity = next((r for r in rows if r[0] == int(raw)), None)
             if not amenity:
                 logging.info("Amenity not found.")
                 continue
-            name = input(f"Name (blank to keep '{amenity[1]}'): ").strip() or amenity[1]
-            details = input(f"Details (blank to keep '{amenity[2] or ''}'): ").strip() or amenity[2]
+            name = ui.ask_text(f"Name (blank to keep '{amenity[1]}'): ") or amenity[1]
+            details = ui.ask_text(f"Details (blank to keep '{amenity[2] or ''}'): ") or amenity[2]
             with db.get_connection() as conn:
                 if conn is None:
                     return
@@ -571,7 +571,7 @@ def manage_amenities_menu():
                            new_value=f"{name} | {details or ''}")
             ui.success("Amenity updated.")
         elif choice == '4':
-            raw = input("Amenity number to toggle: ").strip()
+            raw = ui.ask_text("Amenity number to toggle: ")
             if not raw.isdigit():
                 continue
             with db.get_connection() as conn:
@@ -609,7 +609,7 @@ def manage_promotions_menu():
             "4. End Promotion",
             "5. Back",
         ])
-        choice = input("Enter your choice: ").strip()
+        choice = ui.ask_text("Enter your choice: ")
         if choice in ('1', '3', '4'):
             try:
                 with db.get_connection() as conn:
@@ -638,7 +638,7 @@ def manage_promotions_menu():
                     )
                 ui.pause()
                 continue
-            raw = input("Promotion number: ").strip()
+            raw = ui.ask_text("Promotion number: ")
             if not raw.isdigit():
                 continue
             promotion = next((r for r in rows if r[0] == int(raw)), None)
@@ -656,9 +656,9 @@ def manage_promotions_menu():
                                old_value="Active", new_value="Ended")
                 ui.success("Promotion ended.")
             else:
-                title = input(f"Title (blank to keep '{promotion[1]}'): ").strip() or promotion[1]
-                details = input(f"Details (blank to keep): ").strip() or promotion[2]
-                code = input(f"Discount code (blank to keep '{promotion[3] or ''}'): ").strip() or promotion[3]
+                title = ui.ask_text(f"Title (blank to keep '{promotion[1]}'): ") or promotion[1]
+                details = ui.ask_text(f"Details (blank to keep): ") or promotion[2]
+                code = ui.ask_text(f"Discount code (blank to keep '{promotion[3] or ''}'): ") or promotion[3]
                 with db.get_connection() as conn:
                     if conn is None:
                         return
@@ -674,12 +674,12 @@ def manage_promotions_menu():
                                new_value=f"{title} | {details or ''} | {code or ''}")
                 ui.success("Promotion updated.")
         elif choice == '2':
-            title = input("Promotion title: ").strip()
+            title = ui.ask_text("Promotion title: ")
             if not title:
                 logging.info("Promotion title cannot be blank.")
                 continue
-            details = input("Details: ").strip()
-            code = input("Associated discount code (optional): ").strip()
+            details = ui.ask_text("Details: ")
+            code = ui.ask_text("Associated discount code (optional): ")
             with db.get_connection() as conn:
                 if conn is None:
                     return
