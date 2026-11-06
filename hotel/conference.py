@@ -266,7 +266,7 @@ def conference_room_admin_menu():
             "5. Manage setup types for a room",
             "6. Back to Admin Panel",
         ])
-        choice = input("Enter your choice: ").strip()
+        choice = ui.ask_text("Enter your choice: ")
         if choice == '1':
             rooms = get_conference_rooms(active_only=False)
             if not rooms:
@@ -283,15 +283,15 @@ def conference_room_admin_menu():
                                       ["Setup", "Capacity", "Active"],
                                       [(s[1], s[2], "Yes" if s[3] else "No") for s in setups])
         elif choice == '2':
-            room_number = input("Room number (label, e.g. CR-101): ").strip()
-            name = input("Room name: ").strip()
+            room_number = ui.ask_text("Room number (label, e.g. CR-101): ")
+            name = ui.ask_text("Room name: ")
             try:
-                capacity = int(input("Capacity: ").strip())
+                capacity = ui.ask_number("Capacity: ")
             except ValueError:
                 logging.info("Invalid capacity.")
                 continue
             try:
-                rate = float(input("Hourly rate: ").strip())
+                rate = ui.ask_float("Hourly rate: ")
             except ValueError:
                 logging.info("Invalid rate.")
                 continue
@@ -300,27 +300,27 @@ def conference_room_admin_menu():
                 ui.success(f"Conference room '{room_number}' added (id {new_id}).")
                 # Offer to add at least one setup type right away.
                 if ui.ask_confirmation("Add a setup type now?", default="y"):
-                    st = input("Setup type (" + ", ".join(CONFERENCE_SETUP_TYPES) + "): ").strip()
+                    st = ui.ask_text("Setup type (" + ", ".join(CONFERENCE_SETUP_TYPES) + "): ")
                     try:
-                        cap = int(input("Capacity for that setup: ").strip())
+                        cap = ui.ask_number("Capacity for that setup: ")
                     except ValueError:
                         cap = capacity
                     add_room_setup(room_number, st, cap)
         elif choice == '3':
-            room_number = input("Room number: ").strip()
+            room_number = ui.ask_text("Room number: ")
             room = get_conference_room(room_number)
             if room is None:
                 logging.info("Conference room not found.")
                 continue
             try:
-                new_rate = float(input(f"New hourly rate (current ${room[4]:,.2f}): ").strip())
+                new_rate = ui.ask_float(f"New hourly rate (current ${room[4]:,.2f}): ")
             except ValueError:
                 logging.info("Invalid rate.")
                 continue
             if update_conference_room_rate(room_number, new_rate):
                 ui.success(f"Rate updated for {room_number}.")
         elif choice == '4':
-            room_number = input("Room number: ").strip()
+            room_number = ui.ask_text("Room number: ")
             room = get_conference_room(room_number)
             if room is None:
                 logging.info("Conference room not found.")
@@ -329,7 +329,7 @@ def conference_room_admin_menu():
             if set_conference_room_active(room_number, new_state):
                 ui.success(f"{room_number} is now {'active' if new_state else 'inactive'}.")
         elif choice == '5':
-            room_number = input("Room number: ").strip()
+            room_number = ui.ask_text("Room number: ")
             room = get_conference_room(room_number)
             if room is None:
                 logging.info("Conference room not found.")
@@ -345,11 +345,11 @@ def conference_room_admin_menu():
                     "2. Remove a setup type",
                     "3. Back",
                 ])
-                sub = input("Enter your choice: ").strip()
+                sub = ui.ask_text("Enter your choice: ")
                 if sub == '1':
-                    st = input("Setup type (" + ", ".join(CONFERENCE_SETUP_TYPES) + "): ").strip()
+                    st = ui.ask_text("Setup type (" + ", ".join(CONFERENCE_SETUP_TYPES) + "): ")
                     try:
-                        cap = int(input("Capacity: ").strip())
+                        cap = ui.ask_number("Capacity: ")
                     except ValueError:
                         logging.info("Invalid capacity.")
                         continue
@@ -357,7 +357,7 @@ def conference_room_admin_menu():
                         ui.success("Setup added.")
                 elif sub == '2':
                     try:
-                        sid = int(input("Setup ID to remove: ").strip())
+                        sid = ui.ask_number("Setup ID to remove: ")
                     except ValueError:
                         logging.info("Invalid id.")
                         continue
@@ -562,7 +562,7 @@ def book_conference_room(customer_id=None):
     ui.show_table("Conference Rooms", ["#", "Room", "Name", "Capacity", "Rate/hr"],
                   [(r[0], r[1], r[2], r[3], f"${r[4]:,.2f}") for r in rooms])
     try:
-        choice = int(input("Select room number by index (1-based): ").strip())
+        choice = ui.ask_number("Select room number by index (1-based): ")
     except ValueError:
         logging.info("Invalid selection.")
         return
@@ -576,11 +576,11 @@ def book_conference_room(customer_id=None):
     if setups:
         ui.show_table(f"Setups - {room_number}", ["#", "Setup", "Capacity"],
                       [(i + 1, s[1], s[2]) for i, s in enumerate(setups)])
-        st = input("Select setup (blank = none): ").strip()
+        st = ui.ask_text("Select setup (blank = none): ")
         if st.isdigit() and 1 <= int(st) <= len(setups):
             setup_type = setups[int(st) - 1][1]
     try:
-        attendee_count = int(input("Attendee count: ").strip())
+        attendee_count = ui.ask_number("Attendee count: ")
     except ValueError:
         logging.info("Invalid count.")
         return
@@ -592,8 +592,8 @@ def book_conference_room(customer_id=None):
             return
     from datetime import datetime, timedelta
     try:
-        start_str = input("Start (YYYY-MM-DD HH:MM): ").strip()
-        end_str = input("End (YYYY-MM-DD HH:MM): ").strip()
+        start_str = ui.ask_text("Start (YYYY-MM-DD HH:MM): ")
+        end_str = ui.ask_text("End (YYYY-MM-DD HH:MM): ")
         start = datetime.strptime(start_str, "%Y-%m-%d %H:%M")
         end = datetime.strptime(end_str, "%Y-%m-%d %H:%M")
     except ValueError:
@@ -609,11 +609,11 @@ def book_conference_room(customer_id=None):
     equipment = {}
     if ui.ask_confirmation("Add equipment?", default="n"):
         while True:
-            eq = input("Equipment type (blank to finish): ").strip()
+            eq = ui.ask_text("Equipment type (blank to finish): ")
             if not eq:
                 break
             try:
-                q = int(input(f"Quantity for {eq}: ").strip() or "1")
+                q = int(ui.ask_text(f"Quantity for {eq}: ") or "1")
             except ValueError:
                 q = 1
             equipment[eq] = q
@@ -672,12 +672,12 @@ def conference_bookings_inbox():
                   ["#", "Room", "Start", "End", "Attendees", "Setup", "Status", "Booked by"],
                   [(b[0], b[1], str(b[3])[:16], str(b[4])[:16], b[5], b[6] or "-", b[7], b[8] or "-")
                    for b in bookings])
-    raw = input("Enter a booking number to action (blank to skip): ").strip()
+    raw = ui.ask_text("Enter a booking number to action (blank to skip): ")
     if not raw.isdigit():
         return
     bid = int(raw)
     ui.show_menu("Action", ["1. Mark in progress", "2. Mark completed", "3. Cancel", "4. Back"])
-    act = input("Choice: ").strip()
+    act = ui.ask_text("Choice: ")
     if act == '1':
         try:
             with db.get_connection() as conn:
@@ -731,7 +731,7 @@ def conference_guest_panel():
             "3. My conference bookings",
             "4. Back",
         ])
-        choice = input("Enter your choice: ").strip()
+        choice = ui.ask_text("Enter your choice: ")
         if choice == '1':
             conference_rooms_panel()
         elif choice == '2':
