@@ -47,7 +47,10 @@ A hotel management console app (Python 3 + SQL Server via `pyodbc`).
 |---|---|
 | `main.py` | Entry point **and compatibility facade**: `handle_cli_args()`, `main()`, the `get_connection = db.get_connection` alias, and the `from <module> import *` re-exports so `import main as app` still reaches every moved name. The application body lives in the `hotel/` package below |
 | `hotel/__init__.py` | Package marker only — deliberately imports no submodule, so nothing runs at package import time and the tier order below cannot cycle |
-| `hotel/ui.py` | `rich`-based console helpers (menus, tables, prompts, `clear_screen`/`pause`) |
+| `hotel/ui.py` | UI facade: delegates to the active backend (console or Tkinter); keeps all public names |
+| `hotel/console_ui.py` | Console backend (rich-based helpers moved here verbatim) |
+| `hotel/tk_ui.py` | Tkinter backend: modal prompts + main window, plugged via `ui.set_backend()` |
+| `tk_main.py` | Tkinter entry point: installs the backend, overrides `input()`, runs `main()` |
 | `hotel/reports.py` | CSV report exports, also a standalone CLI (`python -m hotel.reports`) |
 | `hotel/night_audit.py` | Night-audit snapshot writer: `run_night_audit()`, `is_audited()` (037) |
 | `hotel/db.py` | Connection string + `get_connection()` context manager |
