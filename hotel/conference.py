@@ -254,8 +254,139 @@ def remove_room_setup(setup_id):
         return False
 
 
+def _conf_list_rooms():
+    rooms = get_conference_rooms(active_only=False)
+    if not rooms:
+        ui.info("No conference rooms configured yet.")
+    else:
+        ui.show_table("Conference Rooms", ["#", "Room", "Name", "Capacity", "Rate/hr", "Active"],
+                      [(r[0], r[1], r[2], r[3], f"${r[4]:,.2f}", "Yes" if r[5] else "No") for r in rooms])
+        for r in rooms:
+            setups = get_room_setups(r[1])
+            if setups:
+                ui.show_table(f"Setups - {r[1]}", ["Setup", "Capacity", "Active"],
+                              [(s[1], s[2], "Yes" if s[3] else "No") for s in setups])
+
+
+def _conf_add_room():
+    room_number = ui.ask_text("Room number (label, e.g. CR-101): ").strip()
+    name = ui.ask_text("Room name: ").strip()
+    try:
+        capacity = int(ui.ask_text("Capacity: ").strip())
+    except ValueError:
+        logging.info("Invalid capacity.")
+        return
+    try:
+        rate = float(ui.ask_text("Hourly rate: ").strip())
+    except ValueError:
+        logging.info("Invalid rate.")
+        return
+    new_id = add_conference_room(room_number, name, capacity, rate)
+    if new_id is not None:
+        ui.success(f"Conference room '{room_number}' added (id {new_id}).")
+        if ui.ask_confirmation("Add a setup type now?", default="y"):
+            st = ui.ask_text("Setup type (" + ", ".join(CONFERENCE_SETUP_TYPES) + "): ").strip()
+            try:
+                cap = int(ui.ask_text("Capacity for that setup: ").strip())
+            except ValueError:
+                cap = capacity
+            add_room_setup(room_number, st, cap)
+
+
+def _conf_set_rate():
+    room_number = ui.ask_text("Room number: ").strip()
+    room = get_conference_room(room_number)
+    if room is None:
+        logging.info("Conference room not found.")
+        return
+    try:
+        new_rate = float(ui.ask_text(f"New hourly rate (current ${room[4]:,.2f}): ").strip())
+    except ValueError:
+        logging.info("Invalid rate.")
+        return
+    if update_conference_room_rate(room_number, new_rate):
+        ui.success(f"Rate updated for {room_number}.")
+
+
+def _conf_toggle_active():
+    room_number = ui.ask_text("Room number: ").strip()
+    room = get_conference_room(room_number)
+    if room is None:
+        logging.info("Conference room not found.")
+        return
+    new_state = not room[5]
+    if set_conference_room_active(room_number, new_state):
+        ui.success(f"{room_number} is now {'active' if new_state else 'inactive'}.")
+
+
+def _conf_manage_setups():
+    room_number = ui.ask_text("Room number: ").strip()
+    room = get_conference_room(room_number)
+    if room is None:
+        logging.info("Conference room not found.")
+        return
+    if hasattr(ui, "show_buttons"):
+        def _add_setup():
+            st = ui.ask_text("Setup type (" + ", ".join(CONFERENCE_SETUP_TYPES) + "): ").strip()
+            try:
+                cap = int(ui.ask_text("Capacity: ").strip())
+            except ValueError:
+                logging.info("Invalid capacity.")
+                return
+            if add_room_setup(room_number, st, cap):
+                ui.success("Setup added.")
+        def _remove_setup():
+            try:
+                sid = int(ui.ask_text("Setup ID to remove: ").strip())
+            except ValueError:
+                logging.info("Invalid id.")
+                return
+            if remove_room_setup(sid):
+                ui.success("Setup removed.")
+        items = [("1. Add a setup type", _add_setup), ("2. Remove a setup type", _remove_setup)]
+        ui.show_buttons(f"Setups - {room_number}", items)
+        return
+    while True:
+        setups = get_room_setups(room_number)
+        ui.show_table(f"Setups - {room_number}", ["ID", "Setup", "Capacity", "Active"],
+                      [(s[0], s[1], s[2], "Yes" if s[3] else "No") for s in setups] if setups else [])
+        ui.show_menu("Setup types", ["1. Add a setup type", "2. Remove a setup type", "3. Back"])
+        sub = ui.ask_text("Enter your choice: ").strip()
+        if sub == '1':
+            st = ui.ask_text("Setup type (" + ", ".join(CONFERENCE_SETUP_TYPES) + "): ").strip()
+            try:
+                cap = int(ui.ask_text("Capacity: ").strip())
+            except ValueError:
+                logging.info("Invalid capacity.")
+                continue
+            if add_room_setup(room_number, st, cap):
+                ui.success("Setup added.")
+        elif sub == '2':
+            try:
+                sid = int(ui.ask_text("Setup ID to remove: ").strip())
+            except ValueError:
+                logging.info("Invalid id.")
+                continue
+            if remove_room_setup(sid):
+                ui.success("Setup removed.")
+        elif sub == '3':
+            break
+        else:
+            logging.info("Answer 1, 2 or 3.")
+
+
 def conference_room_admin_menu():
     """Admin submenu: manage conference rooms, setups and rates."""
+    if hasattr(ui, "show_buttons"):
+        items = [
+            ("1. List conference rooms", _conf_list_rooms),
+            ("2. Add a conference room", _conf_add_room),
+            ("3. Set hourly rate", _conf_set_rate),
+            ("4. Activate / deactivate a room", _conf_toggle_active),
+            ("5. Manage setup types for a room", _conf_manage_setups),
+        ]
+        ui.show_buttons("Conference Rooms", items)
+        return
     while True:
         ui.pause()
         ui.show_menu("Conference Rooms", [
@@ -268,105 +399,15 @@ def conference_room_admin_menu():
         ])
         choice = ui.ask_text("Enter your choice: ").strip()
         if choice == '1':
-            rooms = get_conference_rooms(active_only=False)
-            if not rooms:
-                ui.info("No conference rooms configured yet.")
-            else:
-                ui.show_table("Conference Rooms",
-                              ["#", "Room", "Name", "Capacity", "Rate/hr", "Active"],
-                              [(r[0], r[1], r[2], r[3], f"${r[4]:,.2f}",
-                                "Yes" if r[5] else "No") for r in rooms])
-                for r in rooms:
-                    setups = get_room_setups(r[1])
-                    if setups:
-                        ui.show_table(f"Setups - {r[1]}",
-                                      ["Setup", "Capacity", "Active"],
-                                      [(s[1], s[2], "Yes" if s[3] else "No") for s in setups])
+            _conf_list_rooms()
         elif choice == '2':
-            room_number = ui.ask_text("Room number (label, e.g. CR-101): ").strip()
-            name = ui.ask_text("Room name: ").strip()
-            try:
-                capacity = int(ui.ask_text("Capacity: ").strip())
-            except ValueError:
-                logging.info("Invalid capacity.")
-                continue
-            try:
-                rate = float(ui.ask_text("Hourly rate: ").strip())
-            except ValueError:
-                logging.info("Invalid rate.")
-                continue
-            new_id = add_conference_room(room_number, name, capacity, rate)
-            if new_id is not None:
-                ui.success(f"Conference room '{room_number}' added (id {new_id}).")
-                # Offer to add at least one setup type right away.
-                if ui.ask_confirmation("Add a setup type now?", default="y"):
-                    st = ui.ask_text("Setup type (" + ", ".join(CONFERENCE_SETUP_TYPES) + "): ").strip()
-                    try:
-                        cap = int(ui.ask_text("Capacity for that setup: ").strip())
-                    except ValueError:
-                        cap = capacity
-                    add_room_setup(room_number, st, cap)
+            _conf_add_room()
         elif choice == '3':
-            room_number = ui.ask_text("Room number: ").strip()
-            room = get_conference_room(room_number)
-            if room is None:
-                logging.info("Conference room not found.")
-                continue
-            try:
-                new_rate = float(ui.ask_text(f"New hourly rate (current ${room[4]:,.2f}): ").strip())
-            except ValueError:
-                logging.info("Invalid rate.")
-                continue
-            if update_conference_room_rate(room_number, new_rate):
-                ui.success(f"Rate updated for {room_number}.")
+            _conf_set_rate()
         elif choice == '4':
-            room_number = ui.ask_text("Room number: ").strip()
-            room = get_conference_room(room_number)
-            if room is None:
-                logging.info("Conference room not found.")
-                continue
-            new_state = not room[5]
-            if set_conference_room_active(room_number, new_state):
-                ui.success(f"{room_number} is now {'active' if new_state else 'inactive'}.")
+            _conf_toggle_active()
         elif choice == '5':
-            room_number = ui.ask_text("Room number: ").strip()
-            room = get_conference_room(room_number)
-            if room is None:
-                logging.info("Conference room not found.")
-                continue
-            while True:
-                setups = get_room_setups(room_number)
-                ui.show_table(f"Setups - {room_number}",
-                              ["ID", "Setup", "Capacity", "Active"],
-                              [(s[0], s[1], s[2], "Yes" if s[3] else "No") for s in setups]
-                              if setups else [])
-                ui.show_menu("Setup types", [
-                    "1. Add a setup type",
-                    "2. Remove a setup type",
-                    "3. Back",
-                ])
-                sub = ui.ask_text("Enter your choice: ").strip()
-                if sub == '1':
-                    st = ui.ask_text("Setup type (" + ", ".join(CONFERENCE_SETUP_TYPES) + "): ").strip()
-                    try:
-                        cap = int(ui.ask_text("Capacity: ").strip())
-                    except ValueError:
-                        logging.info("Invalid capacity.")
-                        continue
-                    if add_room_setup(room_number, st, cap):
-                        ui.success("Setup added.")
-                elif sub == '2':
-                    try:
-                        sid = int(ui.ask_text("Setup ID to remove: ").strip())
-                    except ValueError:
-                        logging.info("Invalid id.")
-                        continue
-                    if remove_room_setup(sid):
-                        ui.success("Setup removed.")
-                elif sub == '3':
-                    break
-                else:
-                    logging.info("Answer 1, 2 or 3.")
+            _conf_manage_setups()
         elif choice == '6':
             return
         else:
