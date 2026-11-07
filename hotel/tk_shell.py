@@ -288,12 +288,13 @@ class Shell:
             return None
         return raw
 
+    def show_clearance(self):
+        self.clear_content()
+
     def open_clearance_window(self):
+        self.show_clearance()
         try:
             from hotel import clearance_ui
-            import tkinter as tk
-            top = tk.Toplevel(self.root)
-            top.title("Clearance Card Desk")
-            clearance_ui.ClearanceWindow(root=top)
+            clearance_ui.ClearanceWindow(root=self.content)
         except Exception as exc:
             self.error(f"Cannot open clearance window: {exc}")

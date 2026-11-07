@@ -42,6 +42,7 @@ def main():
     shell.add_sidebar_button("Admin", lambda: tk_admin.run_admin(shell))
     shell.add_sidebar_button("Bookings", lambda: tk_bookings.run_bookings(shell))
     shell.add_sidebar_button("Conference", lambda: tk_conference.run_conference(shell))
+    shell.add_sidebar_button("Clearance", lambda: shell.show_clearance())
     shell.add_sidebar_button("Exit", lambda: shell.root.destroy())
 
     shell.show_buttons("Welcome", [
