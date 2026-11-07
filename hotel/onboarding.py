@@ -758,6 +758,19 @@ def _setup_summary_rows():
 
 def _wizard_step_menu():
     """Re-run one setup step after the review. Returns when the operator is done."""
+    if hasattr(ui, "show_buttons"):
+        items = [
+            ("1. Hotel settings", lambda: _offer_hotel_settings(wizard=True)),
+            ("2. Nightly rates", lambda: _offer_room_rates(wizard=True)),
+            ("3. Staff accounts", lambda: _offer_staff_accounts(wizard=True)),
+            ("4. Item catalogue", lambda: _offer_item_catalogue(wizard=True)),
+            ("5. Rooms", lambda: _offer_room_layout(wizard=True)),
+            ("6. Reference data", lambda: _offer_reference_data(wizard=True)),
+            ("7. Conference rooms", lambda: _offer_conference_rooms(wizard=True)),
+        ]
+        ui.show_buttons("Go back and change something", items)
+        return
+
     while True:
         ui.show_menu("Go back and change something", [
             "1. Hotel settings",
