@@ -1167,6 +1167,50 @@ def _offer_room_layout(wizard=False):
     when someone has come here deliberately to add more.
     """
     tower_rooms = _count_tower_rooms()
+    if hasattr(ui, "show_buttons"):
+        def _do_tower():
+            if not ui.ask_confirmation(f"Seed {tower_rooms:,} rooms? This is a large insert.",
+                                       default="n"):
+                return
+            pending = rooms.count_rooms_to_add(True)
+            if pending is None:
+                logging.info("Could not count the rooms that would be added. Nothing was changed.")
+                return
+            if pending == 0:
+                logging.info("Every room in the tower layout already exists.")
+                return
+            rooms.seed_rooms(tower=True)
+
+        def _do_mid():
+            rooms.seed_rooms(floors=20, rooms_per_floor=40)
+
+        def _do_custom():
+            while True:
+                floors = ui.ask_number(f"Floors (1-{rooms.MAX_ROOM_FLOORS})", minimum=1, maximum=rooms.MAX_ROOM_FLOORS)
+                per_floor = ui.ask_number(f"Rooms per floor (1-{rooms.MAX_ROOMS_PER_FLOOR})", minimum=1,
+                                          maximum=rooms.MAX_ROOMS_PER_FLOOR)
+                pending = rooms.count_rooms_to_add(False, floors, per_floor)
+                if pending is None:
+                    logging.info("Could not count the rooms that layout would add. Nothing was "
+                                 "changed.")
+                    return
+                if pending == 0:
+                    logging.info("Those rooms all exist already.")
+                    return
+                if ui.ask_confirmation(f"Seed {pending:,} room(s)?", default="y"):
+                    rooms.seed_rooms(floors=floors, rooms_per_floor=per_floor)
+                    return
+                logging.info("Nothing was seeded. Answer 4 to %s, or try again."
+                             % ("skip" if wizard else "cancel"))
+
+        items = [
+            ("1. 150-floor tower", _do_tower),
+            ("2. Mid-size: 20 floors x 40 rooms", _do_mid),
+            ("3. Custom floor count and rooms per floor", _do_custom),
+        ]
+        ui.show_buttons("Room layout", items)
+        return
+
     ui.show_menu("Room layout", [
         "1. 150-floor tower (%s rooms) -- the layout in migrations/008_rooms_seed.sql" % f"{tower_rooms:,}",
         "2. Mid-size: 20 floors x 40 rooms (800 rooms)",
