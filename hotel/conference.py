@@ -717,6 +717,27 @@ def conference_bookings_inbox():
     if not raw.isdigit():
         return
     bid = int(raw)
+    if hasattr(ui, "show_buttons"):
+        def _mark_progress():
+            try:
+                with db.get_connection() as conn:
+                    if conn is not None:
+                        conn.cursor().execute("UPDATE ConferenceBookings SET Status='InProgress' WHERE BookingID=?", (bid,))
+                        conn.commit()
+                ui.success("Marked in progress.")
+            except Exception as e:
+                logging.error(f"Error: {e}")
+        def _mark_complete():
+            inv = complete_conference_booking(bid)
+            if inv is not None:
+                ui.success(f"Completed. Invoice #{inv} issued.")
+        def _cancel():
+            if cancel_conference_booking(bid, session.CURRENT_USER):
+                ui.success("Cancelled.")
+        items = [("1. Mark in progress", _mark_progress), ("2. Mark completed", _mark_complete),
+                 ("3. Cancel", _cancel)]
+        ui.show_buttons("Action", items)
+        return
     ui.show_menu("Action", ["1. Mark in progress", "2. Mark completed", "3. Cancel", "4. Back"])
     act = ui.ask_text("Choice: ").strip()
     if act == '1':
