@@ -6,18 +6,22 @@ import tkinter as tk
 class Form:
     def __init__(self, parent, fields, title=None):
         self.fields = fields
-        self.frame = tk.Frame(parent)
+        self.frame = tk.Frame(parent, bg=parent.cget("bg") if hasattr(parent, "cget") else None)
         if title:
-            tk.Label(self.frame, text=title, font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(4, 8))
+            tk.Label(self.frame, text=title, font=("Segoe UI", 12, "bold"),
+                     bg=self.frame.cget("bg"), fg="#89b4fa").pack(anchor="w", pady=(4, 8))
         self.entries = {}
         self.error_labels = {}
         for label, kind, default in fields:
             row = tk.Frame(self.frame)
             row.pack(fill="x", pady=2)
-            tk.Label(row, text=label, width=28, anchor="w").pack(side="left")
+            tk.Label(row, text=label, width=28, anchor="w", bg=self.frame.cget("bg"),
+                     fg="#cdd6f4").pack(side="left")
             var = tk.StringVar(value="" if default is None else str(default))
-            ent = tk.Entry(row, textvariable=var)
-            ent.pack(side="left", fill="x", expand=True)
+            ent = tk.Entry(row, textvariable=var, bg="#2a2a3c", fg="#cdd6f4",
+                           insertbackground="#cdd6f4", relief="flat", highlightthickness=1,
+                           highlightbackground="#45475a")
+            ent.pack(side="left", fill="x", expand=True, ipady=2)
             self.entries[label] = (var, kind)
             err = tk.Label(self.frame, text="", fg="red", anchor="w")
             err.pack(anchor="w")
