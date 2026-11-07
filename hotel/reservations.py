@@ -476,24 +476,7 @@ RESERVATION_RESET_SCOPES = [
 RESERVATION_RESET_CONFIRM = "DELETE ALL RESERVATIONS"
 
 
-def delete_all_reservations():
-    """Master-override bulk reset of every reservation (admin only).
-
-    Requires the master override secret, then an exact typed confirmation, because the
-    operation is not undoable. Two scopes are offered: the default leaves the permanent
-    financial record (Invoices, LoyaltyTransactions, CustomerProfiles) intact, while the
-    second wipes that too.
-
-    All deletions run on one connection inside a single transaction and commit once, so
-    a failure part-way through leaves the database exactly as it was. Child rows go
-    first and Reservations last. Room statuses are then reset to Available, since a room
-    left flagged Occupied or Dirty with no reservation would misreport the housekeeping
-    board. AuditLog is deliberately preserved -- it is the record of this action.
-    """
-    ui.show_menu("Delete All Reservations (irreversible)", [
-        f"{key}. {label}" for key, label, _ in RESERVATION_RESET_SCOPES
-    ] + ["3. Cancel"])
-    choice = ui.ask_text("Enter your choice: ").strip()
+def _delete_all_reservations_scope(choice):
     scope = next((s for s in RESERVATION_RESET_SCOPES if s[0] == choice), None)
     if scope is None:
         logging.info("Cancelled. No reservations were deleted.")
@@ -519,20 +502,13 @@ def delete_all_reservations():
         logging.info("There are no reservations to delete.")
         return
 
-    ui.show_table(
-        "This will permanently delete", ["Table", "Rows"], counts
-    )
+    ui.show_table("This will permanently delete", ["Table", "Rows"], counts)
     if skipped:
-        ui.warning(
-            "Skipping (table not present, migration not applied): " + ", ".join(skipped)
-        )
-    ui.box(
-        f"Confirm: {scope_label}",
-        "Every stay, folio line, order, request, and key card listed above is removed.\n"
-        "Room statuses are reset to Available. AuditLog is kept.\n"
-        "This cannot be undone.",
-        border_style="red",
-    )
+        ui.warning("Skipping (table not present, migration not applied): " + ", ".join(skipped))
+    ui.box(f"Confirm: {scope_label}",
+           "Every stay, folio line, order, request, and key card listed above is removed.\n"
+           "Room statuses are reset to Available. AuditLog is kept.\n"
+           "This cannot be undone.", border_style="red")
 
     if not ui.ask_confirmation("Proceed?", default="n"):
         logging.info("Cancelled. No reservations were deleted.")
@@ -555,24 +531,31 @@ def delete_all_reservations():
                 deleted[table] = cursor.rowcount
             cursor.execute("DELETE FROM dbo.Reservations")
             deleted["Reservations"] = cursor.rowcount
-            cursor.execute(
-                "UPDATE dbo.Rooms SET Status = 'Available' "
-                "WHERE Status IS NULL OR Status <> 'Available'"
-            )
+            cursor.execute("UPDATE dbo.Rooms SET Status = 'Available' WHERE Status IS NULL OR Status <> 'Available'")
             deleted["Rooms reset to Available"] = cursor.rowcount
             conn.commit()
     except Exception as e:
-        # Nothing was committed, so the connection closing here rolls the whole batch
-        # back and the database is left untouched.
         logging.error(f"Delete all reservations failed and was rolled back: {e}")
         return
 
     core.log_audit("DELETE", "Reservation", "ALL",
-              f"Bulk reservation reset ({scope_label}): "
-              + ", ".join(f"{k}={v}" for k, v in deleted.items()))
+              f"Bulk reservation reset ({scope_label}): " + ", ".join(f"{k}={v}" for k, v in deleted.items()))
     ui.success(f"Deleted {deleted.get('Reservations', 0)} reservation(s).")
-    ui.show_table("Deleted rows", ["Table", "Rows"],
-                  [(k, v) for k, v in deleted.items() if v])
+    ui.show_table("Deleted rows", ["Table", "Rows"], [(k, v) for k, v in deleted.items() if v])
+
+
+def delete_all_reservations():
+    """Master-override bulk reset of every reservation (admin only)."""
+    if hasattr(ui, "show_buttons"):
+        items = [(f"{key}. {label}", (lambda k=key: _delete_all_reservations_scope(k)))
+                 for key, label, _ in RESERVATION_RESET_SCOPES]
+        ui.show_buttons("Delete All Reservations (irreversible)", items)
+        return
+    ui.show_menu("Delete All Reservations (irreversible)", [
+        f"{key}. {label}" for key, label, _ in RESERVATION_RESET_SCOPES
+    ] + ["3. Cancel"])
+    choice = ui.ask_text("Enter your choice: ").strip()
+    _delete_all_reservations_scope(choice)
 
 
 def edit_reservation():
