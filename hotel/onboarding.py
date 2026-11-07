@@ -586,6 +586,14 @@ def _offer_staff_accounts(wizard=False):
         ui.info("%s account(s) exist. Give each person the narrowest role that lets them do "
                 "their job: staff for the desk, manager for the panel, admin for settings."
                 % ("Unknown" if existing is None else existing))
+        if hasattr(ui, "show_buttons"):
+            def _do_add():
+                nonlocal added
+                if _create_staff_account():
+                    added += 1
+            items = [("1. Add a staff account", _do_add)]
+            ui.show_buttons("Staff accounts", items)
+            return added
         ui.show_menu("Staff accounts", [
             "1. Add a staff account",
             "2. %s" % ("Skip for now" if wizard else "Done -- back to setup"),
