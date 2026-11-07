@@ -193,17 +193,6 @@ def main():
             logging.info("Setup interrupted. Run the app again to continue setup.")
             return
 
-    if hasattr(ui, "show_buttons"):
-        items = [
-            ("1. Customer", customer.customer_panel),
-            ("2. Admin", admin.admin_panel),
-            ("3. Bookings", bookings.booking_panel),
-            ("4. Conference Rooms", conference.conference_guest_panel),
-            ("5. Exit", lambda: (logging.info("Exiting Program"), time.sleep(2), sys.exit(0))),
-        ]
-        ui.show_buttons(f"Welcome to {core.get_hotel_name()}!", items)
-        ui.pause()
-        return
     while True:
         ui.pause()
         ui.clear_screen()
@@ -214,7 +203,7 @@ def main():
             "4. Conference Rooms",
             "5. Exit",
         ], subtitle=customer.customer_session_label())
-        choice = ui.ask_text("Enter your choice: ").strip()
+        choice = input("Enter your choice: ").strip()
         if choice == '1':
             customer.customer_panel()
         elif choice == '2':

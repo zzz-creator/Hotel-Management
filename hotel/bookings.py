@@ -84,8 +84,8 @@ def book_room():
         logging.info(f"Booking as {first_name} {last_name}"
                      + (f" <{profile[2]}>." if profile[2] else "."))
     else:
-        last_name = ui.ask_text("Enter your last name: ").strip()
-        first_name = ui.ask_text("Enter your first name: ").strip()
+        last_name = input("Enter your last name: ").strip()
+        first_name = input("Enter your first name: ").strip()
         if not last_name or not first_name:
             logging.info("Both first and last name are required to hold a reservation.")
             return
@@ -298,7 +298,7 @@ def view_my_booking():
     customer_id = customer.customer_login()
     if not customer_id:
         return
-    booking_ref = ui.ask_text(f"Enter your booking reference (the code starting with "
+    booking_ref = input(f"Enter your booking reference (the code starting with "
                         f"'{booking_ledger.BOOKING_REF_PREFIX}-', NOT the room number): ").strip().upper()
     if not booking_ref:
         return
@@ -345,7 +345,7 @@ def cancel_booking():
     customer_id = customer.customer_login()
     if not customer_id:
         return
-    booking_ref = ui.ask_text(f"Enter your booking reference (the code starting with "
+    booking_ref = input(f"Enter your booking reference (the code starting with "
                         f"'{booking_ledger.BOOKING_REF_PREFIX}-', NOT the room number): ").strip().upper()
     if not booking_ref:
         return
@@ -374,7 +374,7 @@ def cancel_booking():
     if not ui.ask_confirmation("Cancel this booking?"):
         logging.info("Booking left unchanged.")
         return
-    confirm = ui.ask_text(f"Type {booking_ref} to confirm cancellation: ").strip().upper()
+    confirm = input(f"Type {booking_ref} to confirm cancellation: ").strip().upper()
     if confirm != booking_ref:
         logging.info("Reference did not match. Booking left unchanged.")
         return
@@ -424,15 +424,6 @@ def booking_panel():
     and "Cancel" all operate on the signed-in guest's own account, and the sign-in is
     cached in CURRENT_CUSTOMER for the rest of the session.
     """
-    if hasattr(ui, "show_buttons"):
-        items = [
-            ("1. Book a Room", book_room),
-            ("2. View My Booking", view_my_booking),
-            ("3. Cancel My Booking", cancel_booking),
-            ("4. Sign Out", lambda: (setattr(session, "CURRENT_CUSTOMER", None), logging.info("You have been signed out."))),
-        ]
-        ui.show_buttons("Bookings", items)
-        return
     while True:
         ui.pause()
         ui.show_menu("Bookings", [
@@ -441,7 +432,7 @@ def booking_panel():
             "3. Cancel My Booking",
             "4. Sign Out",
         ], subtitle=customer.customer_session_label())
-        choice = ui.ask_text("Enter your choice: ").strip()
+        choice = input("Enter your choice: ").strip()
         if choice == '1':
             book_room()
         elif choice == '2':

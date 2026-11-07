@@ -164,7 +164,7 @@ def order_item():
 
     try:
         while True:
-            pay_mode = ui.ask_text("How would you like to pay? (1 = Pay now, 2 = Add to room bill): ").strip()
+            pay_mode = input("How would you like to pay? (1 = Pay now, 2 = Add to room bill): ").strip()
             if pay_mode in ("1", "2"):
                 break
             logging.info("Invalid choice. Enter 1 to pay now or 2 to add to your room bill.")
@@ -199,7 +199,7 @@ def order_item():
                 else:
                     logging.info("Payment received. Your order is confirmed.")
             else:
-                add_later = ui.ask_text("Payment declined. Add this order to your room bill instead? (Y/N): ").strip().lower()
+                add_later = input("Payment declined. Add this order to your room bill instead? (Y/N): ").strip().lower()
                 if add_later == 'y':
                     # Added to the room bill: record at full list price (the discount is
                     # applied again at check-out when the bill is settled).
@@ -257,12 +257,12 @@ def provide_feedback():
                         last_name = row[1] or ""
         rating = None
         while rating is None:
-            raw = ui.ask_text("Please rate our service on a scale of 1-5: ").strip()
+            raw = input("Please rate our service on a scale of 1-5: ").strip()
             if raw.isdigit() and 1 <= int(raw) <= 5:
                 rating = int(raw)
             else:
                 logging.info("Invalid rating. Please enter a number between 1 and 5.")
-        comment = ui.ask_text("Please provide any additional comments: ").strip()
+        comment = input("Please provide any additional comments: ").strip()
         with db.get_connection() as conn:
             if conn is None:
                 logging.info("Could not save your feedback. Please tell the front desk.")
@@ -329,7 +329,7 @@ def track_order_status():
         [(o[0], o[1], o[2].strftime("%Y-%m-%d %H:%M"),
           o[3].strftime("%Y-%m-%d %H:%M"), o[4] or "-") for o in orders],
     )
-    raw = ui.ask_text("Enter an order number for detail (blank to skip): ").strip()
+    raw = input("Enter an order number for detail (blank to skip): ").strip()
     if not raw.isdigit():
         return
     order = next((o for o in orders if o[0] == int(raw)), None)
@@ -413,7 +413,7 @@ def manage_orders_menu():
                 [(r[0], r[1], r[2], r[3].strftime("%Y-%m-%d %H:%M"),
                   r[4].strftime("%Y-%m-%d %H:%M"), r[5] or "-") for r in rows],
             )
-            raw = ui.ask_text("Enter an order number to update (blank to refresh): ").strip()
+            raw = input("Enter an order number to update (blank to refresh): ").strip()
             if not raw:
                 ui.pause()
                 continue
@@ -422,7 +422,7 @@ def manage_orders_menu():
                 ui.pause()
                 continue
             advance_order(int(raw))
-        action = ui.ask_text("Press Enter to refresh, or 'q' to exit: ").strip().lower()
+        action = input("Press Enter to refresh, or 'q' to exit: ").strip().lower()
         if action == 'q':
             return
         ui.pause()
@@ -459,7 +459,7 @@ def advance_order(order_id):
             if not following:
                 logging.info(f"Order {order_id} is '{current}' and cannot be advanced further.")
                 return current
-            choice = ui.ask_text(
+            choice = input(
                 f"Order {order_id} is '{current}'.\n"
                 f"  1. Advance to '{following}'\n"
                 f"  2. Cancel the order\n"
@@ -506,98 +506,8 @@ def advance_order(order_id):
         return None
 
 
-def _amenity_view():
-    rows = core.get_amenities(active_only=False)
-    if not rows:
-        logging.info("No amenities on record.")
-    else:
-        ui.show_table("All Amenities", ["#", "Name", "Details"],
-                      [(r[0], r[1], r[2] or "") for r in rows])
-
-
-def _amenity_add():
-    name = ui.ask_text("Amenity name: ").strip()
-    if not name:
-        logging.info("Amenity name cannot be blank.")
-        return
-    details = ui.ask_text("Details (optional): ").strip()
-    with db.get_connection() as conn:
-        if conn is None:
-            return
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO Amenities (Name, Description, DisplayOrder) "
-            "OUTPUT INSERTED.AmenityID VALUES (?, ?, COALESCE((SELECT MAX(DisplayOrder) + 1 FROM Amenities), 1))",
-            (name, details or None),
-        )
-        conn.commit()
-    core.log_audit("CREATE", "Amenity", name, details or "")
-    ui.success(f"Amenity '{name}' added.")
-
-
-def _amenity_edit():
-    rows = core.get_amenities(active_only=False)
-    if not rows:
-        logging.info("No amenities on record.")
-        return
-    raw = ui.ask_text("Amenity number to edit: ").strip()
-    if not raw.isdigit():
-        return
-    amenity = next((r for r in rows if r[0] == int(raw)), None)
-    if not amenity:
-        logging.info("Amenity not found.")
-        return
-    name = ui.ask_text(f"Name (blank to keep '{amenity[1]}'): ").strip() or amenity[1]
-    details = ui.ask_text(f"Details (blank to keep '{amenity[2] or ''}'): ").strip() or amenity[2]
-    with db.get_connection() as conn:
-        if conn is None:
-            return
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE Amenities SET Name = ?, Description = ? WHERE AmenityID = ?",
-            (name, details or None, int(raw)),
-        )
-        conn.commit()
-    core.log_audit("UPDATE", "Amenity", int(raw), f"'{amenity[1]}' -> '{name}'",
-                   old_value=f"{amenity[1]} | {amenity[2] or ''}",
-                   new_value=f"{name} | {details or ''}")
-    ui.success("Amenity updated.")
-
-
-def _amenity_toggle():
-    raw = ui.ask_text("Amenity number to toggle: ").strip()
-    if not raw.isdigit():
-        return
-    with db.get_connection() as conn:
-        if conn is None:
-            return
-        cursor = conn.cursor()
-        cursor.execute("SELECT Active FROM Amenities WHERE AmenityID = ?", (int(raw),))
-        row = cursor.fetchone()
-        if row is None:
-            logging.info("Amenity not found.")
-            return
-        new_active = 0 if row[0] else 1
-        cursor.execute("UPDATE Amenities SET Active = ? WHERE AmenityID = ?",
-                       (new_active, int(raw)))
-        conn.commit()
-    core.log_audit("UPDATE", "Amenity", int(raw), "Active" if new_active else "Retired",
-                   old_value="Active" if row[0] else "Retired",
-                   new_value="Active" if new_active else "Retired")
-    ui.success(f"Amenity {'reactivated' if new_active else 'retired'}.")
-
-
 def manage_amenities_menu():
     """Admin: add, edit, retire and reorder hotel amenities."""
-    if hasattr(ui, "show_buttons"):
-        items = [
-            ("1. View Amenities", _amenity_view),
-            ("2. Add Amenity", _amenity_add),
-            ("3. Edit Amenity", _amenity_edit),
-            ("4. Retire / Reactivate Amenity", _amenity_toggle),
-        ]
-        ui.show_buttons("Manage Amenities", items)
-        return
     while True:
         ui.pause()
         ui.show_menu("Manage Amenities", [
@@ -607,15 +517,80 @@ def manage_amenities_menu():
             "4. Retire / Reactivate Amenity",
             "5. Back",
         ])
-        choice = ui.ask_text("Enter your choice: ").strip()
+        choice = input("Enter your choice: ").strip()
         if choice == '1':
-            _amenity_view()
+            rows = core.get_amenities(active_only=False)
+            if not rows:
+                logging.info("No amenities on record.")
+            else:
+                ui.show_table("All Amenities", ["#", "Name", "Details"],
+                              [(r[0], r[1], r[2] or "") for r in rows])
         elif choice == '2':
-            _amenity_add()
+            name = input("Amenity name: ").strip()
+            if not name:
+                logging.info("Amenity name cannot be blank.")
+                continue
+            details = input("Details (optional): ").strip()
+            with db.get_connection() as conn:
+                if conn is None:
+                    return
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO Amenities (Name, Description, DisplayOrder) "
+                    "OUTPUT INSERTED.AmenityID VALUES (?, ?, COALESCE((SELECT MAX(DisplayOrder) + 1 FROM Amenities), 1))",
+                    (name, details or None),
+                )
+                conn.commit()
+            core.log_audit("CREATE", "Amenity", name, details or "")
+            ui.success(f"Amenity '{name}' added.")
         elif choice == '3':
-            _amenity_edit()
+            rows = core.get_amenities(active_only=False)
+            if not rows:
+                logging.info("No amenities on record.")
+                continue
+            raw = input("Amenity number to edit: ").strip()
+            if not raw.isdigit():
+                continue
+            amenity = next((r for r in rows if r[0] == int(raw)), None)
+            if not amenity:
+                logging.info("Amenity not found.")
+                continue
+            name = input(f"Name (blank to keep '{amenity[1]}'): ").strip() or amenity[1]
+            details = input(f"Details (blank to keep '{amenity[2] or ''}'): ").strip() or amenity[2]
+            with db.get_connection() as conn:
+                if conn is None:
+                    return
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE Amenities SET Name = ?, Description = ? WHERE AmenityID = ?",
+                    (name, details or None, int(raw)),
+                )
+                conn.commit()
+            core.log_audit("UPDATE", "Amenity", int(raw), f"'{amenity[1]}' -> '{name}'",
+                           old_value=f"{amenity[1]} | {amenity[2] or ''}",
+                           new_value=f"{name} | {details or ''}")
+            ui.success("Amenity updated.")
         elif choice == '4':
-            _amenity_toggle()
+            raw = input("Amenity number to toggle: ").strip()
+            if not raw.isdigit():
+                continue
+            with db.get_connection() as conn:
+                if conn is None:
+                    return
+                cursor = conn.cursor()
+                cursor.execute("SELECT Active FROM Amenities WHERE AmenityID = ?", (int(raw),))
+                row = cursor.fetchone()
+                if row is None:
+                    logging.info("Amenity not found.")
+                    continue
+                new_active = 0 if row[0] else 1
+                cursor.execute("UPDATE Amenities SET Active = ? WHERE AmenityID = ?",
+                               (new_active, int(raw)))
+                conn.commit()
+            core.log_audit("UPDATE", "Amenity", int(raw), "Active" if new_active else "Retired",
+                           old_value="Active" if row[0] else "Retired",
+                           new_value="Active" if new_active else "Retired")
+            ui.success(f"Amenity {'reactivated' if new_active else 'retired'}.")
         elif choice == '5':
             return
         else:
@@ -623,115 +598,8 @@ def manage_amenities_menu():
         ui.pause()
 
 
-def _promo_view():
-    try:
-        with db.get_connection() as conn:
-            if conn is None:
-                return
-            cursor = conn.cursor()
-            cursor.execute("SELECT PromotionID, Title, Details, DiscountCode, StartsOn, EndsOn, Active FROM Promotions ORDER BY PromotionID")
-            rows = cursor.fetchall()
-    except Exception as e:
-        logging.error(f"Error loading promotions: {e}")
-        return
-    if not rows:
-        logging.info("No promotions on record.")
-    else:
-        ui.show_table("All Promotions", ["#", "Title", "Details", "Code", "Starts", "Ends", "Active"],
-                      [(r[0], r[1], r[2] or "", r[3] or "-", r[4].isoformat() if r[4] else "-",
-                        r[5].isoformat() if r[5] else "-", "Yes" if r[6] else "No") for r in rows])
-
-
-def _promo_add():
-    title = ui.ask_text("Promotion title: ").strip()
-    if not title:
-        logging.info("Promotion title cannot be blank.")
-        return
-    details = ui.ask_text("Details: ").strip()
-    code = ui.ask_text("Associated discount code (optional): ").strip()
-    with db.get_connection() as conn:
-        if conn is None:
-            return
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO Promotions (Title, Details, DiscountCode) OUTPUT INSERTED.PromotionID VALUES (?, ?, ?)",
-                       (title, details or None, code or None))
-        conn.commit()
-    core.log_audit("CREATE", "Promotion", title, details or "")
-    ui.success("Promotion added.")
-
-
-def _promo_edit():
-    try:
-        with db.get_connection() as conn:
-            if conn is None:
-                return
-            cursor = conn.cursor()
-            cursor.execute("SELECT PromotionID, Title, Details, DiscountCode, StartsOn, EndsOn, Active FROM Promotions ORDER BY PromotionID")
-            rows = cursor.fetchall()
-    except Exception as e:
-        logging.error(f"Error loading promotions: {e}")
-        return
-    raw = ui.ask_text("Promotion number: ").strip()
-    if not raw.isdigit():
-        return
-    promotion = next((r for r in rows if r[0] == int(raw)), None)
-    if not promotion:
-        logging.info("Promotion not found.")
-        return
-    title = ui.ask_text(f"Title (blank to keep '{promotion[1]}'): ").strip() or promotion[1]
-    details = ui.ask_text(f"Details (blank to keep): ").strip() or promotion[2]
-    code = ui.ask_text(f"Discount code (blank to keep '{promotion[3] or ''}'): ").strip() or promotion[3]
-    with db.get_connection() as conn:
-        if conn is None:
-            return
-        cursor = conn.cursor()
-        cursor.execute("UPDATE Promotions SET Title = ?, Details = ?, DiscountCode = ? WHERE PromotionID = ?",
-                       (title, details or None, code or None, int(raw)))
-        conn.commit()
-    core.log_audit("UPDATE", "Promotion", int(raw), f"'{promotion[1]}' -> '{title}'",
-                   old_value=f"{promotion[1]} | {promotion[2] or ''} | {promotion[3] or ''}",
-                   new_value=f"{title} | {details or ''} | {code or ''}")
-    ui.success("Promotion updated.")
-
-
-def _promo_end():
-    try:
-        with db.get_connection() as conn:
-            if conn is None:
-                return
-            cursor = conn.cursor()
-            cursor.execute("SELECT PromotionID, Title, Details, DiscountCode, StartsOn, EndsOn, Active FROM Promotions ORDER BY PromotionID")
-            rows = cursor.fetchall()
-    except Exception as e:
-        logging.error(f"Error loading promotions: {e}")
-        return
-    raw = ui.ask_text("Promotion number: ").strip()
-    if not raw.isdigit():
-        return
-    promotion = next((r for r in rows if r[0] == int(raw)), None)
-    if not promotion:
-        logging.info("Promotion not found.")
-        return
-    with db.get_connection() as conn:
-        if conn is not None:
-            cursor = conn.cursor()
-            cursor.execute("UPDATE Promotions SET Active = 0 WHERE PromotionID = ?", (int(raw),))
-            conn.commit()
-    core.log_audit("UPDATE", "Promotion", int(raw), f"'{promotion[1]}' ended", old_value="Active", new_value="Ended")
-    ui.success("Promotion ended.")
-
-
 def manage_promotions_menu():
     """Admin: add, edit and expire hotel promotions."""
-    if hasattr(ui, "show_buttons"):
-        items = [
-            ("1. View All Promotions", _promo_view),
-            ("2. Add Promotion", _promo_add),
-            ("3. Edit Promotion", _promo_edit),
-            ("4. End Promotion", _promo_end),
-        ]
-        ui.show_buttons("Manage Promotions", items)
-        return
     while True:
         ui.pause()
         ui.show_menu("Manage Promotions", [
@@ -741,15 +609,89 @@ def manage_promotions_menu():
             "4. End Promotion",
             "5. Back",
         ])
-        choice = ui.ask_text("Enter your choice: ").strip()
-        if choice == '1':
-            _promo_view()
+        choice = input("Enter your choice: ").strip()
+        if choice in ('1', '3', '4'):
+            try:
+                with db.get_connection() as conn:
+                    if conn is None:
+                        return
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT PromotionID, Title, Details, DiscountCode, StartsOn, EndsOn, Active "
+                        "FROM Promotions ORDER BY PromotionID"
+                    )
+                    rows = cursor.fetchall()
+            except Exception as e:
+                logging.error(f"Error loading promotions: {e}")
+                return
+            if choice == '1':
+                if not rows:
+                    logging.info("No promotions on record.")
+                else:
+                    ui.show_table(
+                        "All Promotions",
+                        ["#", "Title", "Details", "Code", "Starts", "Ends", "Active"],
+                        [(r[0], r[1], r[2] or "", r[3] or "-",
+                          r[4].isoformat() if r[4] else "-",
+                          r[5].isoformat() if r[5] else "-", "Yes" if r[6] else "No")
+                         for r in rows],
+                    )
+                ui.pause()
+                continue
+            raw = input("Promotion number: ").strip()
+            if not raw.isdigit():
+                continue
+            promotion = next((r for r in rows if r[0] == int(raw)), None)
+            if not promotion:
+                logging.info("Promotion not found.")
+                continue
+            if choice == '4':
+                with db.get_connection() as conn:
+                    if conn is not None:
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE Promotions SET Active = 0 WHERE PromotionID = ?",
+                                       (int(raw),))
+                        conn.commit()
+                core.log_audit("UPDATE", "Promotion", int(raw), f"'{promotion[1]}' ended",
+                               old_value="Active", new_value="Ended")
+                ui.success("Promotion ended.")
+            else:
+                title = input(f"Title (blank to keep '{promotion[1]}'): ").strip() or promotion[1]
+                details = input(f"Details (blank to keep): ").strip() or promotion[2]
+                code = input(f"Discount code (blank to keep '{promotion[3] or ''}'): ").strip() or promotion[3]
+                with db.get_connection() as conn:
+                    if conn is None:
+                        return
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "UPDATE Promotions SET Title = ?, Details = ?, DiscountCode = ? "
+                        "WHERE PromotionID = ?",
+                        (title, details or None, code or None, int(raw)),
+                    )
+                    conn.commit()
+                core.log_audit("UPDATE", "Promotion", int(raw), f"'{promotion[1]}' -> '{title}'",
+                               old_value=f"{promotion[1]} | {promotion[2] or ''} | {promotion[3] or ''}",
+                               new_value=f"{title} | {details or ''} | {code or ''}")
+                ui.success("Promotion updated.")
         elif choice == '2':
-            _promo_add()
-        elif choice == '3':
-            _promo_edit()
-        elif choice == '4':
-            _promo_end()
+            title = input("Promotion title: ").strip()
+            if not title:
+                logging.info("Promotion title cannot be blank.")
+                continue
+            details = input("Details: ").strip()
+            code = input("Associated discount code (optional): ").strip()
+            with db.get_connection() as conn:
+                if conn is None:
+                    return
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO Promotions (Title, Details, DiscountCode) "
+                    "OUTPUT INSERTED.PromotionID VALUES (?, ?, ?)",
+                    (title, details or None, code or None),
+                )
+                conn.commit()
+            core.log_audit("CREATE", "Promotion", title, details or "")
+            ui.success("Promotion added.")
         elif choice == '5':
             return
         else:

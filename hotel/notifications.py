@@ -20,7 +20,7 @@ def send_notification_to_customer():
     """Record a notification for a guest, persisted so the guest can actually read it."""
     try:
         while True:
-            room_number = ui.ask_text("Enter customer's room number: ").strip()
+            room_number = input("Enter customer's room number: ").strip()
             with db.get_connection() as conn:
                 if conn is None:
                     logging.info("Database connection failed.")
@@ -32,11 +32,11 @@ def send_notification_to_customer():
                 break
             else:
                 logging.info("Room number not reserved. Please try again.")
-        message = ui.ask_text("Enter notification message: ").strip()
+        message = input("Enter notification message: ").strip()
         if not message:
             logging.info("Empty message. Notification not sent.")
             return
-        channel = ui.ask_text("Channel - (I)n-room/(S)ms/(E)mail (default in-room): ").strip().lower() or 'i'
+        channel = input("Channel - (I)n-room/(S)ms/(E)mail (default in-room): ").strip().lower() or 'i'
         channel_name = {'i': 'In-Room', 's': 'SMS', 'e': 'Email'}.get(channel, 'In-Room')
         with db.get_connection() as conn:
             if conn is None:
@@ -91,54 +91,26 @@ def view_notifications_for_room():
         logging.error(f"Error reading notifications: {e}")
 
 
-def _send_alert_for_role(selected_role):
-    message = ui.ask_text("Enter alert message: ").strip()
-    if not message:
-        logging.info("Empty message. Alert not sent.")
-        return
-    severity = ui.ask_text("Severity - (I)nfo/(W)arning/(C)ritical (default info): ").strip().lower() or 'i'
-    severity_name = {'i': 'Info', 'w': 'Warning', 'c': 'Critical'}.get(severity, 'Info')
-    try:
-        with db.get_connection() as conn:
-            if conn is None:
-                return
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO StaffAlerts (TargetRole, Message, Severity) "
-                "OUTPUT INSERTED.AlertID VALUES (?, ?, ?)",
-                (selected_role, message, severity_name),
-            )
-            conn.commit()
-        core.log_audit("CREATE", "StaffAlert", selected_role, f"[{severity_name}] {message}")
-        logging.info(f"Alert sent to {selected_role} staff: {message}")
-    except Exception as e:
-        logging.error(f"Error sending alert: {e}")
-
-
 def send_alert_to_staff():
     """Broadcast an alert to a staff role, persisted and acknowledgeable."""
     try:
-        if hasattr(ui, "show_buttons"):
-            items = [(f"{idx}. {role}", (lambda r=role: _send_alert_for_role(r))) for idx, role in enumerate(core.STAFF_ROLES, 1)]
-            ui.show_buttons("Send Alert to Staff", items)
-            return
         while True:
             ui.pause()
             ui.show_menu("Send Alert to Staff", [
                 f"{idx}. {role}" for idx, role in enumerate(core.STAFF_ROLES, 1)
             ] + ["0. Cancel"])
-            raw = ui.ask_text("Enter the number of the staff role: ").strip()
+            raw = input("Enter the number of the staff role: ").strip()
             if raw == '0':
                 return
             if raw.isdigit() and 1 <= int(raw) <= len(core.STAFF_ROLES):
                 selected_role = core.STAFF_ROLES[int(raw) - 1]
                 break
             logging.info("Invalid choice. Please try again.")
-        message = ui.ask_text("Enter alert message: ").strip()
+        message = input("Enter alert message: ").strip()
         if not message:
             logging.info("Empty message. Alert not sent.")
             return
-        severity = ui.ask_text("Severity - (I)nfo/(W)arning/(C)ritical (default info): ").strip().lower() or 'i'
+        severity = input("Severity - (I)nfo/(W)arning/(C)ritical (default info): ").strip().lower() or 'i'
         severity_name = {'i': 'Info', 'w': 'Warning', 'c': 'Critical'}.get(severity, 'Info')
         with db.get_connection() as conn:
             if conn is None:
@@ -180,7 +152,7 @@ def view_staff_alerts():
             unacked = [r for r in rows if not r.AcknowledgedAt]
             if unacked:
                 logging.info(f"{len(unacked)} unacknowledged alert(s).")
-                raw = ui.ask_text("Enter the alert number to acknowledge (blank to skip): ").strip()
+                raw = input("Enter the alert number to acknowledge (blank to skip): ").strip()
                 if raw.isdigit() and any(r[0] == int(raw) for r in rows):
                     cursor.execute(
                         "UPDATE StaffAlerts SET AcknowledgedAt = ?, AcknowledgedBy = ? "

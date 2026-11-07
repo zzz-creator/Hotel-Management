@@ -517,14 +517,14 @@ def rooms_dashboard():
 def view_rooms():
     """Explore a single floor: colour-coded board with guest + stay details."""
     try:
-        floor = int(ui.ask_text("Enter floor to explore (1-150): ").strip())
+        floor = int(input("Enter floor to explore (1-150): ").strip())
     except ValueError:
         logging.info("Invalid floor. Please enter a number.")
         return
     if floor < 1 or floor > 150:
         logging.info("Floor must be between 1 and 150.")
         return
-    type_raw = ui.ask_text("Filter by room type (blank = all on this floor): ").strip()
+    type_raw = input("Filter by room type (blank = all on this floor): ").strip()
     # One clock, one window convention, for every board. The stay window is half-open
     # [CheckInDate, CheckOutDate) -- the same rule stays_overlap() and search_availability
     # use -- so a guest departing today is a DEPARTURE, not still in house. This query
@@ -608,7 +608,7 @@ def view_rooms():
 
 def update_room_status():
     """Manually update a room's housekeeping/occupancy status."""
-    room_number = ui.ask_text("Enter room number: ").strip()
+    room_number = input("Enter room number: ").strip()
     if not room_number:
         logging.info("Invalid room number.")
         return
@@ -619,7 +619,7 @@ def update_room_status():
         current = get_room_status(room_number)
     logging.info(f"Current status of room {room_number}: {current}")
     logging.info("Available statuses: " + ", ".join(ROOM_STATUSES))
-    status = ui.ask_text("Enter new status: ").strip()
+    status = input("Enter new status: ").strip()
     if status not in ROOM_STATUSES:
         logging.info("Invalid status. Must be one of: " + ", ".join(ROOM_STATUSES))
         return
@@ -631,12 +631,6 @@ def update_room_status():
 
 def rooms_admin_menu(view_only=False):
     """Rooms & housekeeping submenu: dashboard + drill-down explorer."""
-    if hasattr(ui, "show_buttons"):
-        items = [("1. Room Dashboard", rooms_dashboard), ("2. Explore Floor", view_rooms)]
-        if not view_only:
-            items.append(("3. Update Room Status", update_room_status))
-        ui.show_buttons("Rooms & Housekeeping", items)
-        return
     while True:
         if view_only:
             ui.pause()
@@ -653,7 +647,7 @@ def rooms_admin_menu(view_only=False):
                 "3. Update Room Status",
                 "4. Back to Admin Panel",
             ])
-        choice = ui.ask_text("Enter your choice: ").strip()
+        choice = input("Enter your choice: ").strip()
         if choice == '1':
             rooms_dashboard()
         elif choice == '2':
@@ -684,7 +678,7 @@ def view_room_type_rates():
              for rt, rate, active in room_types],
         )
         ui.info("Enter a room type to change its rate, or press Enter to return.")
-        room_type = ui.ask_text("Room type: ").strip()
+        room_type = input("Room type: ").strip()
         if not room_type:
             return
         if not any(rt.lower() == room_type.lower() for rt, _, _ in room_types):
@@ -692,7 +686,7 @@ def view_room_type_rates():
             continue
         current = get_nightly_rate(room_type)
         try:
-            new_rate = float(ui.ask_text(f"New nightly rate for {room_type} (current ${current:,.2f}): ").strip())
+            new_rate = float(input(f"New nightly rate for {room_type} (current ${current:,.2f}): ").strip())
         except ValueError:
             logging.info("Invalid rate. Please enter a number.")
             continue

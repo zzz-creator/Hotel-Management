@@ -37,7 +37,7 @@ def contact_concierge():
                     if row:
                         first_name = row[0] or first_name
                         last_name = row[1] or ""
-        message = ui.ask_text("Enter your message for our concierge: ").strip()
+        message = input("Enter your message for our concierge: ").strip()
         if not message:
             logging.info("Empty message. Nothing was sent.")
             return
@@ -95,13 +95,6 @@ def view_my_concierge_requests():
 
 def guest_requests_menu():
     """Staff/management inbox: concierge requests and stay feedback."""
-    if hasattr(ui, "show_buttons"):
-        items = [
-            ("1. Concierge Requests", _concierge_inbox),
-            ("2. Guest Feedback", _feedback_inbox),
-        ]
-        ui.show_buttons("Guest Requests", items)
-        return
     while True:
         ui.pause()
         ui.show_menu("Guest Requests", [
@@ -109,7 +102,7 @@ def guest_requests_menu():
             "2. Guest Feedback",
             "3. Back",
         ])
-        choice = ui.ask_text("Enter your choice: ").strip()
+        choice = input("Enter your choice: ").strip()
         if choice == '1':
             _concierge_inbox()
         elif choice == '2':
@@ -143,14 +136,14 @@ def _concierge_inbox():
                 [(r[0], r[1] or "-", f"{(r[3] or '')} {(r[2] or '')}".strip() or "-",
                   r[4], r[5], r[6].strftime("%Y-%m-%d %H:%M")) for r in rows],
             )
-            raw = ui.ask_text("Enter a request number to action (blank to skip): ").strip()
+            raw = input("Enter a request number to action (blank to skip): ").strip()
             if not raw.isdigit():
                 return
             request = next((r for r in rows if r[0] == int(raw)), None)
             if not request:
                 logging.info("Request not found.")
                 return
-            response = ui.ask_text("Enter your response to the guest: ").strip()
+            response = input("Enter your response to the guest: ").strip()
             if not response:
                 logging.info("No response entered. Request left unchanged.")
                 return

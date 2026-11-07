@@ -38,15 +38,15 @@ __all__ = [
 
 def add_reservation():
     try:
-        room_number = ui.ask_text("Enter room number (floor + 3-digit code): ").strip()
+        room_number = input("Enter room number (floor + 3-digit code): ").strip()
         # Parse room number like <floor><3-digit-code>, e.g. 10203 -> floor=10, code=203
         m = re.match(r'^(\d+)(\d{3})$', room_number)
         if not m:
             logging.info("Invalid room number format. Expected <floor><3-digit-code> (e.g. 10203).")
             return
         floor = int(m.group(1))
-        last_name = ui.ask_text("Enter last name: ").strip()
-        first_name = ui.ask_text("Enter first name: ").strip()
+        last_name = input("Enter last name: ").strip()
+        first_name = input("Enter first name: ").strip()
         today = core.business_date()
         check_in = ui.ask_date("Enter check-in date (YYYY-MM-DD)", default=str(today))
         check_out = ui.ask_date("Enter check-out date (YYYY-MM-DD)", default=str(today + timedelta(days=1)))
@@ -416,8 +416,8 @@ def show_availability_search():
     if check_out <= check_in:
         logging.info("Check-out date must be after check-in date.")
         return
-    room_type = ui.ask_text(f"Room type (blank for any of: {', '.join(rt for rt, _ in _mod_rooms.get_room_types())}): ").strip()
-    floor_raw = ui.ask_text("Floor (blank for any): ").strip()
+    room_type = input(f"Room type (blank for any of: {', '.join(rt for rt, _ in _mod_rooms.get_room_types())}): ").strip()
+    floor_raw = input("Floor (blank for any): ").strip()
     floor = None
     if floor_raw:
         if not floor_raw.isdigit():
@@ -437,7 +437,7 @@ def show_availability_search():
 
 def delete_reservation():
     try:
-        room_number = ui.ask_text("Enter room number (floor + 3-digit code) to delete: ").strip()
+        room_number = input("Enter room number (floor + 3-digit code) to delete: ").strip()
         with db.get_connection() as conn:
             if conn is None:
                 return
@@ -476,7 +476,24 @@ RESERVATION_RESET_SCOPES = [
 RESERVATION_RESET_CONFIRM = "DELETE ALL RESERVATIONS"
 
 
-def _delete_all_reservations_scope(choice):
+def delete_all_reservations():
+    """Master-override bulk reset of every reservation (admin only).
+
+    Requires the master override secret, then an exact typed confirmation, because the
+    operation is not undoable. Two scopes are offered: the default leaves the permanent
+    financial record (Invoices, LoyaltyTransactions, CustomerProfiles) intact, while the
+    second wipes that too.
+
+    All deletions run on one connection inside a single transaction and commit once, so
+    a failure part-way through leaves the database exactly as it was. Child rows go
+    first and Reservations last. Room statuses are then reset to Available, since a room
+    left flagged Occupied or Dirty with no reservation would misreport the housekeeping
+    board. AuditLog is deliberately preserved -- it is the record of this action.
+    """
+    ui.show_menu("Delete All Reservations (irreversible)", [
+        f"{key}. {label}" for key, label, _ in RESERVATION_RESET_SCOPES
+    ] + ["3. Cancel"])
+    choice = input("Enter your choice: ").strip()
     scope = next((s for s in RESERVATION_RESET_SCOPES if s[0] == choice), None)
     if scope is None:
         logging.info("Cancelled. No reservations were deleted.")
@@ -502,20 +519,27 @@ def _delete_all_reservations_scope(choice):
         logging.info("There are no reservations to delete.")
         return
 
-    ui.show_table("This will permanently delete", ["Table", "Rows"], counts)
+    ui.show_table(
+        "This will permanently delete", ["Table", "Rows"], counts
+    )
     if skipped:
-        ui.warning("Skipping (table not present, migration not applied): " + ", ".join(skipped))
-    ui.box(f"Confirm: {scope_label}",
-           "Every stay, folio line, order, request, and key card listed above is removed.\n"
-           "Room statuses are reset to Available. AuditLog is kept.\n"
-           "This cannot be undone.", border_style="red")
+        ui.warning(
+            "Skipping (table not present, migration not applied): " + ", ".join(skipped)
+        )
+    ui.box(
+        f"Confirm: {scope_label}",
+        "Every stay, folio line, order, request, and key card listed above is removed.\n"
+        "Room statuses are reset to Available. AuditLog is kept.\n"
+        "This cannot be undone.",
+        border_style="red",
+    )
 
     if not ui.ask_confirmation("Proceed?", default="n"):
         logging.info("Cancelled. No reservations were deleted.")
         return
     if not core.require_master_override():
         return
-    typed = ui.ask_text(f"Type {RESERVATION_RESET_CONFIRM} to confirm: ").strip()
+    typed = input(f"Type {RESERVATION_RESET_CONFIRM} to confirm: ").strip()
     if typed != RESERVATION_RESET_CONFIRM:
         logging.info("Confirmation text did not match. No reservations were deleted.")
         return
@@ -531,31 +555,24 @@ def _delete_all_reservations_scope(choice):
                 deleted[table] = cursor.rowcount
             cursor.execute("DELETE FROM dbo.Reservations")
             deleted["Reservations"] = cursor.rowcount
-            cursor.execute("UPDATE dbo.Rooms SET Status = 'Available' WHERE Status IS NULL OR Status <> 'Available'")
+            cursor.execute(
+                "UPDATE dbo.Rooms SET Status = 'Available' "
+                "WHERE Status IS NULL OR Status <> 'Available'"
+            )
             deleted["Rooms reset to Available"] = cursor.rowcount
             conn.commit()
     except Exception as e:
+        # Nothing was committed, so the connection closing here rolls the whole batch
+        # back and the database is left untouched.
         logging.error(f"Delete all reservations failed and was rolled back: {e}")
         return
 
     core.log_audit("DELETE", "Reservation", "ALL",
-              f"Bulk reservation reset ({scope_label}): " + ", ".join(f"{k}={v}" for k, v in deleted.items()))
+              f"Bulk reservation reset ({scope_label}): "
+              + ", ".join(f"{k}={v}" for k, v in deleted.items()))
     ui.success(f"Deleted {deleted.get('Reservations', 0)} reservation(s).")
-    ui.show_table("Deleted rows", ["Table", "Rows"], [(k, v) for k, v in deleted.items() if v])
-
-
-def delete_all_reservations():
-    """Master-override bulk reset of every reservation (admin only)."""
-    if hasattr(ui, "show_buttons"):
-        items = [(f"{key}. {label}", (lambda k=key: _delete_all_reservations_scope(k)))
-                 for key, label, _ in RESERVATION_RESET_SCOPES]
-        ui.show_buttons("Delete All Reservations (irreversible)", items)
-        return
-    ui.show_menu("Delete All Reservations (irreversible)", [
-        f"{key}. {label}" for key, label, _ in RESERVATION_RESET_SCOPES
-    ] + ["3. Cancel"])
-    choice = ui.ask_text("Enter your choice: ").strip()
-    _delete_all_reservations_scope(choice)
+    ui.show_table("Deleted rows", ["Table", "Rows"],
+                  [(k, v) for k, v in deleted.items() if v])
 
 
 def edit_reservation():
@@ -565,7 +582,7 @@ def edit_reservation():
             return
         try:
             cursor = conn.cursor()
-            old_room_number = ui.ask_text("Enter the current room number (floor + 3-digit code) of the reservation to edit: ").strip()
+            old_room_number = input("Enter the current room number (floor + 3-digit code) of the reservation to edit: ").strip()
 
             cursor.execute("SELECT * FROM Reservations WHERE RoomNumber = ?", (old_room_number,))
             reservation = cursor.fetchone()
@@ -573,9 +590,9 @@ def edit_reservation():
             if reservation:
                 logging.info(f"Current reservation details: Room Number: {reservation.RoomNumber}, Floor: {reservation.Floor}, Last Name: {reservation.LastName}, First Name: {reservation.FirstName}")
 
-                new_room_number = ui.ask_text("Enter new room number (floor + 3-digit code) (leave blank to keep current): ").strip()
-                new_last_name = ui.ask_text("Enter new last name (leave blank to keep current): ").strip()
-                new_first_name = ui.ask_text("Enter new first name (leave blank to keep current): ").strip()
+                new_room_number = input("Enter new room number (floor + 3-digit code) (leave blank to keep current): ").strip()
+                new_last_name = input("Enter new last name (leave blank to keep current): ").strip()
+                new_first_name = input("Enter new first name (leave blank to keep current): ").strip()
 
                 if new_room_number == "":
                     new_room_number = old_room_number
@@ -717,16 +734,16 @@ def view_reservations():
 
 def search_reservations():
     try:
-        search_type = ui.ask_text("Search by room number (RN)/last name(LN): ").strip().lower()
+        search_type = input("Search by room number (RN)/last name(LN): ").strip().lower()
         with db.get_connection() as conn:
             if conn is None:
                 return
             cursor = conn.cursor()
             if search_type == 'rn':
-                search_value = ui.ask_text(f"Enter the room number: ").strip()
+                search_value = input(f"Enter the room number: ").strip()
                 cursor.execute("SELECT * FROM Reservations WHERE RoomNumber = ?", (search_value,))
             elif search_type == 'ln':
-                search_value = ui.ask_text(f"Enter the last name: ").strip()
+                search_value = input(f"Enter the last name: ").strip()
                 cursor.execute("SELECT * FROM Reservations WHERE LastName = ?", (search_value,))
             else:
                 logging.info("Invalid search type.")
@@ -829,8 +846,8 @@ def check_in():
                     if res:
                         last_name = res.LastName or ""
                         guest_first = res.FirstName or first_name
-                        email = ui.ask_text("Please enter your email (optional, press Enter to skip): ").strip() or None
-                        phone = ui.ask_text("Please enter your phone number (optional, press Enter to skip): ").strip() or None
+                        email = input("Please enter your email (optional, press Enter to skip): ").strip() or None
+                        phone = input("Please enter your phone number (optional, press Enter to skip): ").strip() or None
                         customer_id = core.upsert_customer_profile(last_name, guest_first, email, phone)
                         if customer_id:
                             # A front-desk or pre-019 stay has no customer link yet. Now

@@ -94,53 +94,7 @@ def mark_catering_delivered(order_id):
         return False
 
 
-def _catering_list():
-    orders = list_catering_orders()
-    if not orders:
-        ui.info("No catering orders.")
-    else:
-        ui.show_table("Catering Orders",
-                      ["#", "Booking", "Package", "Heads", "Unit", "Total", "Status"],
-                      [(o[0], o[1], o[2], o[3], f"${o[4]:,.2f}", f"${o[5]:,.2f}", o[6]) for o in orders])
-
-
-def _catering_place():
-    try:
-        bid = int(ui.ask_text("Booking ID: ").strip())
-    except ValueError:
-        logging.info("Invalid id.")
-        return
-    ui.show_table("Packages", ["Package", "Per head"], [(k, f"${v:,.2f}") for k, v in CATERING_PACKAGES.items()])
-    pkg = ui.ask_text("Package: ").strip()
-    try:
-        heads = int(ui.ask_text("Head count: ").strip())
-    except ValueError:
-        logging.info("Invalid count.")
-        return
-    oid = place_catering_order(bid, pkg, heads)
-    if oid is not None:
-        ui.success(f"Catering order #{oid} placed.")
-
-
-def _catering_deliver():
-    try:
-        oid = int(ui.ask_text("Order ID: ").strip())
-    except ValueError:
-        logging.info("Invalid id.")
-        return
-    if mark_catering_delivered(oid):
-        ui.success("Marked delivered.")
-
-
 def catering_admin_menu():
-    if hasattr(ui, "show_buttons"):
-        items = [
-            ("1. List catering orders", _catering_list),
-            ("2. Place a catering order", _catering_place),
-            ("3. Mark delivered", _catering_deliver),
-        ]
-        ui.show_buttons("Conference Catering", items)
-        return
     while True:
         ui.pause()
         ui.show_menu("Conference Catering", [
@@ -149,13 +103,39 @@ def catering_admin_menu():
             "3. Mark delivered",
             "4. Back",
         ])
-        choice = ui.ask_text("Enter your choice: ").strip()
+        choice = input("Enter your choice: ").strip()
         if choice == '1':
-            _catering_list()
+            orders = list_catering_orders()
+            if not orders:
+                ui.info("No catering orders.")
+            else:
+                ui.show_table("Catering Orders",
+                              ["#", "Booking", "Package", "Heads", "Unit", "Total", "Status"],
+                              [(o[0], o[1], o[2], o[3], f"${o[4]:,.2f}", f"${o[5]:,.2f}", o[6]) for o in orders])
         elif choice == '2':
-            _catering_place()
+            try:
+                bid = int(input("Booking ID: ").strip())
+            except ValueError:
+                logging.info("Invalid id.")
+                continue
+            ui.show_table("Packages", ["Package", "Per head"], [(k, f"${v:,.2f}") for k, v in CATERING_PACKAGES.items()])
+            pkg = input("Package: ").strip()
+            try:
+                heads = int(input("Head count: ").strip())
+            except ValueError:
+                logging.info("Invalid count.")
+                continue
+            oid = place_catering_order(bid, pkg, heads)
+            if oid is not None:
+                ui.success(f"Catering order #{oid} placed.")
         elif choice == '3':
-            _catering_deliver()
+            try:
+                oid = int(input("Order ID: ").strip())
+            except ValueError:
+                logging.info("Invalid id.")
+                continue
+            if mark_catering_delivered(oid):
+                ui.success("Marked delivered.")
         elif choice == '4':
             return
         else:

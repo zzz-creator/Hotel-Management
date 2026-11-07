@@ -182,20 +182,3 @@ def ask_optional_date(prompt):
             return datetime.strptime(raw, "%Y-%m-%d").date()
         except ValueError:
             error("Invalid date. Please use YYYY-MM-DD format.")
-
-
-def ask_text(prompt, default=None):
-    """Prompt for free text. Returns a stripped string."""
-    suffix = f" [{default}]" if default is not None else ""
-    raw = input(f"{prompt}{suffix}: ").strip()
-    if raw == "" and default is not None:
-        return str(default).strip()
-    return raw
-
-
-def ask_optional_text(prompt):
-    """Prompt for free text, allowing a blank answer (returns None)."""
-    raw = input(f"{prompt} (blank to skip): ").strip()
-    if raw == "":
-        return None
-    return raw

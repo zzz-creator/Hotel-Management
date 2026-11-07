@@ -331,107 +331,11 @@ def revoke_key_card(card_number, reason=""):
         return False
 
 
-def _kc_issue():
-    room_number = ui.ask_text("Enter room number (floor + 3-digit code): ").strip()
-    if not room_number:
-        return
-    with db.get_connection() as conn:
-        guest = (None, None)
-        if conn is not None:
-            cursor = conn.cursor()
-            cursor.execute("SELECT LastName, FirstName FROM Reservations WHERE RoomNumber = ?", (room_number,))
-            row = cursor.fetchone()
-            if row:
-                guest = (row[0], row[1])
-    card = issue_key_card(room_number, guest[0], guest[1])
-    if card:
-        ui.success(f"Key card {card} issued for room {room_number}.")
-    else:
-        logging.info("No key card was issued. A guest must be checked in to the room today, "
-                    "and migration 017 must be applied.")
-
-
-def _kc_revoke():
-    card_number = ui.ask_text("Enter card number to revoke: ").strip()
-    revoke_key_card(card_number, "Revoked at front desk")
-
-
-def _kc_lost():
-    card_number = ui.ask_text("Enter card number reported lost: ").strip()
-    try:
-        with db.get_connection() as conn:
-            if conn is None:
-                return
-            cursor = conn.cursor()
-            cursor.execute("UPDATE KeyCards SET Status = 'Lost', RevokedAt = ?, RevokeReason = ? WHERE CardNumber = ?",
-                           (datetime.now(), "Reported lost", card_number))
-            conn.commit()
-            if cursor.rowcount:
-                core.log_audit("REVOKE", "KeyCard", card_number, "Reported lost")
-                logging.info(f"Key card {card_number} marked lost and deactivated.")
-            else:
-                logging.info(f"Card {card_number} not found.")
-    except Exception as e:
-        logging.error(f"Error reporting key card lost: {e}")
-
-
-def _kc_view_room():
-    room_number = ui.ask_text("Enter room number: ").strip()
-    cards = get_key_cards_for_room(room_number)
-    if not cards:
-        logging.info(f"No key cards on record for room {room_number}.")
-    else:
-        ui.show_table(f"Key Cards - Room {room_number}",
-                      ["Card", "Guest", "Status", "Issued", "Expires", "Revoked", "Reason", "By"],
-                      [(c[0], f"{(c[3] or '')} {(c[2] or '')}".strip() or "-", c[4], c[5],
-                        c[6].strftime("%Y-%m-%d") if c[6] else "-",
-                        c[7].strftime("%Y-%m-%d") if c[7] else "-",
-                        c[8] or "-", c[9] or "-") for c in cards])
-
-
-def _kc_test():
-    card_number = ui.ask_text("Enter the card number to test: ").strip()
-    granted, detail = try_open_door(card_number)
-    (ui.success if granted else ui.error)(detail)
-    if not granted:
-        ui.pause()
-
-
-def _kc_view_log():
-    try:
-        with db.get_connection() as conn:
-            if conn is None:
-                return
-            cursor = conn.cursor()
-            cursor.execute("SELECT TOP 50 EventTime, CardNumber, RoomNumber, Result, Detail FROM DoorEvents ORDER BY EventTime DESC")
-            events = cursor.fetchall()
-    except Exception as e:
-        logging.error(f"Error loading door access log: {e}")
-        return
-    if not events:
-        logging.info("No door access events recorded.")
-    else:
-        ui.show_table("Door Access Log (most recent 50)", ["Time", "Card", "Room", "Result", "Detail"],
-                      [(e[0].strftime("%Y-%m-%d %H:%M"), e[1] or "-", e[2] or "-", e[3], e[4] or "") for e in events])
-
-
 def door_access_menu(view_only=False):
     """Staff submenu for key cards and the door access log.
 
     view_only=True (manager) hides every action that changes card state.
     """
-    if hasattr(ui, "show_buttons"):
-        items = []
-        if not view_only:
-            items.append(("1. Issue Key Card", _kc_issue))
-            items.append(("2. Revoke Key Card", _kc_revoke))
-            items.append(("3. Report Key Card Lost", _kc_lost))
-        items.append(("4. View Cards for a Room", _kc_view_room))
-        if not view_only:
-            items.append(("5. Test Card at Reader", _kc_test))
-        items.append(("6. View Door Access Log", _kc_view_log))
-        ui.show_buttons("Door Access Control", items)
-        return
     while True:
         if view_only:
             options = [
@@ -451,7 +355,7 @@ def door_access_menu(view_only=False):
             ]
         ui.pause()
         ui.show_menu("Door Access Control", options)
-        choice = ui.ask_text("Enter your choice: ").strip()
+        choice = input("Enter your choice: ").strip()
         if view_only:
             view_choice = {'1': '4', '2': '6', '3': '7'}.get(choice)
             if not view_choice:
@@ -459,17 +363,98 @@ def door_access_menu(view_only=False):
                 continue
             choice = view_choice
         if choice == '1':
-            _kc_issue()
+            room_number = input("Enter room number (floor + 3-digit code): ").strip()
+            if not room_number:
+                continue
+            with db.get_connection() as conn:
+                guest = (None, None)
+                if conn is not None:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT LastName, FirstName FROM Reservations WHERE RoomNumber = ?",
+                        (room_number,),
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        guest = (row[0], row[1])
+            card = issue_key_card(room_number, guest[0], guest[1])
+            if card:
+                ui.success(f"Key card {card} issued for room {room_number}.")
+            else:
+                # issue_key_card() logs the specific reason it refused (no checked-in
+                # guest, room not Occupied) at info; a missing migration 017 only logs
+                # at debug, so name it here rather than staying silent about it.
+                logging.info(
+                    "No key card was issued. A guest must be checked in to the room today, "
+                    "and migration 017 must be applied."
+                )
         elif choice == '2':
-            _kc_revoke()
+            card_number = input("Enter card number to revoke: ").strip()
+            revoke_key_card(card_number, "Revoked at front desk")
         elif choice == '3':
-            _kc_lost()
+            card_number = input("Enter card number reported lost: ").strip()
+            try:
+                with db.get_connection() as conn:
+                    if conn is None:
+                        continue
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "UPDATE KeyCards SET Status = 'Lost', RevokedAt = ?, RevokeReason = ? "
+                        "WHERE CardNumber = ?",
+                        (datetime.now(), "Reported lost", card_number),
+                    )
+                    conn.commit()
+                    if cursor.rowcount:
+                        core.log_audit("REVOKE", "KeyCard", card_number, "Reported lost")
+                        logging.info(f"Key card {card_number} marked lost and deactivated.")
+                    else:
+                        logging.info(f"Card {card_number} not found.")
+            except Exception as e:
+                logging.error(f"Error reporting key card lost: {e}")
         elif choice == '4':
-            _kc_view_room()
+            room_number = input("Enter room number: ").strip()
+            cards = get_key_cards_for_room(room_number)
+            if not cards:
+                logging.info(f"No key cards on record for room {room_number}.")
+            else:
+                ui.show_table(
+                    f"Key Cards - Room {room_number}",
+                    ["Card", "Guest", "Status", "Issued", "Expires", "Revoked", "Reason", "By"],
+                    [(c[0], f"{(c[3] or '')} {(c[2] or '')}".strip() or "-", c[4], c[5],
+                      c[6].strftime("%Y-%m-%d") if c[6] else "-",
+                      c[7].strftime("%Y-%m-%d") if c[7] else "-",
+                      c[8] or "-", c[9] or "-") for c in cards],
+                )
         elif choice == '5':
-            _kc_test()
+            # Stands in for the physical reader: validates a card and logs the attempt.
+            card_number = input("Enter the card number to test: ").strip()
+            granted, detail = try_open_door(card_number)
+            (ui.success if granted else ui.error)(detail)
+            if not granted:
+                ui.pause()
         elif choice == '6':
-            _kc_view_log()
+            try:
+                with db.get_connection() as conn:
+                    if conn is None:
+                        continue
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT TOP 50 EventTime, CardNumber, RoomNumber, Result, Detail "
+                        "FROM DoorEvents ORDER BY EventTime DESC"
+                    )
+                    events = cursor.fetchall()
+            except Exception as e:
+                logging.error(f"Error loading door access log: {e}")
+                continue
+            if not events:
+                logging.info("No door access events recorded.")
+            else:
+                ui.show_table(
+                    "Door Access Log (most recent 50)",
+                    ["Time", "Card", "Room", "Result", "Detail"],
+                    [(e[0].strftime("%Y-%m-%d %H:%M"), e[1] or "-", e[2] or "-", e[3], e[4] or "")
+                     for e in events],
+                )
         elif choice == '7':
             break
         else:

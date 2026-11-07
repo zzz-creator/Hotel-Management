@@ -43,12 +43,6 @@ pip install -r requirements.txt
 python main.py
 ```
 
-A Tkinter frontend is also available and keeps the console behaviour identical:
-
-```powershell
-python tk_main.py
-```
-
 On first run the app detects that setup has not happened and walks you through it: it creates
 your first administrator login, then offers hotel settings, nightly room rates, staff accounts,
 a starter item catalogue (or lets you type your own), a room layout, optional amenities /

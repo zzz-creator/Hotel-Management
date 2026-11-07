@@ -78,7 +78,7 @@ def clear_lockout(target_username: str) -> bool:
 def edit_user():
     """Edit an existing user."""
     try:
-        username = ui.ask_text("Enter the username of the user to edit: ").strip()
+        username = input("Enter the username of the user to edit: ").strip()
         with db.get_connection() as conn:
             if conn is None:
                 return
@@ -89,8 +89,8 @@ def edit_user():
             if user:
                 logging.info(f"Current user details: Username: {user.Username}")
 
-                new_username = ui.ask_text("Enter new username (leave blank to keep current): ").strip()
-                new_password = ui.ask_text("Enter new password (leave blank to keep current): ").strip()
+                new_username = input("Enter new username (leave blank to keep current): ").strip()
+                new_password = input("Enter new password (leave blank to keep current): ").strip()
 
                 if new_username == "":
                     new_username = user.Username
@@ -122,7 +122,7 @@ def admin_login():
     """Handle admin login with a grace period for lockout, displaying a warning before the final lockout."""
     while True:
         try:
-            username = ui.ask_text("Enter admin username: ").strip()
+            username = input("Enter admin username: ").strip()
             password = getpass.getpass("Enter admin password: ").strip()
 
             with db.get_connection() as conn:
@@ -172,7 +172,7 @@ def admin_login():
                         logging.info("Maximum login attempts exceeded. Account locked.")
                         core.log_audit("LOCKOUT", "User", username,
                                   f"Locked until {lockout_time} after {failed_attempts} failed attempts")
-                        unlockpassword = ui.ask_text("Would you like to attempt manager override to unlock this account? (Y/N) ")
+                        unlockpassword = input("Would you like to attempt manager override to unlock this account? (Y/N) ")
                         if unlockpassword.upper() == "Y":
                             if core.require_master_override():
                                 cursor.execute("UPDATE Users SET FailedAttempts = 0, LockoutTime = NULL WHERE Username = ?", (username,))
@@ -195,8 +195,8 @@ def admin_login():
 
 def add_user():
     try:
-        new_username = ui.ask_text("Enter new username: ").strip()
-        new_password = ui.ask_text("Enter new password: ").strip()
+        new_username = input("Enter new username: ").strip()
+        new_password = input("Enter new password: ").strip()
         role = core._prompt_role()
         if not role:
             logging.info("No account was created.")
@@ -219,7 +219,7 @@ def add_user():
 
 def delete_user():
     try:
-        del_username = ui.ask_text("Enter username to delete: ").strip()
+        del_username = input("Enter username to delete: ").strip()
         with db.get_connection() as conn:
             if conn is None:
                 return
@@ -244,7 +244,7 @@ def view_users():
             if conn is None:
                 return
             cursor = conn.cursor()
-            passwords = ui.ask_text("Would you like to see the passwords? (Y/N): ").strip().upper()
+            passwords = input("Would you like to see the passwords? (Y/N): ").strip().upper()
             show_passwords = False
             if passwords == 'Y':
                 # Same check every other master-gated screen uses.
@@ -281,66 +281,8 @@ def _run_report(label, fn, **kwargs):
         return False
 
 
-def _export_loyalty_statements():
-    who = ui.ask_text("Guest ID/email/name, or a room number (leave blank for all): ").strip()
-    if not who:
-        _run_report("Loyalty statements", reports.export_loyalty_statements)
-        return
-    if hasattr(ui, "show_buttons"):
-        items = [
-            ("1. Guest (ID, email, or name)", lambda: _run_report("Loyalty statements", reports.export_loyalty_statements, customer=who)),
-            ("2. Room number", lambda: _run_report("Loyalty statements", reports.export_loyalty_statements, room_number=who)),
-        ]
-        ui.show_buttons("Loyalty statement for", items)
-        return
-    ui.show_menu("Loyalty statement for", ["1. Guest (ID, email, or name)", "2. Room number"])
-    ref_type = ui.ask_text("Enter your choice: ").strip()
-    if ref_type == '1':
-        _run_report("Loyalty statements", reports.export_loyalty_statements, customer=who)
-    else:
-        _run_report("Loyalty statements", reports.export_loyalty_statements, room_number=who)
-
-
-def _export_revenue():
-    start = ui.ask_optional_date("From date")
-    end = ui.ask_optional_date("To date")
-    _run_report("Revenue", reports.export_revenue, start_date=start, end_date=end)
-
-
-def _export_occupancy():
-    start = ui.ask_optional_date("From date (blank = first night on record)")
-    end = ui.ask_optional_date("To date (blank = the business date)")
-    _run_report("Occupancy", reports.export_occupancy, start_date=start, end_date=end)
-
-
-def _export_housekeeping():
-    floor = ui.ask_text("Floor (blank for every floor): ").strip()
-    on_date = ui.ask_optional_date(f"Board date (blank = business date, {core.business_date()})")
-    _run_report("Housekeeping", reports.export_housekeeping, floor=floor or None, on_date=on_date)
-
-
-def _export_booking_ledger():
-    ref = ui.ask_text("Booking reference (blank for all): ").strip()
-    _run_report("Booking ledger", reports.export_booking_ledger, booking_ref=ref or None)
-
-
 def export_reports_menu():
     """Interactive admin submenu for report exports."""
-    if hasattr(ui, "show_buttons"):
-        items = [
-            ("1. Export Transactions", lambda: _run_report("Transactions", reports.export_transactions)),
-            ("2. Export Reservations", lambda: _run_report("Reservations", reports.export_reservations)),
-            ("3. Export Loyalty Statements", _export_loyalty_statements),
-            ("4. Export Invoices (split folio)", lambda: _run_report("Invoices", reports.export_invoices)),
-            ("5. Export Revenue (room vs F&B)", _export_revenue),
-            ("6. Export Occupancy", _export_occupancy),
-            ("7. Export Housekeeping Board", _export_housekeeping),
-            ("8. Export Guest Satisfaction", lambda: _run_report("Guest satisfaction", reports.export_guest_satisfaction)),
-            ("9. Export Audit Log", lambda: _run_report("Audit log", reports.export_audit_log)),
-            ("10. Export Booking Ledger", _export_booking_ledger),
-        ]
-        ui.show_buttons("Report Export Menu", items)
-        return
     while True:
         ui.pause()
         ui.show_menu("Report Export Menu", [
@@ -356,27 +298,55 @@ def export_reports_menu():
             "10. Export Booking Ledger",
             "11. Back to Admin Panel",
         ])
-        choice = ui.ask_text("Enter your choice: ").strip()
+        choice = input("Enter your choice: ").strip()
         if choice == '1':
             _run_report("Transactions", reports.export_transactions)
         elif choice == '2':
             _run_report("Reservations", reports.export_reservations)
         elif choice == '3':
-            _export_loyalty_statements()
+            # A loyalty statement is the history of a GUEST. Both references resolve to
+            # one person; a room is accepted because staff mostly know the room, and it
+            # then reports that guest's whole history rather than one room's fragment.
+            # A room number and a CustomerID are both 4 digits, so the type is asked
+            # for rather than guessed from the shape of the input.
+            who = input("Guest ID/email/name, or a room number (leave blank for all): ").strip()
+            if not who:
+                _run_report("Loyalty statements", reports.export_loyalty_statements)
+            else:
+                ui.show_menu("Loyalty statement for", ["1. Guest (ID, email, or name)", "2. Room number"])
+                ref_type = input("Enter your choice: ").strip()
+                if ref_type == '1':
+                    _run_report("Loyalty statements", reports.export_loyalty_statements,
+                                customer=who)
+                else:
+                    _run_report("Loyalty statements", reports.export_loyalty_statements,
+                                room_number=who)
         elif choice == '4':
             _run_report("Invoices", reports.export_invoices)
         elif choice == '5':
-            _export_revenue()
+            start = ui.ask_optional_date("From date")
+            end = ui.ask_optional_date("To date")
+            _run_report("Revenue", reports.export_revenue, start_date=start, end_date=end)
         elif choice == '6':
-            _export_occupancy()
+            start = ui.ask_optional_date("From date (blank = first night on record)")
+            end = ui.ask_optional_date("To date (blank = the business date)")
+            _run_report("Occupancy", reports.export_occupancy, start_date=start, end_date=end)
         elif choice == '7':
-            _export_housekeeping()
+            floor = input("Floor (blank for every floor): ").strip()
+            # Defaults to the business date, and takes an explicit one, so the board for
+            # a day that has already closed can be re-run rather than only today's.
+            on_date = ui.ask_optional_date(f"Board date (blank = business date, "
+                                           f"{core.business_date()})")
+            _run_report("Housekeeping", reports.export_housekeeping, floor=floor or None,
+                        on_date=on_date)
         elif choice == '8':
             _run_report("Guest satisfaction", reports.export_guest_satisfaction)
         elif choice == '9':
             _run_report("Audit log", reports.export_audit_log)
         elif choice == '10':
-            _export_booking_ledger()
+            ref = input("Booking reference (blank for all): ").strip()
+            _run_report("Booking ledger", reports.export_booking_ledger,
+                        booking_ref=ref or None)
         elif choice == '11':
             break
         else:
@@ -508,10 +478,6 @@ def _run_admin_submenu(category, entries, session):
     (docs/DEVIATIONS.md §12); entering the submenu does not pause, because the
     category choice that brought you here has already been read.
     """
-    if hasattr(ui, "show_buttons"):
-        items = [(label, (lambda f=func, kw=kwargs: f(**kw) if kw else f())) for (label, func, kwargs) in entries]
-        ui.show_buttons(category, items)
-        return
     while True:
         ui.show_menu(
             category,
@@ -519,7 +485,7 @@ def _run_admin_submenu(category, entries, session):
             + [f"{len(entries) + 1}. Back to Admin Panel"],
             subtitle=session,
         )
-        raw = ui.ask_text("Enter your choice: ").strip()
+        raw = input("Enter your choice: ").strip()
         if not raw.isdigit() or not 1 <= int(raw) <= len(entries) + 1:
             logging.info("Invalid choice. Please try again.")
             ui.pause()
@@ -571,21 +537,12 @@ def admin_panel():
     # The menu is data (_admin_menu): this loop renders it, and _run_admin_submenu
     # dispatches from the same tuples, so an entry cannot point at the wrong function.
     menu = _admin_menu(role)
-    if hasattr(ui, "show_buttons"):
-        items = []
-        for (label, entries) in menu:
-            if entries is None:
-                items.append((label, lambda: None))
-            else:
-                items.append((label, lambda l=label, e=entries: _run_admin_submenu(l, e, session)))
-        ui.show_buttons("Admin Panel - " + session, items)
-        return
     while True:
         ui.pause()
         ui.show_menu("Admin Panel",
                      [f"{i}. {label}" for i, (label, _entries) in enumerate(menu, 1)],
                      subtitle=session)
-        choice = ui.ask_text("Enter your choice: ").strip()
+        choice = input("Enter your choice: ").strip()
         if not choice.isdigit() or not 1 <= int(choice) <= len(menu):
             logging.info("Invalid choice. Please try again.")
             continue
@@ -612,98 +569,9 @@ def view_discount_codes():
         logging.error(f"Error viewing discount codes: {e}")
 
 
-def _discount_add():
-    with db.get_connection() as conn:
-        if conn is None:
-            logging.info("Database connection failed.")
-            return
-        cursor = conn.cursor()
-        cursor.execute("SELECT Code FROM Discounts")
-        last_code = cursor.fetchall()
-        logging.info(f"Last discount code: {(last_code[-1])[0] if last_code else 'None'}")
-        code = ui.ask_text("Enter new discount code: ").strip()
-        if not code:
-            logging.info("Discount code cannot be blank.")
-            return
-        try:
-            discount_percentage = float(ui.ask_text("Enter discount percentage: ").strip())
-        except ValueError:
-            logging.info("Invalid discount percentage.")
-            return
-        if discount_percentage <= 0 or discount_percentage > 100:
-            logging.info("Discount percentage must be greater than 0 and at most 100.")
-            return
-        cursor.execute("SELECT 1 FROM Discounts WHERE Code = ?", (code,))
-        if cursor.fetchone():
-            logging.info(f"Discount code '{code}' already exists. Update it instead.")
-            return
-        cursor.execute("INSERT INTO Discounts (Code, DiscountPercentage) VALUES (?, ?)", (code, discount_percentage))
-        conn.commit()
-        core.log_audit("CREATE", "Discount", code, f"{discount_percentage}%")
-        logging.info(f"Discount code '{code}' added successfully.")
-
-
-def _discount_update():
-    view_discount_codes()
-    code = ui.ask_text("Enter discount code to update: ").strip()
-    with db.get_connection() as conn:
-        if conn is None:
-            logging.info("Database connection failed.")
-            return
-        cursor = conn.cursor()
-        cursor.execute("SELECT DiscountPercentage FROM Discounts WHERE Code = ?", (code,))
-        existing = cursor.fetchone()
-        if not existing:
-            logging.info("Discount code not found.")
-            return
-        try:
-            new_percentage = float(ui.ask_text("Enter new discount percentage: ").strip())
-        except ValueError:
-            logging.info("Invalid percentage.")
-            return
-        if new_percentage <= 0 or new_percentage > 100:
-            logging.info("Discount percentage must be greater than 0 and at most 100.")
-            return
-        cursor.execute("UPDATE Discounts SET DiscountPercentage = ? WHERE Code = ?", (new_percentage, code))
-        conn.commit()
-        core.log_audit("UPDATE", "Discount", code, f"{float(existing[0])}% -> {new_percentage}%",
-                      old_value=f"{float(existing[0])}%", new_value=f"{new_percentage}%")
-        logging.info(f"Discount code '{code}' updated successfully.")
-
-
-def _discount_delete():
-    view_discount_codes()
-    code = ui.ask_text("Enter discount code to delete: ").strip()
-    with db.get_connection() as conn:
-        if conn is None:
-            logging.info("Database connection failed.")
-            return
-        cursor = conn.cursor()
-        cursor.execute("SELECT DiscountPercentage FROM Discounts WHERE Code = ?", (code,))
-        existing = cursor.fetchone()
-        if not existing:
-            logging.info("Discount code not found.")
-            return
-        if not ui.ask_confirmation(f"Delete discount code '{code}' ({float(existing[0])}%)?"):
-            return
-        cursor.execute("DELETE FROM Discounts WHERE Code = ?", (code,))
-        conn.commit()
-        core.log_audit("DELETE", "Discount", code, f"Deleted {float(existing[0])}% code")
-        logging.info(f"Discount code '{code}' deleted successfully.")
-
-
 def manage_discount_codes():
     """Provides a sub-menu for discount code management."""
     try:
-        if hasattr(ui, "show_buttons"):
-            items = [
-                ("1. Add Discount Code", _discount_add),
-                ("2. Update Discount Code", _discount_update),
-                ("3. Delete Discount Code", _discount_delete),
-                ("4. View Discount Codes", view_discount_codes),
-            ]
-            ui.show_buttons("Discount Code Management", items)
-            return
         while True:
             ui.pause()
             ui.show_menu("Discount Code Management", [
@@ -713,18 +581,80 @@ def manage_discount_codes():
                 "4. View Discount Codes",
                 "5. Exit Discount Management",
             ])
-            choice = ui.ask_text("Enter your choice: ").strip()
+            choice = input("Enter your choice: ").strip()
             with db.get_connection() as conn:
                 if conn is None:
                     logging.info("Database connection failed.")
                     return
                 cursor = conn.cursor()
                 if choice == "1":
-                    _discount_add()
+                    cursor.execute("SELECT Code FROM Discounts")
+                    last_code = cursor.fetchall()
+                    logging.info(f"Last discount code: {(last_code[-1])[0] if last_code else 'None'}")
+                    code = input("Enter new discount code: ").strip()
+                    if not code:
+                        logging.info("Discount code cannot be blank.")
+                        continue
+                    try:
+                        discount_percentage = float(input("Enter discount percentage: ").strip())
+                    except ValueError:
+                        logging.info("Invalid discount percentage.")
+                        continue
+                    if discount_percentage <= 0 or discount_percentage > 100:
+                        logging.info("Discount percentage must be greater than 0 and at most 100.")
+                        continue
+                    # Duplicate codes silently overwrote the first one (the PK is Code).
+                    cursor.execute("SELECT 1 FROM Discounts WHERE Code = ?", (code,))
+                    if cursor.fetchone():
+                        logging.info(f"Discount code '{code}' already exists. Update it instead.")
+                        continue
+                    cursor.execute(
+                        "INSERT INTO Discounts (Code, DiscountPercentage) VALUES (?, ?)",
+                        (code, discount_percentage)
+                    )
+                    conn.commit()
+                    core.log_audit("CREATE", "Discount", code, f"{discount_percentage}%")
+                    logging.info(f"Discount code '{code}' added successfully.")
                 elif choice == "2":
-                    _discount_update()
+                    view_discount_codes()
+                    code = input("Enter discount code to update: ").strip()
+                    cursor.execute("SELECT DiscountPercentage FROM Discounts WHERE Code = ?", (code,))
+                    existing = cursor.fetchone()
+                    if existing:
+                        try:
+                            new_percentage = float(input("Enter new discount percentage: ").strip())
+                        except ValueError:
+                            logging.info("Invalid percentage.")
+                            continue
+                        if new_percentage <= 0 or new_percentage > 100:
+                            logging.info("Discount percentage must be greater than 0 and at most 100.")
+                            continue
+                        cursor.execute(
+                            "UPDATE Discounts SET DiscountPercentage = ? WHERE Code = ?",
+                            (new_percentage, code)
+                        )
+                        conn.commit()
+                        core.log_audit("UPDATE", "Discount", code,
+                                  f"{float(existing[0])}% -> {new_percentage}%",
+                                  old_value=f"{float(existing[0])}%",
+                                  new_value=f"{new_percentage}%")
+                        logging.info(f"Discount code '{code}' updated successfully.")
+                    else:
+                        logging.info("Discount code not found.")
                 elif choice == "3":
-                    _discount_delete()
+                    view_discount_codes()
+                    code = input("Enter discount code to delete: ").strip()
+                    cursor.execute("SELECT DiscountPercentage FROM Discounts WHERE Code = ?", (code,))
+                    existing = cursor.fetchone()
+                    if not existing:
+                        logging.info("Discount code not found.")
+                        continue
+                    if not ui.ask_confirmation(f"Delete discount code '{code}' ({float(existing[0])}%)?"):
+                        continue
+                    cursor.execute("DELETE FROM Discounts WHERE Code = ?", (code,))
+                    conn.commit()
+                    core.log_audit("DELETE", "Discount", code, f"Deleted {float(existing[0])}% code")
+                    logging.info(f"Discount code '{code}' deleted successfully.")
                 elif choice == "4":
                     view_discount_codes()
                 elif choice == "5":
@@ -741,10 +671,10 @@ def reset_user_password():
             return
         try:
             cursor = conn.cursor()
-            username = ui.ask_text("Enter the username to reset password: ").strip()
+            username = input("Enter the username to reset password: ").strip()
             cursor.execute("SELECT Username FROM Users WHERE Username = ?", (username,))
             if cursor.fetchone():
-                new_password = ui.ask_text("Enter new password: ").strip()
+                new_password = input("Enter new password: ").strip()
                 cursor.execute("UPDATE Users SET Password = ? WHERE Username = ?", (new_password, username))
                 conn.commit()
                 core.log_audit("UPDATE", "User", username, "Password reset by admin")
@@ -772,7 +702,7 @@ def _pick_from_list(title, options):
     """Show a numbered list and return the chosen option, or None if cancelled."""
     ui.show_table(title, ["#", "Option"], [(i + 1, name) for i, name in enumerate(options)])
     while True:
-        raw = ui.ask_text("Select an option (number, or blank to cancel): ").strip()
+        raw = input("Select an option (number, or blank to cancel): ").strip()
         if raw == "":
             return None
         if raw.isdigit() and 1 <= int(raw) <= len(options):
@@ -782,10 +712,10 @@ def _pick_from_list(title, options):
 
 def it_network_configuration():
     """IT: record a network profile and optionally run simulated diagnostics."""
-    network_name = ui.ask_text("Enter network name: ").strip()
-    ip_address = ui.ask_text("Enter IP address: ").strip()
-    subnet_mask = ui.ask_text("Enter subnet mask: ").strip()
-    gateway = ui.ask_text("Enter gateway: ").strip()
+    network_name = input("Enter network name: ").strip()
+    ip_address = input("Enter IP address: ").strip()
+    subnet_mask = input("Enter subnet mask: ").strip()
+    gateway = input("Enter gateway: ").strip()
     ui.success(f"Network '{network_name}' configured with IP {ip_address}, "
                f"Subnet {subnet_mask}, Gateway {gateway}.")
     if not ui.ask_confirmation("Run diagnostics and test the network?", default="y"):
@@ -804,15 +734,6 @@ def it_network_configuration():
 
 def it_user_accounts():
     """IT: the user-management actions, reusing the shared admin prompts."""
-    if hasattr(ui, "show_buttons"):
-        items = [
-            ("1. Add User", add_user),
-            ("2. Remove User", delete_user),
-            ("3. Reset Password", reset_user_password),
-            ("4. Update User", edit_user),
-        ]
-        ui.show_buttons("User Account Management", items)
-        return
     ui.show_menu("User Account Management", [
         "1. Add User",
         "2. Remove User",
@@ -821,7 +742,7 @@ def it_user_accounts():
         "5. Back",
     ])
     actions = {'1': add_user, '2': delete_user, '3': reset_user_password, '4': edit_user}
-    action = actions.get(ui.ask_text("Enter your choice: ").strip())
+    action = actions.get(input("Enter your choice: ").strip())
     if action:
         action()
     else:
@@ -878,15 +799,6 @@ def it_software_installation():
 
 def it_support_panel():
     """IT Support: network config, user accounts, diagnostics, and software installs."""
-    if hasattr(ui, "show_buttons"):
-        items = [
-            ("1. Network Configuration", it_network_configuration),
-            ("2. User Account Management", it_user_accounts),
-            ("3. System Diagnostics", it_system_diagnostics),
-            ("4. Software Installation", it_software_installation),
-        ]
-        ui.show_buttons("IT Support Panel", items)
-        return
     while True:
         ui.pause()
         ui.show_menu("IT Support Panel", [
@@ -896,7 +808,7 @@ def it_support_panel():
             "4. Software Installation",
             "5. Exit IT Support Panel",
         ])
-        choice = ui.ask_text("Enter your choice: ").strip()
+        choice = input("Enter your choice: ").strip()
         if choice == '1':
             it_network_configuration()
         elif choice == '2':
@@ -911,52 +823,8 @@ def it_support_panel():
             logging.info("Invalid choice. Please try again.")
         ui.pause()
 
-def _valet_handle(action):
-    license_plate = ui.ask_text("Enter vehicle license plate: ").strip()
-    owner_name = ui.ask_text("Enter owner's name: ").strip()
-    if not license_plate or not owner_name:
-        logging.info("Both the license plate and the owner's name are required.")
-        return
-    try:
-        with db.get_connection() as conn:
-            if conn is None:
-                logging.info("Database connection failed.")
-                return
-            cursor = conn.cursor()
-            if action == "ci":
-                parking_spot = ui.ask_text("Enter assigned parking spot: ").strip()
-                check_in_time = datetime.now()
-                cursor.execute(
-                    "INSERT INTO ValetVehicles (LicensePlate, OwnerName, ParkingSpot, Status, CheckInTime) VALUES (?, ?, ?, ?, ?)",
-                    (license_plate, owner_name, parking_spot, "Checked-In", check_in_time)
-                )
-                conn.commit()
-                logging.info(f"Vehicle {license_plate} checked in for {owner_name} at spot {parking_spot}.")
-            else:
-                check_out_time = datetime.now()
-                cursor.execute(
-                    "UPDATE ValetVehicles SET Status = ?, CheckOutTime = ? WHERE LicensePlate = ? AND OwnerName = ? AND Status = 'Checked-In'",
-                    ("Checked-Out", check_out_time, license_plate, owner_name)
-                )
-                conn.commit()
-                if cursor.rowcount:
-                    logging.info(f"Vehicle {license_plate} checked out for {owner_name}.")
-                else:
-                    logging.info(f"No checked-in vehicle matches {license_plate} / {owner_name}.")
-    except Exception as e:
-        logging.error(f"Error managing valet vehicle: {e}")
-
-
 def valet_vehicle_management():
     """Valet: manage vehicle check-in/check-out and see what's parked."""
-    if hasattr(ui, "show_buttons"):
-        items = [
-            ("1. Check In a Vehicle", lambda: _valet_handle("ci")),
-            ("2. Check Out a Vehicle", lambda: _valet_handle("co")),
-            ("3. View Parked Vehicles", _valet_list_parked),
-        ]
-        ui.show_buttons("Valet: Vehicle Management", items)
-        return
     while True:
         ui.pause()
         ui.show_menu("Valet: Vehicle Management", [
@@ -965,7 +833,7 @@ def valet_vehicle_management():
             "3. View Parked Vehicles",
             "4. Exit",
         ])
-        choice = ui.ask_text("Enter your choice: ").strip()
+        choice = input("Enter your choice: ").strip()
         if choice == '4':
             logging.info("Exiting Valet Vehicle Management.")
             return
@@ -976,7 +844,39 @@ def valet_vehicle_management():
             logging.info("Invalid choice.")
             continue
         action = 'ci' if choice == '1' else 'co'
-        _valet_handle(action)
+        license_plate = input("Enter vehicle license plate: ").strip()
+        owner_name = input("Enter owner's name: ").strip()
+        if not license_plate or not owner_name:
+            logging.info("Both the license plate and the owner's name are required.")
+            continue
+        try:
+            with db.get_connection() as conn:
+                if conn is None:
+                    logging.info("Database connection failed.")
+                    return
+                cursor = conn.cursor()
+                if action == "ci":
+                    parking_spot = input("Enter assigned parking spot: ").strip()
+                    check_in_time = datetime.now()
+                    cursor.execute(
+                        "INSERT INTO ValetVehicles (LicensePlate, OwnerName, ParkingSpot, Status, CheckInTime) VALUES (?, ?, ?, ?, ?)",
+                        (license_plate, owner_name, parking_spot, "Checked-In", check_in_time)
+                    )
+                    conn.commit()
+                    logging.info(f"Vehicle {license_plate} checked in for {owner_name} at spot {parking_spot}.")
+                else:
+                    check_out_time = datetime.now()
+                    cursor.execute(
+                        "UPDATE ValetVehicles SET Status = ?, CheckOutTime = ? WHERE LicensePlate = ? AND OwnerName = ? AND Status = 'Checked-In'",
+                        ("Checked-Out", check_out_time, license_plate, owner_name)
+                    )
+                    conn.commit()
+                    if cursor.rowcount:
+                        logging.info(f"Vehicle {license_plate} checked out for {owner_name}.")
+                    else:
+                        logging.info(f"No checked-in vehicle matches {license_plate} / {owner_name}.")
+        except Exception as e:
+            logging.error(f"Error managing valet vehicle: {e}")
 
 
 def _valet_list_parked():

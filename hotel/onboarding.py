@@ -336,7 +336,7 @@ def _offer_hotel_settings(wizard=False):
                  "changed later from Admin Panel → Discounts & Pricing → Manage Pricing & Settings.")
 
     def _ask(key, label, current, parse, valid):
-        raw = ui.ask_text(f"{label} [{current}]: ").strip()
+        raw = input(f"{label} [{current}]: ").strip()
         if not raw:
             return current
         try:
@@ -361,7 +361,7 @@ def _offer_hotel_settings(wizard=False):
     old_accrual, old_per_night = (core.get_loyalty_accrual_points_per_unit(),
                                   core.get_loyalty_points_per_night())
     enabled_raw = core.get_loyalty_enabled()
-    raw_enabled = ui.ask_text(f"Loyalty programme enabled? (y/n) [{'y' if enabled_raw else 'n'}]: ").strip().lower()
+    raw_enabled = input(f"Loyalty programme enabled? (y/n) [{'y' if enabled_raw else 'n'}]: ").strip().lower()
     if raw_enabled in ('y', 'yes', '1', 'true', 'on', 'n', 'no', '0', 'false', 'off'):
         core.set_setting('loyalty_enabled', '1' if raw_enabled in ('y', 'yes', '1', 'true', 'on') else '0')
     new_per_night = _ask('loyalty_points_per_night', "Points per night stayed",
@@ -399,7 +399,7 @@ ROOM_TYPE_NAME_MAX_LENGTH = 50
 
 def _edit_one_room_rate(room_types):
     """Ask for one category's new rate. Returns 1 if it was changed, else 0."""
-    name = ui.ask_text("Room type to change (Enter to cancel): ").strip()
+    name = input("Room type to change (Enter to cancel): ").strip()
     if not name:
         return 0
     match = next((rt for rt, _rate, _active in room_types if rt.lower() == name.lower()), None)
@@ -408,7 +408,7 @@ def _edit_one_room_rate(room_types):
                      + ", ".join(rt for rt, _rate, _active in room_types))
         return 0
     current = next((rate for rt, rate, _active in room_types if rt == match), 0.0)
-    raw = ui.ask_text(f"New nightly rate for {match} [{current:,.2f}]: ").strip()
+    raw = input(f"New nightly rate for {match} [{current:,.2f}]: ").strip()
     if not raw:
         logging.info("Kept the current rate.")
         return 0
@@ -425,7 +425,7 @@ def _edit_one_room_rate(room_types):
 
 def _add_room_category(room_types):
     """Ask for a new category and its rate. Returns 1 if it was changed, else 0."""
-    name = ui.ask_text("New room type name (Enter to cancel): ").strip()
+    name = input("New room type name (Enter to cancel): ").strip()
     if not name:
         return 0
     if len(name) > ROOM_TYPE_NAME_MAX_LENGTH:
@@ -434,7 +434,7 @@ def _add_room_category(room_types):
     if any(rt.lower() == name.lower() for rt, _rate, _active in room_types):
         logging.info("Room type '%s' already exists -- change its rate instead.", name)
         return 0
-    raw = ui.ask_text(f"Nightly rate for {name}: ").strip()
+    raw = input(f"Nightly rate for {name}: ").strip()
     if not raw:
         logging.info("A rate is required to add a room type.")
         return 0
@@ -459,52 +459,6 @@ def _offer_room_rates(wizard=False):
     logging.info("Room rates are the price list for the house. A booking captures the rate "
                  "when it is made, so changing a rate never re-prices a stay already booked.")
     changed = 0
-    if hasattr(ui, "show_buttons"):
-        def _do_change():
-            nonlocal changed
-            try:
-                room_types = rooms.get_room_types(active_only=False, include_status=True)
-            except Exception as e:
-                logging.error(f"Could not load room types: {e}")
-                return
-            if not room_types:
-                logging.info("No room types exist to price.")
-                return
-            ui.show_table("Room Types & Nightly Rates",
-                          ["Room Type", "Nightly Rate", "Status"],
-                          [(rt, f"${rate:,.2f}", "Active" if active else "Inactive")
-                           for rt, rate, active in room_types])
-            try:
-                changed += _edit_one_room_rate(room_types)
-            except (KeyboardInterrupt, EOFError):
-                logging.info("Finished configuring room rates.")
-
-        def _do_add():
-            nonlocal changed
-            try:
-                room_types = rooms.get_room_types(active_only=False, include_status=True)
-            except Exception as e:
-                logging.error(f"Could not load room types: {e}")
-                return
-            if not room_types:
-                logging.info("No room types exist to price.")
-                return
-            ui.show_table("Room Types & Nightly Rates",
-                          ["Room Type", "Nightly Rate", "Status"],
-                          [(rt, f"${rate:,.2f}", "Active" if active else "Inactive")
-                           for rt, rate, active in room_types])
-            try:
-                changed += _add_room_category(room_types)
-            except (KeyboardInterrupt, EOFError):
-                logging.info("Finished configuring room rates.")
-
-        items = [
-            ("1. Change a category's nightly rate", _do_change),
-            ("2. Add a new room category", _do_add),
-        ]
-        ui.show_buttons("Room rates", items)
-        return changed
-
     while True:
         try:
             room_types = rooms.get_room_types(active_only=False, include_status=True)
@@ -524,7 +478,7 @@ def _offer_room_rates(wizard=False):
             "3. %s" % ("Skip for now" if wizard else "Done -- back to setup"),
         ])
         try:
-            choice = ui.ask_text("Enter your choice: ").strip()
+            choice = input("Enter your choice: ").strip()
         except (KeyboardInterrupt, EOFError):
             logging.info("Finished configuring room rates.")
             return changed
@@ -554,7 +508,7 @@ def _create_staff_account():
     account exists, and create_first_user() deliberately refuses in that case.
     """
     try:
-        username = ui.ask_text("Enter new username: ").strip()
+        username = input("Enter new username: ").strip()
         if not username:
             logging.info("A username is required.")
             return False
@@ -586,20 +540,12 @@ def _offer_staff_accounts(wizard=False):
         ui.info("%s account(s) exist. Give each person the narrowest role that lets them do "
                 "their job: staff for the desk, manager for the panel, admin for settings."
                 % ("Unknown" if existing is None else existing))
-        if hasattr(ui, "show_buttons"):
-            def _do_add():
-                nonlocal added
-                if _create_staff_account():
-                    added += 1
-            items = [("1. Add a staff account", _do_add)]
-            ui.show_buttons("Staff accounts", items)
-            return added
         ui.show_menu("Staff accounts", [
             "1. Add a staff account",
             "2. %s" % ("Skip for now" if wizard else "Done -- back to setup"),
         ])
         try:
-            choice = ui.ask_text("Enter your choice: ").strip()
+            choice = input("Enter your choice: ").strip()
         except (KeyboardInterrupt, EOFError):
             logging.info("Finished adding staff accounts.")
             return added
@@ -629,17 +575,17 @@ def _offer_conference_rooms(wizard=False):
                      "-> Conference Rooms.")
         return 0
     while True:
-        room_number = ui.ask_text("Room number/label (e.g. CR-101, blank to finish): ").strip()
+        room_number = input("Room number/label (e.g. CR-101, blank to finish): ").strip()
         if not room_number:
             break
-        name = ui.ask_text("Room name: ").strip() or room_number
+        name = input("Room name: ").strip() or room_number
         try:
-            capacity = int(ui.ask_text("Capacity: ").strip())
+            capacity = int(input("Capacity: ").strip())
         except ValueError:
             logging.info("Invalid capacity. Skipping this room.")
             continue
         try:
-            rate = float(ui.ask_text("Hourly rate: ").strip())
+            rate = float(input("Hourly rate: ").strip())
         except ValueError:
             logging.info("Invalid rate. Skipping this room.")
             continue
@@ -649,11 +595,11 @@ def _offer_conference_rooms(wizard=False):
             continue
         added += 1
         # At least one setup type per room, so the room is actually bookable.
-        st = ui.ask_text("Setup type (" + ", ".join(conference.CONFERENCE_SETUP_TYPES)
+        st = input("Setup type (" + ", ".join(conference.CONFERENCE_SETUP_TYPES)
                    + ", blank to skip): ").strip()
         if st:
             try:
-                cap = int(ui.ask_text("Capacity for that setup (blank = room capacity): ").strip() or capacity)
+                cap = int(input("Capacity for that setup (blank = room capacity): ").strip() or capacity)
             except ValueError:
                 cap = capacity
             conference.add_room_setup(room_number, st, cap)
@@ -675,25 +621,6 @@ def _offer_reference_data(wizard=False):
     a hotel that skips it has an empty guest menu and no discounts, so a full setup flow
     should offer it rather than hide it behind the Admin Panel.
     """
-    if hasattr(ui, "show_buttons"):
-        def _do_amenities():
-            orders.manage_amenities_menu()
-
-        def _do_promotions():
-            orders.manage_promotions_menu()
-
-        def _do_discounts():
-            from hotel import admin as admin_module
-            admin_module.manage_discount_codes()
-
-        items = [
-            ("1. Manage amenities", _do_amenities),
-            ("2. Manage promotions", _do_promotions),
-            ("3. Manage discount codes", _do_discounts),
-        ]
-        ui.show_buttons("Reference data", items)
-        return
-
     while True:
         amenities, promotions, discounts = _reference_data_counts()
 
@@ -711,7 +638,7 @@ def _offer_reference_data(wizard=False):
             "4. %s" % ("Skip for now" if wizard else "Done -- back to setup"),
         ])
         try:
-            choice = ui.ask_text("Enter your choice: ").strip()
+            choice = input("Enter your choice: ").strip()
         except (KeyboardInterrupt, EOFError):
             return
         if choice == "1":
@@ -719,6 +646,8 @@ def _offer_reference_data(wizard=False):
         elif choice == "2":
             orders.manage_promotions_menu()
         elif choice == "3":
+            # Local import: admin.py imports onboarding for _admin_menu, so importing it at
+            # module level here would be a cycle.
             from hotel import admin as admin_module
             admin_module.manage_discount_codes()
         elif choice == "4":
@@ -758,19 +687,6 @@ def _setup_summary_rows():
 
 def _wizard_step_menu():
     """Re-run one setup step after the review. Returns when the operator is done."""
-    if hasattr(ui, "show_buttons"):
-        items = [
-            ("1. Hotel settings", lambda: _offer_hotel_settings(wizard=True)),
-            ("2. Nightly rates", lambda: _offer_room_rates(wizard=True)),
-            ("3. Staff accounts", lambda: _offer_staff_accounts(wizard=True)),
-            ("4. Item catalogue", lambda: _offer_item_catalogue(wizard=True)),
-            ("5. Rooms", lambda: _offer_room_layout(wizard=True)),
-            ("6. Reference data", lambda: _offer_reference_data(wizard=True)),
-            ("7. Conference rooms", lambda: _offer_conference_rooms(wizard=True)),
-        ]
-        ui.show_buttons("Go back and change something", items)
-        return
-
     while True:
         ui.show_menu("Go back and change something", [
             "1. Hotel settings",
@@ -783,7 +699,7 @@ def _wizard_step_menu():
             "8. Back to the review",
         ])
         try:
-            choice = ui.ask_text("Enter your choice: ").strip()
+            choice = input("Enter your choice: ").strip()
         except (KeyboardInterrupt, EOFError):
             return
         if choice == "1":
@@ -855,7 +771,7 @@ def run_first_run_onboarding():
         attempts = 0
         while True:
             try:
-                username = ui.ask_text("Administrator username [admin]: ").strip() or "admin"
+                username = input("Administrator username [admin]: ").strip() or "admin"
             except (KeyboardInterrupt, EOFError):
                 logging.info("Setup cancelled. The wizard will run again next time until "
                              "setup is complete or an account exists.")
@@ -875,7 +791,7 @@ def run_first_run_onboarding():
                 attempts += 1
             if attempts >= 3:
                 try:
-                    retry = ui.ask_text("Failed to create the first administrator. "
+                    retry = input("Failed to create the first administrator. "
                                   "Try again? (Y/n): ").strip().lower()
                 except (KeyboardInterrupt, EOFError):
                     logging.info("Setup cancelled. The wizard will run again next time.")
@@ -990,37 +906,13 @@ def run_first_run_onboarding():
                 + "\nYou can go back and change or add the things above before finishing.",
                 border_style="yellow",
             )
-        if hasattr(ui, "show_buttons"):
-            def _do_finish():
-                try:
-                    confirm = ui.ask_confirmation("Mark first-run setup complete? The wizard will not run again.", default="y")
-                except (KeyboardInterrupt, EOFError):
-                    logging.info("Setup cancelled. The wizard will run again next time.")
-                    return
-                if confirm:
-                    raise _FinishSetupSignal()
-
-            class _FinishSetupSignal(Exception):
-                pass
-
-            try:
-                items = [
-                    ("1. Mark setup complete and go to the main menu", _do_finish),
-                    ("2. Go back and change something", _wizard_step_menu),
-                    ("3. Cancel setup (run wizard again next time)", lambda: logging.info("Setup cancelled.")),
-                ]
-                ui.show_buttons("Finish setup", items)
-            except _FinishSetupSignal:
-                break
-            return
-
         ui.show_menu("Finish setup", [
             "1. Mark setup complete and go to the main menu",
             "2. Go back and change something",
             "3. Cancel setup (run wizard again next time)",
         ])
         try:
-            choice = ui.ask_text("Enter your choice: ").strip()
+            choice = input("Enter your choice: ").strip()
         except (KeyboardInterrupt, EOFError):
             logging.info("Setup cancelled. The wizard will run again next time until "
                          "setup is complete.")
@@ -1107,43 +999,6 @@ def onboarding_checklist(role="admin"):
             ui.info("\nSetup actions need the admin role. This view is read-only.")
             return
 
-        if hasattr(ui, "show_buttons"):
-            def _do_1():
-                if _create_staff_account():
-                    logging.info("Account created. It can sign in immediately.")
-            def _do_2():
-                if core.user_exists("master"):
-                    logging.info("A 'master' account already exists. Leaving it alone.")
-                else:
-                    master_password = core._prompt_new_password("Master password: ")
-                    core.add_user_with_password("master", master_password, "admin")
-            def _do_3():
-                added = _offer_item_catalogue()
-                if added:
-                    logging.info("Added %d item(s). Admin Panel → Items & Services → "
-                                 "View Items to check them.", added)
-                else:
-                    logging.info("Nothing added -- either you finished without adding anything, "
-                                 "the names already exist, or the write failed. Check the log.")
-            def _do_7():
-                if core.get_loyalty_enabled():
-                    loyalty.loyalty_admin_menu()
-                else:
-                    logging.info("The loyalty programme is off. Turn it on under "
-                                 "Setup actions → 6 (hotel settings), then manage tiers here.")
-            items = [
-                ("1. Add a staff account", _do_1),
-                ("2. Create the 'master' override account", _do_2),
-                ("3. Add items (starter catalogue, or your own)", _do_3),
-                ("4. Seed rooms", _offer_room_layout),
-                ("5. Set nightly rates", _offer_room_rates),
-                ("6. Edit hotel settings (tax, loyalty, lockout)", _offer_hotel_settings),
-                ("7. Manage loyalty tiers", _do_7),
-                ("8. Manage amenity, promotion and discount reference data", _offer_reference_data),
-                ("9. Configure conference rooms", _offer_conference_rooms),
-            ]
-            ui.show_buttons("Setup actions", items)
-            return
         ui.pause()
         ui.show_menu("Setup actions", [
             "1. Add a staff account",
@@ -1159,7 +1014,7 @@ def onboarding_checklist(role="admin"):
             "11. Back to Admin Panel",
         ])
         try:
-            choice = ui.ask_text("Enter your choice: ").strip()
+            choice = input("Enter your choice: ").strip()
         except (KeyboardInterrupt, EOFError):
             return
         if choice == '1':
@@ -1170,6 +1025,8 @@ def onboarding_checklist(role="admin"):
                 logging.info("A 'master' account already exists. Leaving it alone.")
             else:
                 master_password = core._prompt_new_password("Master password: ")
+                # Role 'admin' for the same reason as in the wizard: the override matches on
+                # the username, and no login path accepts a 'master' role.
                 core.add_user_with_password("master", master_password, "admin")
         elif choice == '3':
             added = _offer_item_catalogue()
@@ -1223,25 +1080,6 @@ def _offer_item_catalogue(wizard=False):
                  "added or deleted afterwards from Admin Panel → Items & Services.",
                  len(items.DEFAULT_SEED_ITEMS))
     try:
-        if hasattr(ui, "show_buttons"):
-            def _add_starter():
-                nonlocal added
-                added += items.seed_default_items()
-
-            def _add_custom():
-                nonlocal added
-                try:
-                    if items.add_custom_item():
-                        added += 1
-                except KeyboardInterrupt:
-                    logging.info("Cancelled that item. The rest of your catalogue is fine.")
-
-            items_btn = [
-                ("1. Add the starter catalogue (%d items)" % len(items.DEFAULT_SEED_ITEMS), _add_starter),
-                ("2. Add an item of your own", _add_custom),
-            ]
-            ui.show_buttons("Add items", items_btn)
-            return added
         while True:
             ui.pause()
             ui.show_menu("Add items", [
@@ -1249,7 +1087,7 @@ def _offer_item_catalogue(wizard=False):
                 "2. Add an item of your own",
                 "3. %s" % ("Skip for now" if wizard else "Cancel -- done adding items"),
             ])
-            choice = ui.ask_text("Enter your choice: ").strip()
+            choice = input("Enter your choice: ").strip()
             if choice == "1":
                 added += items.seed_default_items()
             elif choice == "2":
@@ -1275,57 +1113,13 @@ def _offer_room_layout(wizard=False):
     when someone has come here deliberately to add more.
     """
     tower_rooms = _count_tower_rooms()
-    if hasattr(ui, "show_buttons"):
-        def _do_tower():
-            if not ui.ask_confirmation(f"Seed {tower_rooms:,} rooms? This is a large insert.",
-                                       default="n"):
-                return
-            pending = rooms.count_rooms_to_add(True)
-            if pending is None:
-                logging.info("Could not count the rooms that would be added. Nothing was changed.")
-                return
-            if pending == 0:
-                logging.info("Every room in the tower layout already exists.")
-                return
-            rooms.seed_rooms(tower=True)
-
-        def _do_mid():
-            rooms.seed_rooms(floors=20, rooms_per_floor=40)
-
-        def _do_custom():
-            while True:
-                floors = ui.ask_number(f"Floors (1-{rooms.MAX_ROOM_FLOORS})", minimum=1, maximum=rooms.MAX_ROOM_FLOORS)
-                per_floor = ui.ask_number(f"Rooms per floor (1-{rooms.MAX_ROOMS_PER_FLOOR})", minimum=1,
-                                          maximum=rooms.MAX_ROOMS_PER_FLOOR)
-                pending = rooms.count_rooms_to_add(False, floors, per_floor)
-                if pending is None:
-                    logging.info("Could not count the rooms that layout would add. Nothing was "
-                                 "changed.")
-                    return
-                if pending == 0:
-                    logging.info("Those rooms all exist already.")
-                    return
-                if ui.ask_confirmation(f"Seed {pending:,} room(s)?", default="y"):
-                    rooms.seed_rooms(floors=floors, rooms_per_floor=per_floor)
-                    return
-                logging.info("Nothing was seeded. Answer 4 to %s, or try again."
-                             % ("skip" if wizard else "cancel"))
-
-        items = [
-            ("1. 150-floor tower", _do_tower),
-            ("2. Mid-size: 20 floors x 40 rooms", _do_mid),
-            ("3. Custom floor count and rooms per floor", _do_custom),
-        ]
-        ui.show_buttons("Room layout", items)
-        return
-
     ui.show_menu("Room layout", [
         "1. 150-floor tower (%s rooms) -- the layout in migrations/008_rooms_seed.sql" % f"{tower_rooms:,}",
         "2. Mid-size: 20 floors x 40 rooms (800 rooms)",
         "3. Custom floor count and rooms per floor",
         "4. %s" % ("Skip -- rooms appear as bookings are made" if wizard else "Cancel"),
     ])
-    choice = ui.ask_text("Enter your choice: ").strip()
+    choice = input("Enter your choice: ").strip()
     if choice == "1":
         if not ui.ask_confirmation(f"Seed {tower_rooms:,} rooms? This is a large insert.",
                                    default="n"):
