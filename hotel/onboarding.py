@@ -675,6 +675,25 @@ def _offer_reference_data(wizard=False):
     a hotel that skips it has an empty guest menu and no discounts, so a full setup flow
     should offer it rather than hide it behind the Admin Panel.
     """
+    if hasattr(ui, "show_buttons"):
+        def _do_amenities():
+            orders.manage_amenities_menu()
+
+        def _do_promotions():
+            orders.manage_promotions_menu()
+
+        def _do_discounts():
+            from hotel import admin as admin_module
+            admin_module.manage_discount_codes()
+
+        items = [
+            ("1. Manage amenities", _do_amenities),
+            ("2. Manage promotions", _do_promotions),
+            ("3. Manage discount codes", _do_discounts),
+        ]
+        ui.show_buttons("Reference data", items)
+        return
+
     while True:
         amenities, promotions, discounts = _reference_data_counts()
 
@@ -700,8 +719,6 @@ def _offer_reference_data(wizard=False):
         elif choice == "2":
             orders.manage_promotions_menu()
         elif choice == "3":
-            # Local import: admin.py imports onboarding for _admin_menu, so importing it at
-            # module level here would be a cycle.
             from hotel import admin as admin_module
             admin_module.manage_discount_codes()
         elif choice == "4":
