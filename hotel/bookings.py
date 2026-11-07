@@ -424,6 +424,15 @@ def booking_panel():
     and "Cancel" all operate on the signed-in guest's own account, and the sign-in is
     cached in CURRENT_CUSTOMER for the rest of the session.
     """
+    if hasattr(ui, "show_buttons"):
+        items = [
+            ("1. Book a Room", book_room),
+            ("2. View My Booking", view_my_booking),
+            ("3. Cancel My Booking", cancel_booking),
+            ("4. Sign Out", lambda: (setattr(session, "CURRENT_CUSTOMER", None), logging.info("You have been signed out."))),
+        ]
+        ui.show_buttons("Bookings", items)
+        return
     while True:
         ui.pause()
         ui.show_menu("Bookings", [

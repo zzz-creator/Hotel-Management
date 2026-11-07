@@ -723,6 +723,14 @@ def conference_guest_panel():
     if cid is None:
         logging.info("Please sign in to book a conference room.")
         return
+    if hasattr(ui, "show_buttons"):
+        items = [
+            ("1. Browse rooms", conference_rooms_panel),
+            ("2. Book a conference room", lambda: book_conference_room(customer_id=cid)),
+            ("3. My conference bookings", lambda: view_my_conference_bookings(cid)),
+        ]
+        ui.show_buttons("Conference Rooms", items)
+        return
     while True:
         ui.pause()
         ui.show_menu("Conference Rooms", [
