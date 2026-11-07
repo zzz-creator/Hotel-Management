@@ -76,15 +76,27 @@ class Shell:
 
     def add_sidebar_button(self, text, cmd):
         b = tk.Button(self.sidebar, text=text, command=cmd, anchor="w",
-                      bg="#3c3c3c", fg="white", relief="flat", padx=12, pady=8)
+                      bg=self.palette["sidebar"], fg=self.palette["text"], relief="flat",
+                      padx=16, pady=10, font=("Segoe UI", 10, "bold"),
+                      activebackground=self.palette["accent"], activeforeground="#1e1e2e")
         b.pack(fill="x")
 
     def show_buttons(self, title, items):
         """items: list of (label, callable)"""
         self.clear_content()
-        tk.Label(self.content, text=title, font=("Segoe UI", 14, "bold")).pack(pady=8)
-        for label, cmd in items:
-            tk.Button(self.content, text=label, command=cmd, width=40).pack(pady=3)
+        tk.Label(self.content, text=title, font=("Segoe UI", 14, "bold"),
+                 bg=self.palette["bg"], fg=self.palette["accent"]).pack(pady=(12, 8), anchor="w", padx=12)
+        grid = tk.Frame(self.content, bg=self.palette["bg"])
+        grid.pack(fill="both", expand=True, padx=12)
+        for i, (label, cmd) in enumerate(items):
+            r, c = divmod(i, 2)
+            b = tk.Button(grid, text=label, command=cmd, width=34,
+                          bg=self.palette["surface"], fg=self.palette["text"], relief="flat",
+                          padx=10, pady=8, font=("Segoe UI", 10),
+                          activebackground=self.palette["accent"], activeforeground="#1e1e2e")
+            b.grid(row=r, column=c, padx=6, pady=4, sticky="ew")
+        grid.columnconfigure(0, weight=1)
+        grid.columnconfigure(1, weight=1)
 
     def run(self):
         self.root.mainloop()
