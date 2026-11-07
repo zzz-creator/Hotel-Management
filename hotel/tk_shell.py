@@ -13,12 +13,15 @@ class Shell:
         self.root = tk.Tk()
         self.root.title("Hotel Management")
         self.root.geometry("1100x700")
+        from hotel import tk_theme
+        tk_theme.apply_theme(self.root)
+        self.palette = tk_theme.PALETTE
         self.ui.root = self.root
         self.ui.owns_root = True
         self.ui.output = None
 
         # sidebar
-        self.sidebar = tk.Frame(self.root, width=180, bg="#2b2b2b")
+        self.sidebar = tk.Frame(self.root, width=200, bg=self.palette["sidebar"])
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
 
