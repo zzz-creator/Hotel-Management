@@ -508,6 +508,10 @@ def _run_admin_submenu(category, entries, session):
     (docs/DEVIATIONS.md §12); entering the submenu does not pause, because the
     category choice that brought you here has already been read.
     """
+    if hasattr(ui, "show_buttons"):
+        items = [(label, (lambda f=func, kw=kwargs: f(**kw) if kw else f())) for (label, func, kwargs) in entries]
+        ui.show_buttons(category, items)
+        return
     while True:
         ui.show_menu(
             category,
@@ -567,6 +571,15 @@ def admin_panel():
     # The menu is data (_admin_menu): this loop renders it, and _run_admin_submenu
     # dispatches from the same tuples, so an entry cannot point at the wrong function.
     menu = _admin_menu(role)
+    if hasattr(ui, "show_buttons"):
+        items = []
+        for (label, entries) in menu:
+            if entries is None:
+                items.append((label, lambda: None))
+            else:
+                items.append((label, lambda l=label, e=entries: _run_admin_submenu(l, e, session)))
+        ui.show_buttons("Admin Panel - " + session, items)
+        return
     while True:
         ui.pause()
         ui.show_menu("Admin Panel",
