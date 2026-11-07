@@ -459,6 +459,52 @@ def _offer_room_rates(wizard=False):
     logging.info("Room rates are the price list for the house. A booking captures the rate "
                  "when it is made, so changing a rate never re-prices a stay already booked.")
     changed = 0
+    if hasattr(ui, "show_buttons"):
+        def _do_change():
+            nonlocal changed
+            try:
+                room_types = rooms.get_room_types(active_only=False, include_status=True)
+            except Exception as e:
+                logging.error(f"Could not load room types: {e}")
+                return
+            if not room_types:
+                logging.info("No room types exist to price.")
+                return
+            ui.show_table("Room Types & Nightly Rates",
+                          ["Room Type", "Nightly Rate", "Status"],
+                          [(rt, f"${rate:,.2f}", "Active" if active else "Inactive")
+                           for rt, rate, active in room_types])
+            try:
+                changed += _edit_one_room_rate(room_types)
+            except (KeyboardInterrupt, EOFError):
+                logging.info("Finished configuring room rates.")
+
+        def _do_add():
+            nonlocal changed
+            try:
+                room_types = rooms.get_room_types(active_only=False, include_status=True)
+            except Exception as e:
+                logging.error(f"Could not load room types: {e}")
+                return
+            if not room_types:
+                logging.info("No room types exist to price.")
+                return
+            ui.show_table("Room Types & Nightly Rates",
+                          ["Room Type", "Nightly Rate", "Status"],
+                          [(rt, f"${rate:,.2f}", "Active" if active else "Inactive")
+                           for rt, rate, active in room_types])
+            try:
+                changed += _add_room_category(room_types)
+            except (KeyboardInterrupt, EOFError):
+                logging.info("Finished configuring room rates.")
+
+        items = [
+            ("1. Change a category's nightly rate", _do_change),
+            ("2. Add a new room category", _do_add),
+        ]
+        ui.show_buttons("Room rates", items)
+        return changed
+
     while True:
         try:
             room_types = rooms.get_room_types(active_only=False, include_status=True)
