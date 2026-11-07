@@ -623,8 +623,115 @@ def manage_amenities_menu():
         ui.pause()
 
 
+def _promo_view():
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return
+            cursor = conn.cursor()
+            cursor.execute("SELECT PromotionID, Title, Details, DiscountCode, StartsOn, EndsOn, Active FROM Promotions ORDER BY PromotionID")
+            rows = cursor.fetchall()
+    except Exception as e:
+        logging.error(f"Error loading promotions: {e}")
+        return
+    if not rows:
+        logging.info("No promotions on record.")
+    else:
+        ui.show_table("All Promotions", ["#", "Title", "Details", "Code", "Starts", "Ends", "Active"],
+                      [(r[0], r[1], r[2] or "", r[3] or "-", r[4].isoformat() if r[4] else "-",
+                        r[5].isoformat() if r[5] else "-", "Yes" if r[6] else "No") for r in rows])
+
+
+def _promo_add():
+    title = ui.ask_text("Promotion title: ").strip()
+    if not title:
+        logging.info("Promotion title cannot be blank.")
+        return
+    details = ui.ask_text("Details: ").strip()
+    code = ui.ask_text("Associated discount code (optional): ").strip()
+    with db.get_connection() as conn:
+        if conn is None:
+            return
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO Promotions (Title, Details, DiscountCode) OUTPUT INSERTED.PromotionID VALUES (?, ?, ?)",
+                       (title, details or None, code or None))
+        conn.commit()
+    core.log_audit("CREATE", "Promotion", title, details or "")
+    ui.success("Promotion added.")
+
+
+def _promo_edit():
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return
+            cursor = conn.cursor()
+            cursor.execute("SELECT PromotionID, Title, Details, DiscountCode, StartsOn, EndsOn, Active FROM Promotions ORDER BY PromotionID")
+            rows = cursor.fetchall()
+    except Exception as e:
+        logging.error(f"Error loading promotions: {e}")
+        return
+    raw = ui.ask_text("Promotion number: ").strip()
+    if not raw.isdigit():
+        return
+    promotion = next((r for r in rows if r[0] == int(raw)), None)
+    if not promotion:
+        logging.info("Promotion not found.")
+        return
+    title = ui.ask_text(f"Title (blank to keep '{promotion[1]}'): ").strip() or promotion[1]
+    details = ui.ask_text(f"Details (blank to keep): ").strip() or promotion[2]
+    code = ui.ask_text(f"Discount code (blank to keep '{promotion[3] or ''}'): ").strip() or promotion[3]
+    with db.get_connection() as conn:
+        if conn is None:
+            return
+        cursor = conn.cursor()
+        cursor.execute("UPDATE Promotions SET Title = ?, Details = ?, DiscountCode = ? WHERE PromotionID = ?",
+                       (title, details or None, code or None, int(raw)))
+        conn.commit()
+    core.log_audit("UPDATE", "Promotion", int(raw), f"'{promotion[1]}' -> '{title}'",
+                   old_value=f"{promotion[1]} | {promotion[2] or ''} | {promotion[3] or ''}",
+                   new_value=f"{title} | {details or ''} | {code or ''}")
+    ui.success("Promotion updated.")
+
+
+def _promo_end():
+    try:
+        with db.get_connection() as conn:
+            if conn is None:
+                return
+            cursor = conn.cursor()
+            cursor.execute("SELECT PromotionID, Title, Details, DiscountCode, StartsOn, EndsOn, Active FROM Promotions ORDER BY PromotionID")
+            rows = cursor.fetchall()
+    except Exception as e:
+        logging.error(f"Error loading promotions: {e}")
+        return
+    raw = ui.ask_text("Promotion number: ").strip()
+    if not raw.isdigit():
+        return
+    promotion = next((r for r in rows if r[0] == int(raw)), None)
+    if not promotion:
+        logging.info("Promotion not found.")
+        return
+    with db.get_connection() as conn:
+        if conn is not None:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE Promotions SET Active = 0 WHERE PromotionID = ?", (int(raw),))
+            conn.commit()
+    core.log_audit("UPDATE", "Promotion", int(raw), f"'{promotion[1]}' ended", old_value="Active", new_value="Ended")
+    ui.success("Promotion ended.")
+
+
 def manage_promotions_menu():
     """Admin: add, edit and expire hotel promotions."""
+    if hasattr(ui, "show_buttons"):
+        items = [
+            ("1. View All Promotions", _promo_view),
+            ("2. Add Promotion", _promo_add),
+            ("3. Edit Promotion", _promo_edit),
+            ("4. End Promotion", _promo_end),
+        ]
+        ui.show_buttons("Manage Promotions", items)
+        return
     while True:
         ui.pause()
         ui.show_menu("Manage Promotions", [
@@ -635,88 +742,14 @@ def manage_promotions_menu():
             "5. Back",
         ])
         choice = ui.ask_text("Enter your choice: ").strip()
-        if choice in ('1', '3', '4'):
-            try:
-                with db.get_connection() as conn:
-                    if conn is None:
-                        return
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT PromotionID, Title, Details, DiscountCode, StartsOn, EndsOn, Active "
-                        "FROM Promotions ORDER BY PromotionID"
-                    )
-                    rows = cursor.fetchall()
-            except Exception as e:
-                logging.error(f"Error loading promotions: {e}")
-                return
-            if choice == '1':
-                if not rows:
-                    logging.info("No promotions on record.")
-                else:
-                    ui.show_table(
-                        "All Promotions",
-                        ["#", "Title", "Details", "Code", "Starts", "Ends", "Active"],
-                        [(r[0], r[1], r[2] or "", r[3] or "-",
-                          r[4].isoformat() if r[4] else "-",
-                          r[5].isoformat() if r[5] else "-", "Yes" if r[6] else "No")
-                         for r in rows],
-                    )
-                ui.pause()
-                continue
-            raw = ui.ask_text("Promotion number: ").strip()
-            if not raw.isdigit():
-                continue
-            promotion = next((r for r in rows if r[0] == int(raw)), None)
-            if not promotion:
-                logging.info("Promotion not found.")
-                continue
-            if choice == '4':
-                with db.get_connection() as conn:
-                    if conn is not None:
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE Promotions SET Active = 0 WHERE PromotionID = ?",
-                                       (int(raw),))
-                        conn.commit()
-                core.log_audit("UPDATE", "Promotion", int(raw), f"'{promotion[1]}' ended",
-                               old_value="Active", new_value="Ended")
-                ui.success("Promotion ended.")
-            else:
-                title = ui.ask_text(f"Title (blank to keep '{promotion[1]}'): ").strip() or promotion[1]
-                details = ui.ask_text(f"Details (blank to keep): ").strip() or promotion[2]
-                code = ui.ask_text(f"Discount code (blank to keep '{promotion[3] or ''}'): ").strip() or promotion[3]
-                with db.get_connection() as conn:
-                    if conn is None:
-                        return
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "UPDATE Promotions SET Title = ?, Details = ?, DiscountCode = ? "
-                        "WHERE PromotionID = ?",
-                        (title, details or None, code or None, int(raw)),
-                    )
-                    conn.commit()
-                core.log_audit("UPDATE", "Promotion", int(raw), f"'{promotion[1]}' -> '{title}'",
-                               old_value=f"{promotion[1]} | {promotion[2] or ''} | {promotion[3] or ''}",
-                               new_value=f"{title} | {details or ''} | {code or ''}")
-                ui.success("Promotion updated.")
+        if choice == '1':
+            _promo_view()
         elif choice == '2':
-            title = ui.ask_text("Promotion title: ").strip()
-            if not title:
-                logging.info("Promotion title cannot be blank.")
-                continue
-            details = ui.ask_text("Details: ").strip()
-            code = ui.ask_text("Associated discount code (optional): ").strip()
-            with db.get_connection() as conn:
-                if conn is None:
-                    return
-                cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT INTO Promotions (Title, Details, DiscountCode) "
-                    "OUTPUT INSERTED.PromotionID VALUES (?, ?, ?)",
-                    (title, details or None, code or None),
-                )
-                conn.commit()
-            core.log_audit("CREATE", "Promotion", title, details or "")
-            ui.success("Promotion added.")
+            _promo_add()
+        elif choice == '3':
+            _promo_edit()
+        elif choice == '4':
+            _promo_end()
         elif choice == '5':
             return
         else:
