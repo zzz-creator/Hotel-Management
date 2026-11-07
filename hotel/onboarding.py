@@ -1115,6 +1115,25 @@ def _offer_item_catalogue(wizard=False):
                  "added or deleted afterwards from Admin Panel → Items & Services.",
                  len(items.DEFAULT_SEED_ITEMS))
     try:
+        if hasattr(ui, "show_buttons"):
+            def _add_starter():
+                nonlocal added
+                added += items.seed_default_items()
+
+            def _add_custom():
+                nonlocal added
+                try:
+                    if items.add_custom_item():
+                        added += 1
+                except KeyboardInterrupt:
+                    logging.info("Cancelled that item. The rest of your catalogue is fine.")
+
+            items_btn = [
+                ("1. Add the starter catalogue (%d items)" % len(items.DEFAULT_SEED_ITEMS), _add_starter),
+                ("2. Add an item of your own", _add_custom),
+            ]
+            ui.show_buttons("Add items", items_btn)
+            return added
         while True:
             ui.pause()
             ui.show_menu("Add items", [
