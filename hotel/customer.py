@@ -586,6 +586,14 @@ def edit_guest_account():
     account = _pick_customer_account()
     if not account:
         return
+    if hasattr(ui, "show_buttons"):
+        items = [
+            ("1. Change email", lambda: _update_account_field(account, "Email", 100)),
+            ("2. Change phone", lambda: _update_account_field(account, "Phone", 20)),
+            ("3. Change preferences", lambda: _update_account_field(account, "Preferences", 255)),
+        ]
+        ui.show_buttons(f"Edit Account #{account.CustomerID} - {account.FirstName} {account.LastName}", items)
+        return
     while True:
         ui.pause()
         ui.show_menu(f"Edit Account #{account.CustomerID} - {account.FirstName} {account.LastName}", [
