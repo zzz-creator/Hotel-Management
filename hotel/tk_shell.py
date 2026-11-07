@@ -32,8 +32,14 @@ class Shell:
         self.content.pack(side="top", fill="both", expand=True)
         self.prompt_area = tk.Frame(right)
         self.prompt_area.pack(side="top", fill="x")
-        self.log = tk.Text(right, height=8, wrap="word", state="disabled", font=("Consolas", 9))
+        # log drawer (collapsible)
+        self.log_toggle = tk.Button(right, text="Show log", command=self._toggle_log, relief="flat",
+                                    bg=self.palette["surface"], fg=self.palette["muted"])
+        self.log_toggle.pack(side="bottom", fill="x")
+        self.log = tk.Text(right, height=8, wrap="word", state="disabled", font=("Consolas", 9),
+                           bg=self.palette["surface"], fg=self.palette["text"])
         self.log.pack(side="bottom", fill="x")
+        self.log_visible = True
 
         # input bar
         bar = tk.Frame(right)
@@ -97,6 +103,16 @@ class Shell:
             b.grid(row=r, column=c, padx=6, pady=4, sticky="ew")
         grid.columnconfigure(0, weight=1)
         grid.columnconfigure(1, weight=1)
+
+    def _toggle_log(self):
+        if self.log_visible:
+            self.log.pack_forget()
+            self.log_toggle.configure(text="Show log")
+            self.log_visible = False
+        else:
+            self.log.pack(side="bottom", fill="x", before=self.log_toggle)
+            self.log_toggle.configure(text="Hide log")
+            self.log_visible = True
 
     def run(self):
         self.root.mainloop()
