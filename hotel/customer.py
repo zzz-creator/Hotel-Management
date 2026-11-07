@@ -777,6 +777,40 @@ def customer_panel():
     # Resolved once here: nothing inside this panel changes the account, and Sign Out
     # exits the menu, so the label cannot go stale while it is shown.
     session = customer_session_label()
+    if hasattr(ui, "show_buttons"):
+        def _join_loyalty():
+            if not core.get_loyalty_enabled():
+                logging.info("Loyalty Program is not enabled. Contact administration to enable it.")
+                return
+            room_number = ui.ask_text("Enter your room number to join/verify loyalty account: ").strip()
+            if not room_number:
+                logging.info("Invalid room number.")
+                return
+            if loyalty.create_loyalty_account_if_missing(room_number):
+                points = loyalty.get_points_by_room(room_number)
+                logging.info(f"Loyalty account ready for room {room_number}. Current points: {points}.")
+            else:
+                logging.info("Failed to create or verify loyalty account. Please contact front desk.")
+        items = [
+            ("1. Check In", reservations.check_in),
+            ("2. Place Order", orders.order_item),
+            ("3. Check Out", billing.check_out),
+            ("4. View Amenities", orders.view_amenities),
+            ("5. Provide Feedback", orders.provide_feedback),
+            ("6. View Promotions", orders.view_promotions),
+            ("7. Join Loyalty Program", _join_loyalty),
+            ("8. Track Order Status", orders.track_order_status),
+            ("9. Contact Concierge", concierge.contact_concierge),
+            ("10. View My Concierge Requests", concierge.view_my_concierge_requests),
+            ("11. View My Loyalty Tier & Perks", view_my_loyalty_status),
+            ("12. Print My Invoice", print_my_invoice),
+            ("13. View My History", my_history),
+            ("14. My Key Card", keycards.view_my_key_card),
+            ("15. My Notifications", notifications.view_notifications_for_room),
+            ("16. Sign Out", lambda: logging.info("Signed out.")),
+        ]
+        ui.show_buttons("Customer Menu - " + session, items)
+        return
     while True:
         ui.pause()
         ui.show_menu("Customer Menu", [
