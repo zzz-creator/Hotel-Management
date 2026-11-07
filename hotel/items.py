@@ -255,8 +255,106 @@ def view_items():
             logging.error(f"Error displaying items: {e}")
 
 
+def _pricing_dispatch(choice):
+    if choice == '1':
+        order_rate, room_rate = loyalty.points_per_dollar_order_vs_room(
+            core.get_loyalty_accrual_points_per_unit(), core.get_loyalty_points_per_night())
+        rows = [
+            ("Business date (the app's 'today')", str(core.business_date())),
+            ("Peak price factor", f"{core.get_peak_factor():.2f}"),
+            ("Off-peak price factor", f"{core.get_offpeak_factor():.2f}"),
+            ("Tax rate", f"{core.get_tax_rate():.2f}"),
+            ("Loyalty order accrual (points per $1 of F&B)", f"{order_rate:g}"),
+            ("Loyalty stay accrual (points per night)", core.get_loyalty_points_per_night()),
+            ("Loyalty redemption (points per $1 credit)", core.get_loyalty_redemption_points_per_currency_unit()),
+            ("Booking free-cancellation (days before check-in)", core.get_booking_refund_cutoff_days()),
+            ("Hotel name", core.get_hotel_name()),
+            ("Loyalty programme", "on" if core.get_loyalty_enabled() else "off"),
+            ("Admin lockout after N failed attempts", core.get_lockout_threshold()),
+            ("Admin lockout length (minutes)", core.get_lockout_duration()),
+            ("Guest login attempts before stop", core.get_customer_login_max_attempts()),
+        ]
+        ui.show_table("Current Settings", ["Setting", "Value"], rows)
+        ui.show_table("Room Types & Nightly Rates", ["Room Type", "Nightly Rate"],
+                      [(rt, f"${rate:,.2f}") for rt, rate in rooms.get_room_types()])
+        ui.show_table("Room-Type Points Multipliers", ["Room Type", "Multiplier"],
+                      [(rt, f"x{mult:.2f}") for rt, mult in rooms.get_all_room_type_multipliers()])
+        ui.info(f"Earn rate check: a Standard night buys {room_rate:.2f} points per $1, "
+                f"so $1 of room service at {order_rate:g} is the smaller prize. It should "
+                f"be -- the room is the thing being bought.")
+    elif choice == '2':
+        logging.info(f"Current peak factor: {core.get_peak_factor():.2f} (sale price = base x factor)")
+        logging.info(f"Current off-peak factor: {core.get_offpeak_factor():.2f} (sale price = base x factor)")
+        try:
+            peak = float(ui.ask_text("Enter new peak factor (e.g. 1.20): ").strip())
+            offpeak = float(ui.ask_text("Enter new off-peak factor (e.g. 0.90): ").strip())
+        except ValueError:
+            logging.info("Invalid factor. Please enter a number.")
+            return
+        if peak <= 0 or offpeak <= 0:
+            logging.info("Factors must be positive numbers.")
+            return
+        core.set_setting('peak_factor', peak)
+        core.set_setting('offpeak_factor', offpeak)
+        logging.info("Peak/off-peak factors updated.")
+    elif choice == '3':
+        logging.info(f"Current tax rate: {core.get_tax_rate():.2f}")
+        try:
+            tax = float(ui.ask_text("Enter new tax rate (e.g. 0.08 for 8%): ").strip())
+        except ValueError:
+            logging.info("Invalid tax rate. Please enter a number.")
+            return
+        if tax < 0:
+            logging.info("Tax rate cannot be negative.")
+            return
+        core.set_setting('tax_rate', tax)
+        logging.info("Tax rate updated.")
+    elif choice == '4':
+        logging.info("Loyalty points rates (order accrual, stay accrual, redemption) are managed "
+                    "via Hotel Settings; use option 6 (General Settings) or edit loyalty parameters.")
+    elif choice == '5':
+        logging.info("Room-type points multipliers are managed under Rooms & Housekeeping.")
+    elif choice == '6':
+        logging.info("Room types and nightly rates are managed under Rooms & Housekeeping.")
+    elif choice == '7':
+        logging.info(f"Current booking cancellation policy: {core.get_booking_refund_cutoff_days()} days.")
+        try:
+            days = int(ui.ask_text("Enter new cancellation cutoff (days before check-in): ").strip())
+        except ValueError:
+            logging.info("Invalid number.")
+            return
+        if days < 0:
+            logging.info("Cancellation cutoff cannot be negative.")
+            return
+        core.set_setting('booking_refund_cutoff_days', days)
+        logging.info("Booking cancellation policy updated.")
+    elif choice == '8':
+        logging.info("General settings edited via option 6 of the Admin Panel.")
+    elif choice == '9':
+        if not ui.ask_confirmation("Reset ALL settings to seeded defaults? This cannot be undone."):
+            return
+        core.reset_settings_to_defaults()
+        logging.info("All settings reset to seeded defaults.")
+    elif choice == '10':
+        return
+    else:
+        logging.info("Invalid choice. Please try again.")
 def manage_pricing_rules():
     """Admin: view and edit nightly room rates, peak/off-peak factors, tax, and loyalty rates."""
+    if hasattr(ui, "show_buttons"):
+        items = [
+            ("1. View Current Settings", lambda: _pricing_dispatch('1')),
+            ("2. Edit Peak / Off-Peak Price Factors", lambda: _pricing_dispatch('2')),
+            ("3. Edit Tax Rate", lambda: _pricing_dispatch('3')),
+            ("4. Edit Loyalty Points Rates", lambda: _pricing_dispatch('4')),
+            ("5. Edit Room-Type Points Multipliers", lambda: _pricing_dispatch('5')),
+            ("6. View / Edit Room Types & Nightly Rates", lambda: _pricing_dispatch('6')),
+            ("7. Edit Booking Cancellation Policy", lambda: _pricing_dispatch('7')),
+            ("8. Edit General Settings", lambda: _pricing_dispatch('8')),
+            ("9. Reset All Settings To Seeded Defaults", lambda: _pricing_dispatch('9')),
+        ]
+        ui.show_buttons("Pricing & Settings", items)
+        return
     while True:
         ui.pause()
         ui.show_menu("Pricing & Settings", [
