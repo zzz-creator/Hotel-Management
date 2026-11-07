@@ -759,10 +759,119 @@ def admin_adjust_loyalty_points():
                 logging.error(f"Error adjusting loyalty points: {e}")
 
 
+def _tier_edit_discount():
+    tiers = _tiers_from_db() or core.DEFAULT_TIERS
+    name = ui.ask_text("Enter tier name to edit (e.g. Silver, Gold, Platinum): ").strip()
+    match = None
+    for t in tiers:
+        if t[0].lower() == name.lower():
+            match = t
+            break
+    if match is None:
+        logging.info("Tier not found.")
+        return
+    try:
+        new_discount = float(ui.ask_text(f"New discount percent for {match[0]} (current {match[3]:.0f}%): ").strip())
+    except ValueError:
+        logging.info("Invalid number.")
+        return
+    new_discount = max(0.0, min(100.0, new_discount))
+    with db.get_connection() as conn:
+        if conn is None:
+            return
+        try:
+            conn.cursor().execute("UPDATE LoyaltyTiers SET DiscountPercent = ? WHERE TierName = ?", (new_discount, match[0]))
+            conn.commit()
+            logging.info(f"Updated {match[0]} discount to {new_discount:.0f}%.")
+            admin_recompute_all_tiers()
+        except Exception as e:
+            logging.error(f"Error updating tier discount: {e}")
+
+
+def _tier_edit_multiplier():
+    tiers = _tiers_from_db() or core.DEFAULT_TIERS
+    name = ui.ask_text("Enter tier name to edit (e.g. Silver, Gold, Platinum): ").strip()
+    match = None
+    for t in tiers:
+        if t[0].lower() == name.lower():
+            match = t
+            break
+    if match is None:
+        logging.info("Tier not found.")
+        return
+    try:
+        new_mult = float(ui.ask_text(f"New points multiplier for {match[0]} (current x{match[2]:.2f}): ").strip())
+    except ValueError:
+        logging.info("Invalid number.")
+        return
+    if new_mult < 0:
+        logging.info("Multiplier cannot be negative.")
+        return
+    with db.get_connection() as conn:
+        if conn is None:
+            return
+        try:
+            conn.cursor().execute("UPDATE LoyaltyTiers SET PointsMultiplier = ? WHERE TierName = ?", (new_mult, match[0]))
+            conn.commit()
+            logging.info(f"Updated {match[0]} multiplier to x{new_mult:.2f}.")
+            admin_recompute_all_tiers()
+        except Exception as e:
+            logging.error(f"Error updating tier multiplier: {e}")
+
+
+def _tier_edit_min():
+    tiers = _tiers_from_db() or core.DEFAULT_TIERS
+    name = ui.ask_text("Enter tier name to edit (e.g. Silver, Gold, Platinum): ").strip()
+    match = None
+    idx = None
+    for i, t in enumerate(tiers):
+        if t[0].lower() == name.lower():
+            match = t
+            idx = i
+            break
+    if match is None:
+        logging.info("Tier not found.")
+        return
+    try:
+        new_min = int(ui.ask_text(f"New minimum lifetime points for {match[0]} (current {match[1]}): ").strip())
+    except ValueError:
+        logging.info("Invalid number.")
+        return
+    if new_min < 0:
+        logging.info("Minimum points cannot be negative.")
+        return
+    lower = tiers[idx - 1][1] if idx > 0 else None
+    upper = tiers[idx + 1][1] if idx + 1 < len(tiers) else None
+    if (lower is not None and new_min <= lower) or (upper is not None and new_min >= upper):
+        logging.info("Minimum points must keep tiers in ascending order.")
+        return
+    with db.get_connection() as conn:
+        if conn is None:
+            return
+        try:
+            conn.cursor().execute("UPDATE LoyaltyTiers SET MinLifetimePoints = ? WHERE TierName = ?", (new_min, match[0]))
+            conn.commit()
+            logging.info(f"Updated {match[0]} minimum to {new_min} points.")
+            admin_recompute_all_tiers()
+        except Exception as e:
+            logging.error(f"Error updating tier minimum points: {e}")
+
+
 def admin_manage_loyalty_tiers():
     """Admin: view and edit loyalty tier thresholds/perks."""
     if not core.get_loyalty_enabled():
         logging.info("Loyalty program is not enabled.")
+        return
+    if hasattr(ui, "show_buttons"):
+        tiers = _tiers_from_db() or core.DEFAULT_TIERS
+        ui.show_table("Loyalty Tiers", ["Tier", "Min Lifetime Points", "Points x", "Discount %", "Perks"],
+                      [(t[0], t[1], f"x{t[2]:.2f}", f"{t[3]:.0f}%", t[4]) for t in tiers])
+        items = [
+            ("1. Edit Tier Discount Percentage", _tier_edit_discount),
+            ("2. Edit Tier Points Multiplier", _tier_edit_multiplier),
+            ("3. Edit Tier Minimum Points", _tier_edit_min),
+        ]
+        ui.show_buttons("Tier Management", items)
         return
     while True:
         tiers = _tiers_from_db() or core.DEFAULT_TIERS
@@ -777,92 +886,11 @@ def admin_manage_loyalty_tiers():
         ])
         choice = ui.ask_text("Enter your choice: ").strip()
         if choice == '1':
-            name = ui.ask_text("Enter tier name to edit (e.g. Silver, Gold, Platinum): ").strip()
-            match = None
-            for t in tiers:
-                if t[0].lower() == name.lower():
-                    match = t
-                    break
-            if match is None:
-                logging.info("Tier not found.")
-                continue
-            try:
-                new_discount = float(ui.ask_text(f"New discount percent for {match[0]} (current {match[3]:.0f}%): ").strip())
-            except ValueError:
-                logging.info("Invalid number.")
-                continue
-            new_discount = max(0.0, min(100.0, new_discount))
-            with db.get_connection() as conn:
-                if conn is None:
-                    continue
-                try:
-                    conn.cursor().execute("UPDATE LoyaltyTiers SET DiscountPercent = ? WHERE TierName = ?", (new_discount, match[0]))
-                    conn.commit()
-                    logging.info(f"Updated {match[0]} discount to {new_discount:.0f}%.")
-                    admin_recompute_all_tiers()
-                except Exception as e:
-                    logging.error(f"Error updating tier discount: {e}")
+            _tier_edit_discount()
         elif choice == '2':
-            name = ui.ask_text("Enter tier name to edit (e.g. Silver, Gold, Platinum): ").strip()
-            match = None
-            for t in tiers:
-                if t[0].lower() == name.lower():
-                    match = t
-                    break
-            if match is None:
-                logging.info("Tier not found.")
-                continue
-            try:
-                new_mult = float(ui.ask_text(f"New points multiplier for {match[0]} (current x{match[2]:.2f}): ").strip())
-            except ValueError:
-                logging.info("Invalid number.")
-                continue
-            new_mult = max(1.0, new_mult)
-            with db.get_connection() as conn:
-                if conn is None:
-                    continue
-                try:
-                    conn.cursor().execute("UPDATE LoyaltyTiers SET PointsMultiplier = ? WHERE TierName = ?", (new_mult, match[0]))
-                    conn.commit()
-                    logging.info(f"Updated {match[0]} multiplier to x{new_mult:.2f}.")
-                    admin_recompute_all_tiers()
-                except Exception as e:
-                    logging.error(f"Error updating tier multiplier: {e}")
+            _tier_edit_multiplier()
         elif choice == '3':
-            name = ui.ask_text("Enter tier name to edit (e.g. Silver, Gold, Platinum): ").strip()
-            match = None
-            idx = None
-            for i, t in enumerate(tiers):
-                if t[0].lower() == name.lower():
-                    match = t
-                    idx = i
-                    break
-            if match is None:
-                logging.info("Tier not found.")
-                continue
-            try:
-                new_min = int(ui.ask_text(f"New minimum lifetime points for {match[0]} (current {match[1]}): ").strip())
-            except ValueError:
-                logging.info("Invalid number.")
-                continue
-            if new_min < 0:
-                logging.info("Minimum points cannot be negative.")
-                continue
-            lower = tiers[idx - 1][1] if idx > 0 else None
-            upper = tiers[idx + 1][1] if idx + 1 < len(tiers) else None
-            if (lower is not None and new_min <= lower) or (upper is not None and new_min >= upper):
-                logging.info("Minimum points must keep tiers in ascending order.")
-                continue
-            with db.get_connection() as conn:
-                if conn is None:
-                    continue
-                try:
-                    conn.cursor().execute("UPDATE LoyaltyTiers SET MinLifetimePoints = ? WHERE TierName = ?", (new_min, match[0]))
-                    conn.commit()
-                    logging.info(f"Updated {match[0]} minimum to {new_min} points.")
-                    admin_recompute_all_tiers()
-                except Exception as e:
-                    logging.error(f"Error updating tier minimum points: {e}")
+            _tier_edit_min()
         elif choice == '4':
             break
         else:
