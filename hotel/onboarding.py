@@ -977,6 +977,30 @@ def run_first_run_onboarding():
                 + "\nYou can go back and change or add the things above before finishing.",
                 border_style="yellow",
             )
+        if hasattr(ui, "show_buttons"):
+            def _do_finish():
+                try:
+                    confirm = ui.ask_confirmation("Mark first-run setup complete? The wizard will not run again.", default="y")
+                except (KeyboardInterrupt, EOFError):
+                    logging.info("Setup cancelled. The wizard will run again next time.")
+                    return
+                if confirm:
+                    raise _FinishSetupSignal()
+
+            class _FinishSetupSignal(Exception):
+                pass
+
+            try:
+                items = [
+                    ("1. Mark setup complete and go to the main menu", _do_finish),
+                    ("2. Go back and change something", _wizard_step_menu),
+                    ("3. Cancel setup (run wizard again next time)", lambda: logging.info("Setup cancelled.")),
+                ]
+                ui.show_buttons("Finish setup", items)
+            except _FinishSetupSignal:
+                break
+            return
+
         ui.show_menu("Finish setup", [
             "1. Mark setup complete and go to the main menu",
             "2. Go back and change something",
