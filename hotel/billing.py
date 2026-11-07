@@ -747,8 +747,49 @@ def print_invoice(invoice_id):
     return True
 
 
+def _invoice_print_by_number():
+    raw = ui.ask_text("Enter invoice number: ").strip()
+    if raw.isdigit():
+        print_invoice(int(raw))
+    else:
+        logging.info("Invalid invoice number.")
+
+
+def _invoice_find_by_room():
+    room_number = ui.ask_text("Enter room number (floor + 3-digit code): ").strip()
+    invoices = list_invoices_for_room(room_number)
+    if not invoices:
+        logging.info("No invoices found for that room.")
+        return
+    ui.show_table(
+        f"Invoices for Room {room_number}",
+        ["Invoice #", "Room", "Date", "Total", "Paid"],
+        [(inv.InvoiceID, inv.RoomNumber, inv.InvoiceDate,
+          f"${float(inv.TotalAmount):.2f}", f"${float(inv.AmountPaid):.2f}") for inv in invoices],
+    )
+    raw = ui.ask_text("Enter invoice number to print (blank to cancel): ").strip()
+    if raw.isdigit():
+        print_invoice(int(raw))
+
+
+def _invoice_void():
+    raw = ui.ask_text("Enter invoice number to void: ").strip()
+    if raw.isdigit():
+        void_invoice(int(raw))
+    else:
+        logging.info("Invalid invoice number.")
+
+
 def invoices_menu():
     """Admin/manager: browse and print stored invoices."""
+    if hasattr(ui, "show_buttons"):
+        items = [
+            ("1. Print Invoice by Number", _invoice_print_by_number),
+            ("2. Find Invoices by Room", _invoice_find_by_room),
+            ("3. Void an Invoice", _invoice_void),
+        ]
+        ui.show_buttons("Invoices & Printing", items)
+        return
     while True:
         ui.pause()
         ui.show_menu("Invoices & Printing", [
@@ -759,32 +800,11 @@ def invoices_menu():
         ])
         choice = ui.ask_text("Enter your choice: ").strip()
         if choice == '1':
-            raw = ui.ask_text("Enter invoice number: ").strip()
-            if raw.isdigit():
-                print_invoice(int(raw))
-            else:
-                logging.info("Invalid invoice number.")
+            _invoice_print_by_number()
         elif choice == '2':
-            room_number = ui.ask_text("Enter room number (floor + 3-digit code): ").strip()
-            invoices = list_invoices_for_room(room_number)
-            if not invoices:
-                logging.info("No invoices found for that room.")
-                continue
-            ui.show_table(
-                f"Invoices for Room {room_number}",
-                ["Invoice #", "Room", "Date", "Total", "Paid"],
-                [(inv.InvoiceID, inv.RoomNumber, inv.InvoiceDate,
-                  f"${float(inv.TotalAmount):.2f}", f"${float(inv.AmountPaid):.2f}") for inv in invoices],
-            )
-            raw = ui.ask_text("Enter invoice number to print (blank to cancel): ").strip()
-            if raw.isdigit():
-                print_invoice(int(raw))
+            _invoice_find_by_room()
         elif choice == '3':
-            raw = ui.ask_text("Enter invoice number to void: ").strip()
-            if raw.isdigit():
-                void_invoice(int(raw))
-            else:
-                logging.info("Invalid invoice number.")
+            _invoice_void()
         elif choice == '4':
             break
         else:
